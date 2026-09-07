@@ -154,6 +154,7 @@ struct SessionRow: View {
                 }
             }
             Spacer(minLength: 0)
+            PRMarkView(refs: summary.pullRequests)
             if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
             if sessions.isFavorite(summary.id) { Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow) }
         }

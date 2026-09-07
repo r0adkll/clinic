@@ -12,14 +12,14 @@ struct TranscriptFixture {
         self.sessionId = sessionId; self.cwd = cwd
     }
 
-    private func base(_ type: String, timestamp: String?) -> [String: Any] {
+    func base(_ type: String, timestamp: String?) -> [String: Any] {
         var o: [String: Any] = ["type": type, "sessionId": sessionId.rawValue, "cwd": cwd, "uuid": UUID().uuidString, "isSidechain": false, "version": "2.1.263"]
         if let gitBranch { o["gitBranch"] = gitBranch }
         if let timestamp { o["timestamp"] = timestamp }
         return o
     }
 
-    private mutating func append(_ obj: [String: Any]) {
+    mutating func append(_ obj: [String: Any]) {
         let data = try! JSONSerialization.data(withJSONObject: obj)
         lines.append(String(decoding: data, as: UTF8.self))
     }
@@ -50,4 +50,15 @@ struct TranscriptFixture {
     mutating func raw(_ s: String) { lines.append(s) }
 
     var data: Data { Data((lines.joined(separator: "\n") + "\n").utf8) }
+}
+
+extension TranscriptFixture {
+    /// `{"type":"pr-link","prNumber":…,"prUrl":…,"prRepository":…}` as written by Claude Code when it opens a PR.
+    mutating func prLink(number: Int, repo: String = "octocat/example", at ts: String = "2026-09-07T10:30:00.000Z") {
+        var o = base("pr-link", timestamp: ts)
+        o["prNumber"] = number
+        o["prUrl"] = "https://github.com/\(repo)/pull/\(number)"
+        o["prRepository"] = repo
+        append(o)
+    }
 }

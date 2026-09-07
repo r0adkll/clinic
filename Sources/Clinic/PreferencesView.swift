@@ -16,6 +16,7 @@ struct PreferencesView: View {
     @AppStorage(Prefs.hookTrace) private var hookTrace = false
     @AppStorage("ClinicShowUsage") private var showUsage = true
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
+    @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
 
     var body: some View {
         TabView {
@@ -23,6 +24,9 @@ struct PreferencesView: View {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
                 Toggle("Show tab bar", isOn: $showTabBar)
                 Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
+                Picker("Merge pull requests with", selection: $mergeMethod) {
+                    Text("Squash").tag("squash"); Text("Merge commit").tag("merge"); Text("Rebase").tag("rebase")
+                }
                 Picker("Default model for new sessions", selection: $defaultModel) {
                     ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
                 }

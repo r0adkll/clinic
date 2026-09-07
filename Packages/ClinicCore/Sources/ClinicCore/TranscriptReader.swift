@@ -61,6 +61,7 @@ public struct TranscriptReader: Sendable {
             if s.firstPrompt == nil, (obj["isMeta"] as? Bool) != true, (obj["isCompactSummary"] as? Bool) != true,
                let text = Self.userText(from: obj["message"]), !text.isEmpty, !Self.looksLikeSystemInjected(text) {
                 s.firstPrompt = text
+                for ref in PullRequestRef.refs(in: text, fromPrompt: true) { Self.link(ref, into: &s) }
             }
         case "assistant":
             if let message = obj["message"] as? [String: Any], let model = message["model"] as? String, !model.isEmpty { s.model = model }
@@ -70,9 +71,31 @@ public struct TranscriptReader: Sendable {
             if let t = obj["customTitle"] as? String, !t.isEmpty { s.customTitle = t }
         case "cost-state":
             if let c = obj["totalCostUSD"] as? Double { s.totalCostUSD = c }
+        case "pr-link":
+            // {"type":"pr-link","prNumber":1040,"prUrl":"https://github.com/o/r/pull/1040","prRepository":"o/r",…}
+            if let ref = Self.pullRequestRef(from: obj) { Self.link(ref, into: &s) }
         default:
             break
         }
+    }
+
+    private static func pullRequestRef(from obj: [String: Any]) -> PullRequestRef? {
+        if let raw = obj["prUrl"] as? String, let url = URL(string: raw), let ref = PullRequestRef(url: url) { return ref }
+        // Fall back to number + repository when the URL is missing or malformed.
+        guard let number = (obj["prNumber"] as? NSNumber)?.intValue ?? Int(obj["prNumber"] as? String ?? ""),
+              let repo = obj["prRepository"] as? String, repo.split(separator: "/").count == 2,
+              let url = URL(string: "https://github.com/\(repo)/pull/\(number)") else { return nil }
+        return PullRequestRef(number: number, repository: repo, url: url)
+    }
+
+    /// Unique by URL, newest link last; a prompt-derived flag survives a later `pr-link` for the same URL.
+    private static func link(_ ref: PullRequestRef, into s: inout SessionSummary) {
+        var ref = ref
+        if let i = s.pullRequests.firstIndex(where: { $0.id == ref.id }) {
+            ref.fromPrompt = ref.fromPrompt || s.pullRequests[i].fromPrompt
+            s.pullRequests.remove(at: i)
+        }
+        s.pullRequests.append(ref)
     }
 
     private static func userText(from message: Any?) -> String? {

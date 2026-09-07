@@ -77,12 +77,18 @@ struct TabSurfaces: View {
     let isSelected: Bool
 
     var body: some View {
-        if tab.gitPageVisible, let git = tab.gitPage {
+        switch tab.rightPane {
+        case .git:
             HSplitView {
                 terminals.frame(minWidth: 360)
-                GitPage(tab: tab, model: git).frame(minWidth: 380, idealWidth: 520)
+                if let git = tab.gitPage { GitPage(tab: tab, model: git).frame(minWidth: 380, idealWidth: 520) }
             }
-        } else {
+        case .pr(let ref):
+            HSplitView {
+                terminals.frame(minWidth: 360)
+                PRPage(tab: tab, ref: ref).frame(minWidth: 380, idealWidth: 560)
+            }
+        case .none:
             terminals
         }
     }
@@ -125,12 +131,19 @@ struct TabFooter: View {
                 .buttonStyle(.plain)
                 .help("Click to copy: \(pwd)")
             }
+            ForEach(tabs.pullRequests(for: tab)) { ref in
+                PRChip(ref: ref, active: tab.rightPane == .pr(ref)) { tabs.togglePRPage(tab, ref: ref) }
+            }
             Spacer()
             if let pid = tab.surface.foregroundPID { Text("pid " + String(pid)).foregroundStyle(.tertiary).monospacedDigit() }
             Button { tabs.togglePanel(tab) } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }.buttonStyle(.plain).help("Terminal panel (⌘J)")
                 .foregroundStyle(tab.panelVisible ? Color.accentColor : .secondary)
             Button { tabs.toggleGitPage(tab) } label: { Image(systemName: "arrow.triangle.branch") }.buttonStyle(.plain).help("Git page (⌘⇧G)")
                 .foregroundStyle(tab.gitPageVisible ? Color.accentColor : .secondary)
+            if !tabs.pullRequests(for: tab).isEmpty {
+                Button { tabs.togglePRPage(tab) } label: { Image(systemName: "arrow.triangle.pull") }.buttonStyle(.plain).help("Pull request page (⌘⇧P)")
+                    .foregroundStyle({ if case .pr = tab.rightPane { return Color.accentColor } else { return .secondary } }())
+            }
         }
         .font(.callout)
         .foregroundStyle(.secondary)

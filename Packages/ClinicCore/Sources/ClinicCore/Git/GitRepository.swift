@@ -258,7 +258,7 @@ enum GitProcess {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = ["git", "-C", directory] + args
-        var env = ProcessInfo.processInfo.environment
+        var env = ProcessEnvironment.withToolPaths()
         env["LANG"] = "C"
         env["LC_ALL"] = "C"
         env["GIT_OPTIONAL_LOCKS"] = "0"

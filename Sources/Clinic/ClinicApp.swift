@@ -13,6 +13,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.sessions)
                 .environment(appDelegate.history)
                 .environment(appDelegate.usage)
+                .environment(appDelegate.prs)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -28,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let notifications = NotificationService()
     let history = NotificationStore()
     let usage = UsageService()
+    let prs = PRStore()
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -38,6 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessions.start()
         tabs.start()
         if UserDefaults.standard.bool(forKey: "ClinicShowUsage") { usage.start() }
+        prs.openRefsProvider = { [weak self] in
+            guard let self else { return [] }
+            return self.tabs.tabs.flatMap { tab in self.tabs.pullRequests(for: tab) }
+        }
+        prs.start()
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
                 await sessions.initialScan?.value
@@ -49,6 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
             if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") { tabs.toggleGitPage() }
+        }
+        // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
+        if let raw = UserDefaults.standard.string(forKey: "ClinicOpenSessionOnLaunch"), !raw.isEmpty {
+            Task {
+                await sessions.initialScan?.value
+                if let s = sessions.sessions[SessionID(raw)] {
+                    tabs.open(session: s)
+                    if UserDefaults.standard.bool(forKey: "ClinicOpenPRPageOnLaunch") { tabs.togglePRPage() }
+                }
+            }
         }
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
@@ -119,6 +136,7 @@ struct ClinicCommands: Commands {
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
             Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
+            Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()
             Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Tab") { tabs.selectNext(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])

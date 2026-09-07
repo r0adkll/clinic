@@ -44,6 +44,7 @@ public enum GitInfo {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
                 p.arguments = ["git", "-C", directory] + args
+                p.environment = ProcessEnvironment.withToolPaths()
                 let out = Pipe()
                 p.standardOutput = out
                 p.standardError = FileHandle.nullDevice

@@ -28,9 +28,11 @@ final class Tab: Identifiable {
     /// Secondary plain shell below the main surface (ADR-046). Created lazily by ⌘J, freed with the tab.
     var panelSurface: GhosttySurfaceView?
     var panelVisible = false
-    /// Git page (ADR-052), created on first open.
+    /// Right column: git page (ADR-052) or PR page (ADR-053). One at a time.
+    enum RightPane: Equatable { case none, git, pr(PullRequestRef) }
+    var rightPane: RightPane = .none
     var gitPage: GitPageModel?
-    var gitPageVisible = false
+    var gitPageVisible: Bool { rightPane == .git }
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -272,8 +274,24 @@ final class TabStore {
     func toggleGitPage(_ tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab else { return }
         if tab.gitPage == nil { tab.gitPage = GitPageModel() }
-        tab.gitPageVisible.toggle()
+        tab.rightPane = tab.rightPane == .git ? .none : .git
         if !tab.gitPageVisible { tab.gitPage?.stopWatching() }
+    }
+
+    /// PR refs known for a tab's session (from the transcript).
+    func pullRequests(for tab: Tab) -> [PullRequestRef] {
+        guard let id = tab.sessionId, let s = sessions.sessions[id] else { return [] }
+        return s.pullRequests
+    }
+
+    /// ⌘⇧P: show the newest PR page, or hide it; `ref` picks a specific PR (footer chip).
+    func togglePRPage(_ tab: Tab? = nil, ref: PullRequestRef? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        let target = ref ?? pullRequests(for: tab).last
+        guard let target else { return }
+        if case .pr(let current) = tab.rightPane, current == target { tab.rightPane = .none; return }
+        tab.gitPage?.stopWatching()
+        tab.rightPane = .pr(target)
     }
 
     func tab(forSurface surface: GhosttySurfaceView) -> Tab? {
