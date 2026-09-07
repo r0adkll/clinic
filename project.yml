@@ -31,6 +31,8 @@ targets:
       - target: clinic-hook
         embed: true
         codeSign: true
+        copy:
+          destination: executables
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.r0adkll.clinic
