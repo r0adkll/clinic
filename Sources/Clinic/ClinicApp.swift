@@ -71,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ClinicCommands: Commands {
     let tabs: TabStore
+    var sessions: SessionStore { tabs.sessions }
+    private var selectedSession: SessionSummary? { tabs.selectedTab?.sessionId.flatMap { sessions.sessions[$0] } }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -78,6 +80,23 @@ struct ClinicCommands: Commands {
             Button("New Shell") { tabs.newShell() }.keyboardShortcut("t", modifiers: .command)
             Divider()
             Button("Close Tab") { tabs.closeSelected() }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil)
+        }
+        CommandMenu("Session") {
+            Button("Rename…") { if let s = selectedSession { SessionActions.rename(s, sessions: sessions) } }
+                .keyboardShortcut("r", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+            Button(selectedSession.map { sessions.isFavorite($0.id) } == true ? "Remove from Favorites" : "Add to Favorites") {
+                if let s = selectedSession { sessions.toggleFavorite(s.id) }
+            }.keyboardShortcut("d", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+            Button("Archive") { if let s = selectedSession { SessionActions.archive(s, sessions: sessions, tabs: tabs) } }
+                .keyboardShortcut("a", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+            Button("Undo Archive") { sessions.undoArchive() }
+                .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!sessions.canUndoArchive)
+            Divider()
+            Button("Jump to Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: nil) }
+                .keyboardShortcut("k", modifiers: .command)
+        }
+        CommandGroup(after: .sidebar) {
+            Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
         }
         CommandMenu("Tabs") {
             Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
@@ -92,4 +111,5 @@ struct ClinicCommands: Commands {
 
 extension Notification.Name {
     static let clinicNewSession = Notification.Name("com.r0adkll.clinic.newSession")
+    static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
 }

@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
     @State private var showNewSession = false
+    @State private var showSwitcher = false
 
     var body: some View {
         NavigationSplitView {
@@ -16,6 +17,8 @@ struct RootView: View {
         }
         .frame(minWidth: 800, minHeight: 480)
         .sheet(isPresented: $showNewSession) { NewSessionSheet() }
+        .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in showSwitcher = true }
         .alert("Could not open a terminal", isPresented: Binding(get: { tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(tabs.lastSurfaceError ?? "") }

@@ -15,6 +15,8 @@ final class SessionStore {
     private(set) var projects: [Project] = []
     private(set) var state = ClinicState()
     private(set) var isScanning = false
+    var showArchived = false { didSet { rebuildProjects() } }
+    private var archiveUndoStack: [SessionID] = []
 
     private let scanner: SessionScanner
     private let watcher: DirectoryWatcher
@@ -61,18 +63,63 @@ final class SessionStore {
     private func rebuildProjects() {
         var byPath: [String: Date] = [:]
         for s in sessions.values {
-            guard state.archived[s.id] == nil, let p = ProjectGrouping.project(for: s) else { continue }
+            guard isVisible(s), let p = ProjectGrouping.project(for: s) else { continue }
             byPath[p.path] = max(byPath[p.path] ?? .distantPast, s.activityDate)
         }
         for added in state.addedProjects where byPath[added] == nil { byPath[added] = .distantPast }
         projects = byPath.keys.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }.map(Project.init(path:))
     }
 
-    /// Sessions for a project, most recent first (ADR-040). Archived hidden (ADR-013).
+    /// Sessions for a project, most recent first (ADR-040). Archived hidden unless `showArchived`.
     func sessions(in project: Project) -> [SessionSummary] {
         sessions.values
-            .filter { state.archived[$0.id] == nil && ProjectGrouping.project(for: $0)?.path == project.path }
+            .filter { isVisible($0) && ProjectGrouping.project(for: $0)?.path == project.path }
             .sorted { ($0.activityDate, $0.id.rawValue) > ($1.activityDate, $1.id.rawValue) }
+    }
+
+    /// Favorited sessions across projects, most recent first.
+    var favoriteSessions: [SessionSummary] {
+        state.favorites.compactMap { sessions[$0] }.filter(isVisible)
+            .sorted { ($0.activityDate, $0.id.rawValue) > ($1.activityDate, $1.id.rawValue) }
+    }
+
+    func isVisible(_ s: SessionSummary) -> Bool { showArchived || state.archived[s.id] == nil }
+    func isArchived(_ id: SessionID) -> Bool { state.archived[id] != nil }
+    func isFavorite(_ id: SessionID) -> Bool { state.favorites.contains(id) }
+
+    // MARK: Overlays (ADR-018: Clinic-side only)
+
+    func rename(_ id: SessionID, to name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        update { s in if let trimmed, !trimmed.isEmpty { s.manualNames[id] = trimmed } else { s.manualNames[id] = nil } }
+    }
+
+    func toggleFavorite(_ id: SessionID) {
+        update { s in if s.favorites.contains(id) { s.favorites.remove(id) } else { s.favorites.insert(id) } }
+    }
+
+    func archive(_ id: SessionID) {
+        archiveUndoStack.append(id)
+        update { s in s.archived[id] = Date() }
+    }
+
+    func unarchive(_ id: SessionID) {
+        update { s in s.archived[id] = nil }
+    }
+
+    var canUndoArchive: Bool { !archiveUndoStack.isEmpty }
+
+    func undoArchive() {
+        guard let id = archiveUndoStack.popLast() else { return }
+        unarchive(id)
+    }
+
+    /// Case-insensitive substring match over name, prompt, project, branch and id. Empty query matches everything.
+    func matches(_ s: SessionSummary, query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        let hay = [displayName(for: s), s.firstPrompt ?? "", ProjectGrouping.project(for: s)?.name ?? "", s.gitBranch ?? "", s.id.rawValue]
+        return q.split(separator: " ").allSatisfy { term in hay.contains { $0.lowercased().contains(term) } }
     }
 
     func displayName(for session: SessionSummary) -> String {
