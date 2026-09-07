@@ -25,6 +25,9 @@ final class Tab: Identifiable {
     var pendingInput: String?
     var gitBranch: String?
     var model: String?
+    /// Secondary plain shell below the main surface (ADR-046). Created lazily by ⌘J, freed with the tab.
+    var panelSurface: GhosttySurfaceView?
+    var panelVisible = false
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -191,7 +194,11 @@ final class TabStore {
     // MARK: Selection / close (ADR-019, ADR-037)
 
     private func applySelection() {
-        for t in tabs { t.surface.isOccluded = (t.id != selectedTabId) }
+        for t in tabs {
+            let hidden = (t.id != selectedTabId)
+            t.surface.isOccluded = hidden
+            t.panelSurface?.isOccluded = hidden || !t.panelVisible
+        }
         if let tab = selectedTab {
             tab.unread = false
             if let id = tab.sessionId { history.markRead(sessionId: id) }
@@ -222,12 +229,43 @@ final class TabStore {
         tabs.removeAll { $0.id == tab.id }
         if selectedTabId == tab.id { selectedTabId = tabs.last?.id }
         tab.surface.free()
+        tab.panelSurface?.free()
+        tab.panelSurface = nil
         if let id = tab.sessionId { sessions.removePending(id: id) }
         updateBadge()
         return true
     }
 
     func closeSelected() { if let t = selectedTab { close(t) } }
+
+    /// ⌘J: show/hide the tab's shell panel, creating the surface on first use in the tab's current directory.
+    func togglePanel(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab, let runtime else { return }
+        if tab.panelSurface == nil {
+            var options = GhosttySurfaceOptions()
+            options.workingDirectory = tab.pwd ?? tab.projectPath
+            options.environment = ["CLINIC": "1", "CLINIC_PANEL": "1"]
+            do {
+                let surface = try GhosttySurfaceView(runtime: runtime, options: options)
+                surface.delegate = self
+                tab.panelSurface = surface
+            } catch {
+                Self.log.error("panel surface creation failed: \(error, privacy: .public)")
+                lastSurfaceError = "\(error)"
+                return
+            }
+            tab.panelVisible = true
+        } else {
+            tab.panelVisible.toggle()
+        }
+        tab.panelSurface?.isOccluded = !tab.panelVisible
+        let target = tab.panelVisible ? tab.panelSurface : tab.surface
+        DispatchQueue.main.async { target?.window?.makeFirstResponder(target) }
+    }
+
+    func tab(forSurface surface: GhosttySurfaceView) -> Tab? {
+        tabs.first { $0.surface === surface || $0.panelSurface === surface }
+    }
 
     var runningCount: Int { tabs.filter(\.isRunningClaude).count }
 
@@ -301,14 +339,15 @@ final class TabStore {
 
 extension TabStore: GhosttySurfaceDelegate {
     func surface(_ surface: GhosttySurfaceView, didReceive action: GhosttyAction) -> Bool {
-        let tab = tabs.first { $0.surface === surface }
+        let tab = tab(forSurface: surface)
+        let isPanel = tab?.panelSurface === surface
         switch action {
         case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
         case .openURL(let url, _): NSWorkspace.shared.open(url); return true
         case .ringBell: NSSound.beep(); return true
-        case .setTitle(let t): if let tab, tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t }; return true
+        case .setTitle(let t): if let tab, tab.kind == .shell, !isPanel { tab.title = t.isEmpty ? "Shell" : t }; return true
         case .pwd(let p):
-            if let tab {
+            if let tab, !isPanel {
                 let changed = tab.pwd != p
                 tab.pwd = p
                 flushPendingInput(tab)
@@ -322,11 +361,20 @@ extension TabStore: GhosttySurfaceDelegate {
     }
 
     func surfaceRequestedClose(_ surface: GhosttySurfaceView, processAlive: Bool) {
-        if let tab = tabs.first(where: { $0.surface === surface }) { close(tab, confirm: processAlive) }
+        guard let tab = tab(forSurface: surface) else { return }
+        if tab.panelSurface === surface { closePanel(tab) } else { close(tab, confirm: processAlive) }
+    }
+
+    private func closePanel(_ tab: Tab) {
+        tab.panelSurface?.free()
+        tab.panelSurface = nil
+        tab.panelVisible = false
+        DispatchQueue.main.async { tab.surface.window?.makeFirstResponder(tab.surface) }
     }
 
     func surfaceChildExited(_ surface: GhosttySurfaceView, exitCode: Int32?) {
-        guard let tab = tabs.first(where: { $0.surface === surface }) else { return }
+        guard let tab = tab(forSurface: surface) else { return }
+        if tab.panelSurface === surface { closePanel(tab); return }
         tab.childExited = true
         if tab.state != nil { tab.state = .exited }
         updateBadge()

@@ -54,7 +54,7 @@ struct DetailView: View {
             } else {
                 // Every open tab keeps its surface mounted; only the selected one is visible (ADR-019).
                 ForEach(tabs.tabs) { tab in
-                    SurfaceContainer(surface: tab.surface, isVisible: tab.id == tabs.selectedTabId)
+                    TabSurfaces(tab: tab, isSelected: tab.id == tabs.selectedTabId)
                         .opacity(tab.id == tabs.selectedTabId ? 1 : 0)
                         .allowsHitTesting(tab.id == tabs.selectedTabId)
                 }
@@ -62,6 +62,25 @@ struct DetailView: View {
                     ExitedOverlay(tab: tab)
                 }
             }
+        }
+    }
+}
+
+/// Main surface plus the optional shell panel below it (ADR-046).
+struct TabSurfaces: View {
+    let tab: Tab
+    let isSelected: Bool
+
+    var body: some View {
+        if tab.panelVisible, let panel = tab.panelSurface {
+            VSplitView {
+                SurfaceContainer(surface: tab.surface, isVisible: false)
+                    .frame(minHeight: 120)
+                SurfaceContainer(surface: panel, isVisible: isSelected)
+                    .frame(minHeight: 80, idealHeight: 220)
+            }
+        } else {
+            SurfaceContainer(surface: tab.surface, isVisible: isSelected)
         }
     }
 }

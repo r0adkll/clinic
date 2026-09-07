@@ -41,7 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
-        if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") { tabs.newShell() }
+        if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
+            tabs.newShell()
+            if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
+        }
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             tabs.newSession(projectPath: path, model: "haiku", worktree: false)
@@ -108,6 +111,8 @@ struct ClinicCommands: Commands {
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
         }
         CommandMenu("Tabs") {
+            Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
+            Divider()
             Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Tab") { tabs.selectNext(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
