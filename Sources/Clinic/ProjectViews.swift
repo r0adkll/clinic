@@ -18,12 +18,13 @@ struct ProjectHeader: View {
             Spacer(minLength: 4)
             if hovering {
                 Button { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: sessions.state.lastWorktreeByProject[project.path] ?? false) } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "plus.circle.fill").font(.body)
                 }.buttonStyle(.borderless).help("New session in \(project.name)")
             }
-            Menu { ProjectMenu(project: project) } label: { Image(systemName: "ellipsis.circle") }
+            Menu { ProjectMenu(project: project) } label: { Image(systemName: "ellipsis.circle").font(.body) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .opacity(hovering ? 1 : 0.5)
+                .opacity(hovering ? 1 : 0.6)
+                .help("Project actions")
         }
         .textCase(nil)
         .padding(.vertical, 2)
@@ -58,7 +59,7 @@ struct ProjectMenu: View {
 /// `project-icon.svg|png` → `.clinic/icon.*` → monogram on a hashed colour (ADR-050).
 struct ProjectIcon: View {
     let project: Project
-    var size: CGFloat = 18
+    var size: CGFloat = 22
 
     var body: some View {
         Group {

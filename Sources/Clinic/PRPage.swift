@@ -204,13 +204,15 @@ struct PRChip: View {
     var body: some View {
         let mark = prs.mark(for: ref)
         Button(action: onTap) {
-            HStack(spacing: 3) {
+            HStack(spacing: 4) {
                 Image(systemName: mark?.symbolName ?? "arrow.triangle.pull")
-                Text("#" + String(ref.number)).monospacedDigit()
+                Text("PR #" + String(ref.number)).monospacedDigit()
             }
-            .foregroundStyle(mark.map(PRStyle.color) ?? .secondary)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(active ? Color.accentColor.opacity(0.15) : Color.clear, in: Capsule())
+            .font(.callout)
+            .lineLimit(1)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(mark.map(PRStyle.color) ?? .primary)
         }
         .buttonStyle(.plain)
         .help(mark?.summary ?? "Pull request #" + String(ref.number))

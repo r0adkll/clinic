@@ -194,6 +194,21 @@ struct StateGlyph: View {
                 Circle().fill(.clear)
             }
         }
-        .frame(width: 8, height: 8)
+        .frame(width: 10, height: 10)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        guard let tab else { return "Not open" }
+        if tab.unread { return "Finished — unread" }
+        switch tab.state {
+        case .launching: return "Starting"
+        case .working: return "Working"
+        case .waitingForPermission: return "Waiting for permission"
+        case .waitingForInput: return "Waiting for your input"
+        case .idle: return "Idle at the prompt"
+        case .exited: return "Exited"
+        case nil: return "Shell"
+        }
     }
 }

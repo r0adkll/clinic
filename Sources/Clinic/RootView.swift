@@ -27,8 +27,8 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { n in newSessionProject = n.object as? String; showNewSession = true }
         .toolbar {
             ToolbarItemGroup {
-                Button { showNewSession = true } label: { Label("New Session", systemImage: "plus") }
-                Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }
+                Button { showNewSession = true } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
+                Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab (⌘T)")
                 NotificationBell()
             }
         }
@@ -108,13 +108,9 @@ struct TabFooter: View {
     let tab: Tab
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             if let model = tab.model {
-                Label(Self.shortModel(model), systemImage: "cpu").help(model)
-            }
-            if let branch = tab.gitBranch {
-                Button { tabs.toggleGitPage(tab) } label: { Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1) }
-                    .buttonStyle(.plain).help("Toggle git page (⌘⇧G)")
+                Label(Self.shortModel(model), systemImage: "cpu").help("Model: \(model)")
             }
             if let pwd = tab.pwd {
                 Button {
@@ -123,26 +119,21 @@ struct TabFooter: View {
                     Label(Self.abbreviate(pwd), systemImage: "folder").lineLimit(1).truncationMode(.head)
                 }
                 .buttonStyle(.plain)
-                .help("Click to copy: \(pwd)")
+                .help("Working directory (click to copy): \(pwd)")
             }
-            ForEach(tabs.pullRequests(for: tab)) { ref in
-                PRChip(ref: ref, active: tab.rightPane == .pr(ref)) { tabs.togglePRPage(tab, ref: ref) }
-            }
-            Spacer()
-            if let pid = tab.surface.foregroundPID { Text("pid " + String(pid)).foregroundStyle(.tertiary).monospacedDigit() }
-            Button { tabs.togglePanel(tab) } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }.buttonStyle(.plain).help("Terminal panel (⌘J)")
-                .foregroundStyle(tab.panelVisible ? Color.accentColor : .secondary)
-            Button { tabs.toggleGitPage(tab) } label: { Image(systemName: "arrow.triangle.branch") }.buttonStyle(.plain).help("Git page (⌘⇧G)")
-                .foregroundStyle(tab.gitPageVisible ? Color.accentColor : .secondary)
-            if !tabs.pullRequests(for: tab).isEmpty {
-                Button { tabs.togglePRPage(tab) } label: { Image(systemName: "arrow.triangle.pull") }.buttonStyle(.plain).help("Pull request page (⌘⇧P)")
-                    .foregroundStyle({ if case .pr = tab.rightPane { return Color.accentColor } else { return .secondary } }())
+            Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                FooterToggle(title: "Panel", symbol: "rectangle.bottomthird.inset.filled", active: tab.panelVisible, help: "Shell panel below the session (⌘J)") { tabs.togglePanel(tab) }
+                FooterToggle(title: tab.gitBranch ?? "Git", symbol: "arrow.triangle.branch", active: tab.gitPageVisible, help: "Git page (⌘⇧G)") { tabs.toggleGitPage(tab) }
+                ForEach(tabs.pullRequests(for: tab)) { ref in
+                    PRChip(ref: ref, active: tab.rightPane == .pr(ref)) { tabs.togglePRPage(tab, ref: ref) }
+                }
             }
         }
         .font(.callout)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background(.bar)
     }
 
@@ -159,6 +150,29 @@ struct TabFooter: View {
         guard let family = parts.first else { return id }
         let version = parts.dropFirst().joined(separator: ".")
         return family.capitalized + (version.isEmpty ? "" : " " + version)
+    }
+}
+
+/// Labeled footer toggle (icon + title) so each control reads at a glance.
+struct FooterToggle: View {
+    let title: String
+    let symbol: String
+    let active: Bool
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .font(.callout)
+                .lineLimit(1)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(active ? Color.accentColor : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
