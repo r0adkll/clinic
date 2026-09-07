@@ -21,6 +21,8 @@ final class Tab: Identifiable {
     var pwd: String?
     var childExited = false
     var lastResume: ClaudeLaunch?
+    /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
+    var pendingInput: String?
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -39,6 +41,7 @@ final class TabStore {
 
     private(set) var runtime: GhosttyRuntime?
     private(set) var startupError: String?
+    var lastSurfaceError: String?
     private(set) var tabs: [Tab] = []
     var selectedTabId: UUID? { didSet { applySelection() } }
 
@@ -53,6 +56,7 @@ final class TabStore {
     var selectedTab: Tab? { tabs.first { $0.id == selectedTabId } }
 
     func start() {
+        Self.adoptInstalledGhosttyResources()
         do {
             let config = try GhosttyConfig()
             for d in config.diagnostics { Self.log.warning("ghostty config: \(d, privacy: .public)") }
@@ -65,6 +69,21 @@ final class TabStore {
         }
         hooks.onEvent = { [weak self] event in self?.handle(hookEvent: event) }
         notifications.onActivate = { [weak self] id in self?.reveal(sessionId: id) }
+    }
+
+    /// ADR-034: shell integration scripts are GPLv3 and not bundled. If Ghostty.app is installed, let libghostty
+    /// use its resources (shell-integration, themes, terminfo). Must run before the runtime is created.
+    static func adoptInstalledGhosttyResources() {
+        guard ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] == nil else { return }
+        let candidates = ["/Applications/Ghostty.app", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Ghostty.app").path]
+        for app in candidates {
+            let dir = app + "/Contents/Resources/ghostty"
+            if FileManager.default.fileExists(atPath: dir + "/shell-integration") {
+                setenv("GHOSTTY_RESOURCES_DIR", dir, 1)
+                Self.log.info("using Ghostty resources at \(dir, privacy: .public)")
+                return
+            }
+        }
     }
 
     // MARK: Opening
@@ -107,19 +126,44 @@ final class TabStore {
         guard let runtime else { return nil }
         var options = GhosttySurfaceOptions()
         options.workingDirectory = cwd
-        options.initialInput = initialInput
         options.environment = ["CLINIC": "1"]
         do {
-            let surface = try GhosttySurfaceView(runtime: runtime, options: options)
+            let surface: GhosttySurfaceView
+            do {
+                surface = try GhosttySurfaceView(runtime: runtime, options: options)
+            } catch {
+                // ghostty_surface_new has been observed to fail intermittently right after launch; one retry after a tick.
+                Self.log.warning("surface creation failed once, retrying: \(error, privacy: .public)")
+                runtime.tick()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+                surface = try GhosttySurfaceView(runtime: runtime, options: options)
+            }
             let tab = Tab(kind: kind, projectPath: projectPath, surface: surface, title: title)
             tab.pwd = cwd
+            tab.pendingInput = initialInput
             surface.delegate = self
             tabs.append(tab)
+            if initialInput != nil {
+                Task { [weak self, weak tab] in
+                    try? await Task.sleep(for: .milliseconds(Self.initialInputFallbackMs))
+                    if let tab { self?.flushPendingInput(tab) }
+                }
+            }
             return tab
         } catch {
             Self.log.error("surface creation failed: \(error, privacy: .public)")
+            lastSurfaceError = "\(error)"
             return nil
         }
+    }
+
+    /// Fallback if the shell never reports a prompt (no shell integration).
+    static let initialInputFallbackMs = 700
+
+    private func flushPendingInput(_ tab: Tab) {
+        guard let text = tab.pendingInput else { return }
+        tab.pendingInput = nil
+        tab.surface.sendLine(text)
     }
 
     // MARK: Selection / close (ADR-019, ADR-037)
@@ -178,7 +222,7 @@ final class TabStore {
         guard tab.childExited, let launch = tab.lastResume else { return }
         tab.childExited = false
         tab.state = .launching
-        tab.surface.sendText(launch.shellLine)
+        tab.surface.sendLine(launch.shellLine)
     }
 
     // MARK: Hooks → state (ADR-026, ADR-033)
@@ -235,7 +279,10 @@ extension TabStore: GhosttySurfaceDelegate {
         case .openURL(let url, _): NSWorkspace.shared.open(url); return true
         case .ringBell: NSSound.beep(); return true
         case .setTitle(let t): if let tab, tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t }; return true
-        case .pwd(let p): tab?.pwd = p; return true
+        case .pwd(let p):
+            tab?.pwd = p
+            if let tab { flushPendingInput(tab) }
+            return true
         case .progressReport, .commandFinished, .mouseShape, .colorScheme: return true
         case .quit: NSApp.terminate(nil); return true
         case .unhandled(let kind): Self.log.debug("unhandled surface action \(kind, privacy: .public)"); return false

@@ -16,6 +16,9 @@ struct RootView: View {
         }
         .frame(minWidth: 800, minHeight: 480)
         .sheet(isPresented: $showNewSession) { NewSessionSheet() }
+        .alert("Could not open a terminal", isPresented: Binding(get: { tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(tabs.lastSurfaceError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { _ in showNewSession = true }
         .toolbar {
             ToolbarItemGroup {

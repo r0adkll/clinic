@@ -248,6 +248,27 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         text.withCString { ghostty_surface_text(surface, $0, UInt(len)) }
     }
 
+    /// Presses and releases Return as a synthesized key event. `ghostty_surface_text` is the IME text path and
+    /// does not submit a newline, so callers that want to "type a command" use `sendLine`.
+    public func pressEnter() {
+        guard let surface else { return }
+        var ev = ghostty_input_key_s()
+        ev.keycode = 36 // kVK_Return
+        ev.unshifted_codepoint = 0x0D
+        ev.action = GHOSTTY_ACTION_PRESS
+        _ = ghostty_surface_key(surface, ev)
+        ev.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, ev)
+    }
+
+    /// Types `line` (any trailing newline stripped) and presses Return.
+    public func sendLine(_ line: String) {
+        var text = line
+        while text.hasSuffix("\n") || text.hasSuffix("\r") { text.removeLast() }
+        sendText(text)
+        pressEnter()
+    }
+
     /// Perform a keybind action by name (e.g. `"copy_to_clipboard"`, `"scroll_to_bottom"`).
     @discardableResult
     public func perform(action: String) -> Bool {

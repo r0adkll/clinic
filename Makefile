@@ -16,7 +16,7 @@ build: project
 
 test:
 	swift test --package-path Packages/ClinicCore
-	xcodebuild -project Clinic.xcodeproj -scheme Clinic -derivedDataPath build test | tail -20
+	swift test --package-path Packages/GhosttyBridge
 
 clean:
 	rm -rf build Clinic.xcodeproj Packages/*/.build

@@ -7,12 +7,12 @@ struct SidebarView: View {
     @Binding var showNewSession: Bool
 
     var body: some View {
-        List(selection: Binding(get: { tabs.selectedTabId }, set: { if let id = $0 { tabs.selectedTabId = id } })) {
+        List(selection: selection) {
             let shells = tabs.tabs.filter { $0.kind == .shell }
             if !shells.isEmpty {
                 Section("Shells") {
                     ForEach(shells) { tab in
-                        Label(tab.title, systemImage: "terminal").tag(tab.id)
+                        Label(tab.title, systemImage: "terminal").tag(SidebarItem.tab(tab.id))
                             .contextMenu { Button("Close") { tabs.close(tab) } }
                     }
                 }
@@ -21,9 +21,7 @@ struct SidebarView: View {
                 Section {
                     ForEach(sessions.sessions(in: project)) { summary in
                         SessionRow(summary: summary, tab: tabs.tab(for: summary.id))
-                            .tag(tabs.tab(for: summary.id)?.id ?? UUID())
-                            .contentShape(Rectangle())
-                            .onTapGesture { tabs.open(session: summary) }
+                            .tag(SidebarItem.session(summary.id))
                             .contextMenu {
                                 Button("Open") { tabs.open(session: summary) }
                                 if let tab = tabs.tab(for: summary.id) { Button("Close Tab") { tabs.close(tab) } }
@@ -47,6 +45,34 @@ struct SidebarView: View {
                 ContentUnavailableView("No sessions yet", systemImage: "tray", description: Text("Start one with ⌘N."))
             }
         }
+    }
+}
+
+/// Stable selection identity: sessions by id (open or not), shells by tab id.
+enum SidebarItem: Hashable {
+    case session(SessionID)
+    case tab(UUID)
+}
+
+extension SidebarView {
+    var selection: Binding<SidebarItem?> {
+        Binding(
+            get: {
+                guard let tab = tabs.selectedTab else { return nil }
+                if let id = tab.sessionId { return .session(id) }
+                return .tab(tab.id)
+            },
+            set: { item in
+                switch item {
+                case .session(let id)?:
+                    if let tab = tabs.tab(for: id) { tabs.selectedTabId = tab.id }
+                    else if let summary = sessions.sessions[id] { tabs.open(session: summary) }
+                case .tab(let id)?:
+                    tabs.selectedTabId = id
+                case nil:
+                    break
+                }
+            })
     }
 }
 
