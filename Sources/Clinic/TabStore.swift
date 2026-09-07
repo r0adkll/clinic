@@ -28,6 +28,9 @@ final class Tab: Identifiable {
     /// Secondary plain shell below the main surface (ADR-046). Created lazily by ⌘J, freed with the tab.
     var panelSurface: GhosttySurfaceView?
     var panelVisible = false
+    /// Git page (ADR-052), created on first open.
+    var gitPage: GitPageModel?
+    var gitPageVisible = false
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -232,6 +235,7 @@ final class TabStore {
         tab.surface.free()
         tab.panelSurface?.free()
         tab.panelSurface = nil
+        tab.gitPage?.stopWatching()
         if let id = tab.sessionId { sessions.removePending(id: id) }
         updateBadge()
         return true
@@ -262,6 +266,14 @@ final class TabStore {
         tab.panelSurface?.isOccluded = !tab.panelVisible
         let target = tab.panelVisible ? tab.panelSurface : tab.surface
         DispatchQueue.main.async { target?.window?.makeFirstResponder(target) }
+    }
+
+    /// ⌘⇧G: show/hide the tab's git page.
+    func toggleGitPage(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        if tab.gitPage == nil { tab.gitPage = GitPageModel() }
+        tab.gitPageVisible.toggle()
+        if !tab.gitPageVisible { tab.gitPage?.stopWatching() }
     }
 
     func tab(forSurface surface: GhosttySurfaceView) -> Tab? {

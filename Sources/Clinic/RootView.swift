@@ -77,6 +77,18 @@ struct TabSurfaces: View {
     let isSelected: Bool
 
     var body: some View {
+        if tab.gitPageVisible, let git = tab.gitPage {
+            HSplitView {
+                terminals.frame(minWidth: 360)
+                GitPage(tab: tab, model: git).frame(minWidth: 380, idealWidth: 520)
+            }
+        } else {
+            terminals
+        }
+    }
+
+    @ViewBuilder
+    private var terminals: some View {
         if tab.panelVisible, let panel = tab.panelSurface {
             VSplitView {
                 SurfaceContainer(surface: tab.surface, isVisible: false)
@@ -92,6 +104,7 @@ struct TabSurfaces: View {
 
 /// Model, branch and cwd for the selected tab (milestone 2, Collins footer).
 struct TabFooter: View {
+    @Environment(TabStore.self) private var tabs
     let tab: Tab
 
     var body: some View {
@@ -100,7 +113,8 @@ struct TabFooter: View {
                 Label(Self.shortModel(model), systemImage: "cpu").help(model)
             }
             if let branch = tab.gitBranch {
-                Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+                Button { tabs.toggleGitPage(tab) } label: { Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1) }
+                    .buttonStyle(.plain).help("Toggle git page (⌘⇧G)")
             }
             if let pwd = tab.pwd {
                 Button {
@@ -113,6 +127,10 @@ struct TabFooter: View {
             }
             Spacer()
             if let pid = tab.surface.foregroundPID { Text("pid " + String(pid)).foregroundStyle(.tertiary).monospacedDigit() }
+            Button { tabs.togglePanel(tab) } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }.buttonStyle(.plain).help("Terminal panel (⌘J)")
+                .foregroundStyle(tab.panelVisible ? Color.accentColor : .secondary)
+            Button { tabs.toggleGitPage(tab) } label: { Image(systemName: "arrow.triangle.branch") }.buttonStyle(.plain).help("Git page (⌘⇧G)")
+                .foregroundStyle(tab.gitPageVisible ? Color.accentColor : .secondary)
         }
         .font(.callout)
         .foregroundStyle(.secondary)

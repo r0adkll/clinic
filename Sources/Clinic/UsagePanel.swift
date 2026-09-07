@@ -30,7 +30,9 @@ final class UsageService {
         isLoading = true
         defer { isLoading = false }
         do {
-            guard let creds = Self.readCredentials() else { throw UsageError.noCredentials }
+            // Keychain access can block on a user prompt; never do it on the main thread.
+            let creds = await Task.detached(priority: .utility) { Self.readCredentials() }.value
+            guard let creds else { throw UsageError.noCredentials }
             snapshot = try await UsageClient.fetch(credentials: creds)
             error = nil
         } catch {
