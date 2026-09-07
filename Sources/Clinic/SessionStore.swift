@@ -87,6 +87,14 @@ final class SessionStore {
 
     func flush() async { await stateStore.flush() }
 
+    /// Drops a placeholder whose transcript never appeared (tab closed before the first prompt).
+    func removePending(id: SessionID) {
+        guard pending[id] != nil, !FileManager.default.fileExists(atPath: sessions[id]?.transcriptPath ?? "") else { return }
+        pending[id] = nil
+        sessions[id] = nil
+        rebuildProjects()
+    }
+
     /// Placeholder rows for sessions launched by Clinic whose transcript does not exist yet (ADR-017).
     func registerPending(id: SessionID, cwd: String) {
         guard sessions[id] == nil else { return }

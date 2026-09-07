@@ -199,6 +199,7 @@ final class TabStore {
         tabs.removeAll { $0.id == tab.id }
         if selectedTabId == tab.id { selectedTabId = tabs.last?.id }
         tab.surface.free()
+        if let id = tab.sessionId { sessions.removePending(id: id) }
         updateBadge()
         return true
     }
