@@ -1,0 +1,58 @@
+import SwiftUI
+import ClinicCore
+
+/// Milestone 2 preferences (ADR-038 lifted the "no window" rule for milestone 2). Keys are UserDefaults-backed.
+enum Prefs {
+    static let reopenLastSession = "ClinicReopenLastSession"
+    static let defaultModel = "ClinicDefaultModel"
+    static let notificationSound = "ClinicNotificationSound"
+    static let hookTrace = "ClinicHookTrace"
+}
+
+struct PreferencesView: View {
+    @AppStorage(Prefs.reopenLastSession) private var reopenLastSession = false
+    @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
+    @AppStorage(Prefs.notificationSound) private var notificationSound = false
+    @AppStorage(Prefs.hookTrace) private var hookTrace = false
+
+    var body: some View {
+        TabView {
+            Form {
+                Toggle("Reopen last session on launch", isOn: $reopenLastSession)
+                Picker("Default model for new sessions", selection: $defaultModel) {
+                    ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
+                }
+                Text("Per-project choices in the New Session sheet override this.").font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("General", systemImage: "gear") }
+
+            Form {
+                Toggle("Play a sound with notifications", isOn: $notificationSound)
+                Text("Notifications are posted when a session finishes or needs you and Clinic is not in front of it.").font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Notifications", systemImage: "bell") }
+
+            Form {
+                Toggle("Record hook payloads to a trace file", isOn: $hookTrace)
+                LabeledContent("Trace and state files") {
+                    Button("Reveal in Finder") {
+                        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Clinic")
+                        NSWorkspace.shared.activateFileViewerSelecting([dir])
+                    }
+                }
+                LabeledContent("Unified log") {
+                    Button("Copy log command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("/usr/bin/log show --info --predicate 'subsystem == \"com.r0adkll.clinic\" OR subsystem == \"com.mitchellh.ghostty\"' --last 10m --style compact", forType: .string)
+                    }
+                }
+                Text("Clinic never writes to ~/.claude. Its own state lives in Application Support.").font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+        }
+        .frame(width: 480, height: 260)
+    }
+}

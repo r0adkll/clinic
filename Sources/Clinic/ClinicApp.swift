@@ -15,6 +15,7 @@ struct ClinicApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
         .commands { ClinicCommands(tabs: appDelegate.tabs) }
+        Settings { PreferencesView() }
     }
 }
 
@@ -31,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hooks.start()
         sessions.start()
         tabs.start()
+        if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
+            Task {
+                await sessions.initialScan?.value
+                if let id = sessions.state.selectedSessionId, let s = sessions.sessions[id] { tabs.open(session: s) }
+            }
+        }
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") { tabs.newShell() }
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).

@@ -24,6 +24,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         content.body = body
         content.userInfo = ["sessionId": sessionId.rawValue]
         content.interruptionLevel = .timeSensitive
+        if UserDefaults.standard.bool(forKey: Prefs.notificationSound) { content.sound = .default }
         let request = UNNotificationRequest(identifier: "\(sessionId.rawValue)-\(Date().timeIntervalSince1970)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { Self.log.error("notification post: \(error, privacy: .public)") }

@@ -47,7 +47,8 @@ struct NewSessionSheet: View {
 
     private func loadDefaults() {
         let m = sessions.state.lastModelByProject[projectPath]
-        if let m { if modelChoices.contains(m) { modelChoice = m } else { modelChoice = "custom"; customModel = m } } else { modelChoice = "default" }
+        if let m { if modelChoices.contains(m) { modelChoice = m } else { modelChoice = "custom"; customModel = m } }
+        else { modelChoice = UserDefaults.standard.string(forKey: Prefs.defaultModel) ?? "default" }
         worktree = sessions.state.lastWorktreeByProject[projectPath] ?? false
     }
 

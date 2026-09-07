@@ -22,6 +22,8 @@ final class SessionStore {
     private let watcher: DirectoryWatcher
     private let stateStore: StateStore
     private var watchTask: Task<Void, Never>?
+    /// Completes after the first full scan; used by launch restoration.
+    private(set) var initialScan: Task<Void, Never>?
 
     init(paths: ClaudePaths = ClaudePaths(), stateURL: URL = StateStore.defaultURL()) {
         scanner = SessionScanner(paths: paths)
@@ -30,7 +32,7 @@ final class SessionStore {
     }
 
     func start() {
-        Task {
+        initialScan = Task {
             state = await stateStore.state
             await rescan()
             watcher.start()

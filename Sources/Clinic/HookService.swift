@@ -14,7 +14,7 @@ final class HookService {
     private var pumpTask: Task<Void, Never>?
     /// ADR-027 / ADR-038: hidden `defaults write com.r0adkll.clinic ClinicHookTrace -bool YES` appends every payload to trace/<session>.jsonl.
     let traceDirectory: URL
-    var traceEnabled: Bool { UserDefaults.standard.bool(forKey: "ClinicHookTrace") }
+    var traceEnabled: Bool { UserDefaults.standard.bool(forKey: Prefs.hookTrace) }
 
     init(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) {
         let dir = appSupport.appendingPathComponent("Clinic", isDirectory: true)
