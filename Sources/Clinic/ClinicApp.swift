@@ -11,6 +11,7 @@ struct ClinicApp: App {
             RootView()
                 .environment(appDelegate.tabs)
                 .environment(appDelegate.sessions)
+                .environment(appDelegate.history)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -24,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let sessions = SessionStore()
     let hooks = HookService()
     let notifications = NotificationService()
-    lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications)
+    let history = NotificationStore()
+    lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         scrubInheritedClaudeEnvironment()

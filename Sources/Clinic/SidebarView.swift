@@ -96,6 +96,9 @@ struct SessionContextMenu: View {
         Button("Rename…") { SessionActions.rename(summary, sessions: sessions) }
         if sessions.state.manualNames[summary.id] != nil { Button("Clear Custom Name") { sessions.rename(summary.id, to: nil) } }
         Button(sessions.isFavorite(summary.id) ? "Remove from Favorites" : "Add to Favorites") { sessions.toggleFavorite(summary.id) }
+        Button(sessions.state.mutedSessions.contains(summary.id) ? "Unmute Notifications" : "Mute Notifications") {
+            sessions.update { s in if s.mutedSessions.contains(summary.id) { s.mutedSessions.remove(summary.id) } else { s.mutedSessions.insert(summary.id) } }
+        }
         if sessions.isArchived(summary.id) {
             Button("Unarchive") { sessions.unarchive(summary.id) }
         } else {
@@ -142,6 +145,7 @@ struct SessionRow: View {
                 Text(summary.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
             if sessions.isFavorite(summary.id) { Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow) }
         }
         .padding(.vertical, 2)

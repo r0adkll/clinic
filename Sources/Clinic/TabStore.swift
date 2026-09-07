@@ -50,9 +50,17 @@ final class TabStore {
     let sessions: SessionStore
     let hooks: HookService
     let notifications: NotificationService
+    let history: NotificationStore
 
-    init(sessions: SessionStore, hooks: HookService, notifications: NotificationService) {
-        self.sessions = sessions; self.hooks = hooks; self.notifications = notifications
+    init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
+        self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
+    }
+
+    /// Records to history and posts a system notification unless the session is muted (ADR-033, milestone 2).
+    private func notify(_ tab: Tab, sessionId: SessionID, body: String, kind: NotificationStore.Entry.Kind) {
+        history.record(sessionId: sessionId, title: tab.title, body: body, kind: kind)
+        guard !sessions.state.mutedSessions.contains(sessionId) else { return }
+        notifications.post(sessionId: sessionId, title: tab.title, body: body)
     }
 
     var selectedTab: Tab? { tabs.first { $0.id == selectedTabId } }
@@ -186,6 +194,7 @@ final class TabStore {
         for t in tabs { t.surface.isOccluded = (t.id != selectedTabId) }
         if let tab = selectedTab {
             tab.unread = false
+            if let id = tab.sessionId { history.markRead(sessionId: id) }
             if let id = tab.sessionId { sessions.update { $0.selectedSessionId = id } }
             updateBadge()
         }
@@ -257,12 +266,14 @@ final class TabStore {
         tab.state = new
         tab.errorBadge = (event.hookEventName == "StopFailure")
         let isFrontAndSelected = NSApp.isActive && selectedTabId == tab.id
-        if SessionStateMachine.isFinishedEdge(from: old, to: new) {
-            if !isFrontAndSelected { tab.unread = true; notifications.post(sessionId: event.sessionId, title: tab.title, body: "Finished") }
+        if event.hookEventName == "StopFailure" {
+            notify(tab, sessionId: event.sessionId, body: event.message ?? "The turn ended with an API error", kind: .error)
+        } else if SessionStateMachine.isFinishedEdge(from: old, to: new) {
+            if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: event.sessionId, body: "Finished", kind: .finished) }
         } else if new.isWaiting && !old.isWaiting {
             if !isFrontAndSelected {
-                let body = new == .waitingForPermission ? "Needs permission" : (event.message ?? "Waiting for input")
-                notifications.post(sessionId: event.sessionId, title: tab.title, body: body)
+                let permission = new == .waitingForPermission
+                notify(tab, sessionId: event.sessionId, body: permission ? "Needs permission" : (event.message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
             }
         }
         updateBadge()

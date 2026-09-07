@@ -12,8 +12,40 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var lastWorktreeByProject: [String: Bool] = [:]
     public var selectedSessionId: SessionID?
     public var windowFrame: [Double]?   // x, y, w, h
+    public var mutedSessions: Set<SessionID> = []
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions
+    }
+
+    /// Tolerant decoding so state files written by older builds keep loading when fields are added.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        manualNames = try Self.sessionMap(c, .manualNames, legacy: { $0 })
+        favorites = try c.decodeIfPresent(Set<SessionID>.self, forKey: .favorites) ?? []
+        archived = try Self.sessionMap(c, .archived, legacy: { ISO8601DateFormatter().date(from: $0) })
+        projectOrder = try c.decodeIfPresent([String].self, forKey: .projectOrder) ?? []
+        addedProjects = try c.decodeIfPresent([String].self, forKey: .addedProjects) ?? []
+        lastModelByProject = try c.decodeIfPresent([String: String].self, forKey: .lastModelByProject) ?? [:]
+        lastWorktreeByProject = try c.decodeIfPresent([String: Bool].self, forKey: .lastWorktreeByProject) ?? [:]
+        selectedSessionId = try c.decodeIfPresent(SessionID.self, forKey: .selectedSessionId)
+        windowFrame = try c.decodeIfPresent([Double].self, forKey: .windowFrame)
+        mutedSessions = try c.decodeIfPresent(Set<SessionID>.self, forKey: .mutedSessions) ?? []
+    }
+
+    /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that
+    /// pre-CodingKeyRepresentable builds wrote (values were strings in both legacy cases).
+    private static func sessionMap<T: Decodable>(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys, legacy: (String) -> T?) throws -> [SessionID: T] {
+        if let map = try? c.decodeIfPresent([SessionID: T].self, forKey: key) { return map }
+        guard let flat = try? c.decodeIfPresent([String].self, forKey: key) else { return [:] }
+        var out: [SessionID: T] = [:]
+        var i = 0
+        while i + 1 < flat.count { if let v = legacy(flat[i + 1]) { out[SessionID(flat[i])] = v }; i += 2 }
+        return out
+    }
 }
 
 /// Atomic, debounced JSON persistence.

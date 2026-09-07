@@ -27,6 +27,7 @@ struct RootView: View {
             ToolbarItemGroup {
                 Button { showNewSession = true } label: { Label("New Session", systemImage: "plus") }
                 Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }
+                NotificationBell()
             }
         }
         .navigationTitle(tabs.selectedTab?.title ?? "Clinic")

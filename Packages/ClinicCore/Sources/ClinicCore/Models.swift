@@ -2,9 +2,12 @@ import Foundation
 
 /// Vocabulary per ADR-025: Project, Session, Surface, Tab.
 
-public struct SessionID: Hashable, Codable, Sendable, CustomStringConvertible {
+public struct SessionID: Hashable, Codable, Sendable, CustomStringConvertible, CodingKeyRepresentable {
     public let rawValue: String
     public init(_ rawValue: String) { self.rawValue = rawValue.lowercased() }
+    /// Lets `[SessionID: T]` encode as a JSON object instead of a flat key/value array.
+    public var codingKey: CodingKey { StringKey(rawValue) }
+    public init?<T: CodingKey>(codingKey: T) { self.init(codingKey.stringValue) }
     public static func generate() -> SessionID { SessionID(UUID().uuidString) }
     public var description: String { rawValue }
     public init(from decoder: Decoder) throws { self.init(try decoder.singleValueContainer().decode(String.self)) }
@@ -12,6 +15,13 @@ public struct SessionID: Hashable, Codable, Sendable, CustomStringConvertible {
 }
 
 /// Everything Clinic knows about a session from its transcript on disk (ADR-029).
+struct StringKey: CodingKey {
+    var stringValue: String; var intValue: Int? { nil }
+    init(_ s: String) { stringValue = s }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { nil }
+}
+
 public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
     public var id: SessionID
     public var transcriptPath: String
