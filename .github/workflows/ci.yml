@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+      - name: Tools
+        run: brew install xcodegen zig@0.15 gettext
+      - name: Cache GhosttyKit.xcframework
+        id: ghostty-cache
+        uses: actions/cache@v4
+        with:
+          path: Packages/GhosttyBridge/GhosttyKit.xcframework
+          key: ghosttykit-${{ hashFiles('.gitmodules') }}-${{ hashFiles('vendor/ghostty/build.zig.zon') }}-$(git -C vendor/ghostty rev-parse HEAD)-zig0.15.2
+      - name: Metal toolchain
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        run: xcodebuild -downloadComponent MetalToolchain || true
+      - name: Build GhosttyKit
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        run: scripts/build-ghostty.sh
+      - name: Core tests
+        run: swift test --package-path Packages/ClinicCore
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build app
+        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO build | tail -50
+      - name: Bridge smoke test
+        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -derivedDataPath build CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO test | tail -50

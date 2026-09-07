@@ -1,0 +1,21 @@
+# Xcode / build
+*.xcodeproj
+*.xcworkspace
+build/
+DerivedData/
+.build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+
+# libghostty build output (rebuilt by scripts/build-ghostty.sh)
+Packages/GhosttyBridge/GhosttyKit.xcframework
+vendor/ghostty/zig-out/
+vendor/ghostty/macos/GhosttyKit.xcframework
+vendor/ghostty/.zig-cache/
+
+# Local-only regression transcripts (ADR-044)
+Fixtures/local/
+
+# macOS
+.DS_Store

@@ -1,0 +1,77 @@
+name: Clinic
+options:
+  bundleIdPrefix: com.r0adkll
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: 1
+    DEAD_CODE_STRIPPING: YES
+packages:
+  ClinicCore:
+    path: Packages/ClinicCore
+  GhosttyBridge:
+    path: Packages/GhosttyBridge
+targets:
+  Clinic:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Clinic
+    dependencies:
+      - package: ClinicCore
+      - package: GhosttyBridge
+      - target: clinic-hook
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.r0adkll.clinic
+        PRODUCT_NAME: Clinic
+        INFOPLIST_FILE: Sources/Clinic/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/Clinic/Clinic.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+    entitlements:
+      path: Sources/Clinic/Clinic.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.cs.allow-jit: false
+    info:
+      path: Sources/Clinic/Info.plist
+      properties:
+        CFBundleName: Clinic
+        CFBundleDisplayName: Clinic
+        LSMinimumSystemVersion: "15.0"
+        NSPrincipalClass: NSApplication
+        NSHumanReadableCopyright: "© 2026 Drew Heavner. MIT."
+        LSApplicationCategoryType: public.app-category.developer-tools
+  clinic-hook:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/clinic-hook
+    settings:
+      base:
+        PRODUCT_NAME: clinic-hook
+        SKIP_INSTALL: YES
+schemes:
+  Clinic:
+    build:
+      targets:
+        Clinic: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: ClinicCore/ClinicCoreTests
+        - package: GhosttyBridge/GhosttyBridgeTests

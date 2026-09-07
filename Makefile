@@ -1,0 +1,22 @@
+.PHONY: setup ghostty project build test clean
+
+setup:
+	brew install xcodegen zig@0.15 gettext
+	git submodule update --init
+	@xcrun -sdk macosx metal --version >/dev/null 2>&1 || echo "Run: xcodebuild -downloadComponent MetalToolchain"
+
+ghostty:
+	scripts/build-ghostty.sh
+
+project:
+	xcodegen generate
+
+build: project
+	xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build build | tail -20
+
+test:
+	swift test --package-path Packages/ClinicCore
+	xcodebuild -project Clinic.xcodeproj -scheme Clinic -derivedDataPath build test | tail -20
+
+clean:
+	rm -rf build Clinic.xcodeproj Packages/*/.build
