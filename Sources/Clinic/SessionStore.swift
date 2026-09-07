@@ -184,7 +184,7 @@ final class SessionStore {
         guard sessions[id] == nil else { return }
         let paths = ClaudePaths()
         let path = paths.projectsDirectory.appendingPathComponent(ClaudePaths.encodedProjectDirectoryName(for: cwd)).appendingPathComponent("\(id.rawValue).jsonl").path
-        let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
+        let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, firstPrompt: "New session", createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
         pending[id] = placeholder
         sessions[id] = placeholder
         update { s in
