@@ -68,7 +68,7 @@ final class SessionStore {
             guard isVisible(s), let p = ProjectGrouping.project(for: s) else { continue }
             byPath[p.path] = max(byPath[p.path] ?? .distantPast, s.activityDate)
         }
-        for added in state.addedProjects where byPath[added] == nil { byPath[added] = .distantPast }
+        for added in state.addedProjects where byPath[added] == nil && !state.removedProjects.contains(added) { byPath[added] = .distantPast }
         projects = byPath.keys.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }.map(Project.init(path:))
     }
 
@@ -85,7 +85,42 @@ final class SessionStore {
             .sorted { ($0.activityDate, $0.id.rawValue) > ($1.activityDate, $1.id.rawValue) }
     }
 
-    func isVisible(_ s: SessionSummary) -> Bool { showArchived || state.archived[s.id] == nil }
+    /// ADR-048: only owned sessions unless the hidden preference shows discovered ones; removed projects hide their sessions.
+    func isVisible(_ s: SessionSummary) -> Bool {
+        guard showArchived || state.archived[s.id] == nil else { return false }
+        guard let p = ProjectGrouping.project(for: s), !state.removedProjects.contains(p.path) else { return false }
+        return isOwned(s.id) || UserDefaults.standard.bool(forKey: "ClinicShowDiscoveredSessions")
+    }
+
+    func isOwned(_ id: SessionID) -> Bool { state.ownedSessions[id] != nil }
+
+    /// Adopts an on-disk session into Clinic (Import).
+    func adopt(_ summary: SessionSummary) {
+        guard !isOwned(summary.id) else { return }
+        let path = ProjectGrouping.project(for: summary)?.path ?? summary.cwd ?? ""
+        update { s in
+            s.ownedSessions[summary.id] = ClinicState.OwnedSession(projectPath: path, imported: true)
+            s.removedProjects.remove(path)
+        }
+    }
+
+    /// All on-disk sessions for the switcher, owned first, then the rest.
+    func allSessions(matching query: String) -> [SessionSummary] {
+        sessions.values
+            .filter { state.archived[$0.id] == nil && matches($0, query: query) }
+            .sorted { a, b in
+                let ao = isOwned(a.id), bo = isOwned(b.id)
+                if ao != bo { return ao }
+                return (a.activityDate, a.id.rawValue) > (b.activityDate, b.id.rawValue)
+            }
+    }
+
+    func removeProject(_ project: Project) {
+        update { s in
+            s.removedProjects.insert(project.path)
+            s.addedProjects.removeAll { $0 == project.path }
+        }
+    }
     func isArchived(_ id: SessionID) -> Bool { state.archived[id] != nil }
     func isFavorite(_ id: SessionID) -> Bool { state.favorites.contains(id) }
 
@@ -141,7 +176,7 @@ final class SessionStore {
         guard pending[id] != nil, !FileManager.default.fileExists(atPath: sessions[id]?.transcriptPath ?? "") else { return }
         pending[id] = nil
         sessions[id] = nil
-        rebuildProjects()
+        update { s in s.ownedSessions[id] = nil }
     }
 
     /// Placeholder rows for sessions launched by Clinic whose transcript does not exist yet (ADR-017).
@@ -152,6 +187,9 @@ final class SessionStore {
         let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
         pending[id] = placeholder
         sessions[id] = placeholder
-        rebuildProjects()
+        update { s in
+            s.ownedSessions[id] = ClinicState.OwnedSession(projectPath: ProjectGrouping.projectPath(forCwd: cwd))
+            s.removedProjects.remove(ProjectGrouping.projectPath(forCwd: cwd))
+        }
     }
 }

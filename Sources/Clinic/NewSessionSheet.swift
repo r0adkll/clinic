@@ -6,6 +6,7 @@ struct NewSessionSheet: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
     @Environment(\.dismiss) private var dismiss
+    var initialProject: String? = nil
 
     @State private var projectPath: String = ""
     @State private var modelChoice: String = "default"
@@ -39,7 +40,7 @@ struct NewSessionSheet: View {
         .padding(20)
         .frame(width: 520)
         .onAppear {
-            projectPath = tabs.selectedTab?.projectPath ?? sessions.projects.first?.path ?? ""
+            projectPath = initialProject ?? tabs.selectedTab?.projectPath ?? sessions.projects.first?.path ?? ""
             loadDefaults()
         }
         .onChange(of: projectPath) { loadDefaults() }

@@ -13,11 +13,24 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var selectedSessionId: SessionID?
     public var windowFrame: [Double]?   // x, y, w, h
     public var mutedSessions: Set<SessionID> = []
+    /// Sessions Clinic started or imported (ADR-048). The sidebar shows only these.
+    public var ownedSessions: [SessionID: OwnedSession] = [:]
+    /// Projects the user removed from the sidebar (ADR-050); their sessions stay owned but hidden.
+    public var removedProjects: Set<String> = []
 
     public init() {}
 
+    public struct OwnedSession: Codable, Sendable, Equatable {
+        public var projectPath: String
+        public var addedAt: Date
+        public var imported: Bool
+        public init(projectPath: String, addedAt: Date = Date(), imported: Bool = false) {
+            self.projectPath = projectPath; self.addedAt = addedAt; self.imported = imported
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions
+        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -34,6 +47,8 @@ public struct ClinicState: Codable, Sendable, Equatable {
         selectedSessionId = try c.decodeIfPresent(SessionID.self, forKey: .selectedSessionId)
         windowFrame = try c.decodeIfPresent([Double].self, forKey: .windowFrame)
         mutedSessions = try c.decodeIfPresent(Set<SessionID>.self, forKey: .mutedSessions) ?? []
+        ownedSessions = (try? c.decodeIfPresent([SessionID: OwnedSession].self, forKey: .ownedSessions)) ?? [:]
+        removedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .removedProjects) ?? []
     }
 
     /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that

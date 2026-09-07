@@ -106,6 +106,7 @@ final class TabStore {
     /// Opens (or focuses, ADR-041) a session known from disk.
     func open(session summary: SessionSummary) {
         if let existing = tab(for: summary.id) { selectedTabId = existing.id; return }
+        sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         let launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
         guard let tab = makeTab(kind: .session(summary.id), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),

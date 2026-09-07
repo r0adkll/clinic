@@ -33,7 +33,7 @@ jobs:
       - name: Core tests
         run: swift test --package-path Packages/ClinicCore
       - name: Generate project
-        run: xcodegen generate
+        run: cp -n Local.xcconfig.example Local.xcconfig; xcodegen generate
       - name: Build app
         run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO build | tail -50
       - name: Bridge smoke test

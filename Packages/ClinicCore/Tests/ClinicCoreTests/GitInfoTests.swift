@@ -3,6 +3,13 @@ import Testing
 @testable import ClinicCore
 
 @Suite struct GitInfoTests {
+    @Test func remoteToWebURL() {
+        #expect(GitInfo.webURL(fromRemote: "git@github.com:r0adkll/clinic.git")?.absoluteString == "https://github.com/r0adkll/clinic")
+        #expect(GitInfo.webURL(fromRemote: "https://github.com/r0adkll/clinic.git")?.absoluteString == "https://github.com/r0adkll/clinic")
+        #expect(GitInfo.webURL(fromRemote: "ssh://git@github.com/r0adkll/clinic.git")?.absoluteString == "https://github.com/r0adkll/clinic")
+        #expect(GitInfo.webURL(fromRemote: "/local/path") == nil)
+    }
+
     @Test func branchInFreshRepo() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clinic-git-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

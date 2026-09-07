@@ -109,6 +109,7 @@ struct ClinicCommands: Commands {
         }
         CommandGroup(after: .sidebar) {
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
+            Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.object(forKey: "ClinicShowTabBar") as? Bool ?? true }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
         }
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)

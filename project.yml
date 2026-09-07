@@ -6,6 +6,9 @@ options:
   xcodeVersion: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"

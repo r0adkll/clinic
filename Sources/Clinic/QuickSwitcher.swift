@@ -10,11 +10,8 @@ struct QuickSwitcher: View {
     @State private var highlighted = 0
     @FocusState private var focused: Bool
 
-    private var results: [SessionSummary] {
-        sessions.sessions.values.filter { sessions.isVisible($0) && sessions.matches($0, query: query) }
-            .sorted { ($0.activityDate, $0.id.rawValue) > ($1.activityDate, $1.id.rawValue) }
-            .prefix(30).map { $0 }
-    }
+    /// Owned sessions first, then every other transcript on disk; opening one imports it (ADR-048).
+    private var results: [SessionSummary] { Array(sessions.allSessions(matching: query).prefix(40)) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +36,7 @@ struct QuickSwitcher: View {
                                 Text(ProjectGrouping.project(for: s)?.name ?? "").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            if !sessions.isOwned(s.id) { Text("import").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule()) }
                             Text(s.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 2)

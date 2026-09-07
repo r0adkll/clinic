@@ -9,15 +9,6 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: selection) {
-            let shells = tabs.tabs.filter { $0.kind == .shell }
-            if !shells.isEmpty && query.isEmpty {
-                Section("Shells") {
-                    ForEach(shells) { tab in
-                        Label(tab.title, systemImage: "terminal").tag(SidebarItem.tab(tab.id))
-                            .contextMenu { Button("Close") { tabs.close(tab) } }
-                    }
-                }
-            }
             let favorites = sessions.favoriteSessions.filter { sessions.matches($0, query: query) }
             if !favorites.isEmpty {
                 Section("Favorites") {
@@ -30,11 +21,7 @@ struct SidebarView: View {
                     Section {
                         ForEach(rows) { summary in row(summary) }
                     } header: {
-                        HStack {
-                            Text(project.name).help(project.path)
-                            Spacer()
-                            Text("\(rows.count)").foregroundStyle(.tertiary).monospacedDigit()
-                        }
+                        ProjectHeader(project: project, count: rows.count)
                     }
                 }
             }
@@ -43,7 +30,7 @@ struct SidebarView: View {
         .searchable(text: $query, placement: .sidebar, prompt: "Filter sessions")
         .overlay {
             if sessions.projects.isEmpty && !sessions.isScanning {
-                ContentUnavailableView("No sessions yet", systemImage: "tray", description: Text("Start one with ⌘N."))
+                ContentUnavailableView("No sessions yet", systemImage: "tray", description: Text("Start one with ⌘N, or import an existing session with ⌘K."))
             }
         }
     }
@@ -134,15 +121,28 @@ enum SessionActions {
 
 struct SessionRow: View {
     @Environment(SessionStore.self) private var sessions
+    @Environment(TabStore.self) private var tabs
     let summary: SessionSummary
     let tab: Tab?
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
             StateGlyph(tab: tab)
             VStack(alignment: .leading, spacing: 2) {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
-                Text(summary.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                if hovering {
+                    HStack(spacing: 10) {
+                        if let tab { Button("Close") { tabs.close(tab) } }
+                        Button(sessions.isArchived(summary.id) ? "Unarchive" : "Archive") {
+                            if sessions.isArchived(summary.id) { sessions.unarchive(summary.id) } else { SessionActions.archive(summary, sessions: sessions, tabs: tabs) }
+                        }
+                        Button(sessions.isFavorite(summary.id) ? "Unstar" : "Star") { sessions.toggleFavorite(summary.id) }
+                    }
+                    .buttonStyle(.plain).font(.caption).foregroundStyle(Color.accentColor)
+                } else {
+                    Text(summary.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
             if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
@@ -150,6 +150,7 @@ struct SessionRow: View {
         }
         .padding(.vertical, 2)
         .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
+        .onHover { hovering = $0 }
     }
 }
 
