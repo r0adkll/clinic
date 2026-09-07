@@ -14,11 +14,15 @@ struct PreferencesView: View {
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage(Prefs.notificationSound) private var notificationSound = false
     @AppStorage(Prefs.hookTrace) private var hookTrace = false
+    @AppStorage("ClinicShowUsage") private var showUsage = true
+    @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
     var body: some View {
         TabView {
             Form {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
+                Toggle("Show tab bar", isOn: $showTabBar)
+                Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
                 Picker("Default model for new sessions", selection: $defaultModel) {
                     ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
                 }

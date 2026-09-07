@@ -7,7 +7,16 @@ struct SidebarView: View {
     @Binding var showNewSession: Bool
     @State private var query = ""
 
+    @AppStorage("ClinicShowUsage") private var showUsage = true
+
     var body: some View {
+        VStack(spacing: 0) {
+            sessionList
+            if showUsage { Divider(); UsagePanel() }
+        }
+    }
+
+    private var sessionList: some View {
         List(selection: selection) {
             let favorites = sessions.favoriteSessions.filter { sessions.matches($0, query: query) }
             if !favorites.isEmpty {

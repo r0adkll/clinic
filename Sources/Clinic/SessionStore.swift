@@ -29,11 +29,11 @@ final class SessionStore {
         scanner = SessionScanner(paths: paths)
         watcher = DirectoryWatcher(root: paths.projectsDirectory)
         stateStore = StateStore(url: stateURL)
+        state = stateStore.initialState
     }
 
     func start() {
         initialScan = Task {
-            state = await stateStore.state
             await rescan()
             watcher.start()
             watchTask = Task { [watcher] in

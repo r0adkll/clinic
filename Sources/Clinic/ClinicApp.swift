@@ -12,6 +12,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.tabs)
                 .environment(appDelegate.sessions)
                 .environment(appDelegate.history)
+                .environment(appDelegate.usage)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let hooks = HookService()
     let notifications = NotificationService()
     let history = NotificationStore()
+    let usage = UsageService()
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hooks.start()
         sessions.start()
         tabs.start()
+        if UserDefaults.standard.object(forKey: "ClinicShowUsage") as? Bool ?? true { usage.start() }
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
                 await sessions.initialScan?.value

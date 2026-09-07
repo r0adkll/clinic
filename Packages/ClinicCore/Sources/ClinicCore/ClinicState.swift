@@ -69,11 +69,15 @@ public actor StateStore {
     private var pendingWrite: Task<Void, Never>?
     private var current: ClinicState
     private let debounce: Duration
+    /// State as loaded from disk at init; lets callers seed synchronously before any actor hop.
+    public nonisolated let initialState: ClinicState
 
     public init(url: URL, debounce: Duration = .milliseconds(500)) {
         self.url = url
         self.debounce = debounce
-        self.current = (try? Self.load(from: url)) ?? ClinicState()
+        let loaded = (try? Self.load(from: url)) ?? ClinicState()
+        self.current = loaded
+        self.initialState = loaded
     }
 
     public static func defaultURL(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) -> URL {
