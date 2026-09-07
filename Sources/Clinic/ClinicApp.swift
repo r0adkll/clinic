@@ -31,12 +31,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
         notifications.requestAuthorization()
         hooks.start()
         sessions.start()
         tabs.start()
-        if UserDefaults.standard.object(forKey: "ClinicShowUsage") as? Bool ?? true { usage.start() }
+        if UserDefaults.standard.bool(forKey: "ClinicShowUsage") { usage.start() }
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
                 await sessions.initialScan?.value
@@ -113,7 +114,7 @@ struct ClinicCommands: Commands {
         }
         CommandGroup(after: .sidebar) {
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
-            Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.object(forKey: "ClinicShowTabBar") as? Bool ?? true }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
+            Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
         }
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
