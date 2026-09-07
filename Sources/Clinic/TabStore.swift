@@ -23,6 +23,8 @@ final class Tab: Identifiable {
     var lastResume: ClaudeLaunch?
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
     var pendingInput: String?
+    var gitBranch: String?
+    var model: String?
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -107,6 +109,7 @@ final class TabStore {
         let launch = ClaudeLaunch(mode: .new(id: id), model: model, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path)
         guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }
         tab.lastResume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        tab.model = model
         sessions.registerPending(id: id, cwd: projectPath)
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
@@ -143,6 +146,7 @@ final class TabStore {
             tab.pendingInput = initialInput
             surface.delegate = self
             tabs.append(tab)
+            refreshFooter(tab)
             if initialInput != nil {
                 Task { [weak self, weak tab] in
                     try? await Task.sleep(for: .milliseconds(Self.initialInputFallbackMs))
@@ -159,6 +163,16 @@ final class TabStore {
 
     /// Fallback if the shell never reports a prompt (no shell integration).
     static let initialInputFallbackMs = 700
+
+    /// Refresh footer facts for a tab (ADR-013 H, milestone 2): branch from git, model from the transcript.
+    func refreshFooter(_ tab: Tab) {
+        let dir = tab.pwd ?? tab.projectPath
+        Task { [weak tab] in
+            let branch = await GitInfo.branch(at: dir)
+            await MainActor.run { tab?.gitBranch = branch }
+        }
+        if let id = tab.sessionId, let s = sessions.sessions[id], let m = s.model { tab.model = m }
+    }
 
     private func flushPendingInput(_ tab: Tab) {
         guard let text = tab.pendingInput else { return }
@@ -234,8 +248,10 @@ final class TabStore {
             return
         }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
-        if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" {
-            Task { await sessions.refresh(transcriptPath: path); self.refreshTitle(tab) }
+        if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
+            Task { await sessions.refresh(transcriptPath: path); self.refreshTitle(tab); self.refreshFooter(tab) }
+        } else if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" {
+            refreshFooter(tab)
         }
         guard let old = tab.state, let new = SessionStateMachine.reduce(old, event: event) else { return }
         tab.state = new
@@ -281,8 +297,12 @@ extension TabStore: GhosttySurfaceDelegate {
         case .ringBell: NSSound.beep(); return true
         case .setTitle(let t): if let tab, tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t }; return true
         case .pwd(let p):
-            tab?.pwd = p
-            if let tab { flushPendingInput(tab) }
+            if let tab {
+                let changed = tab.pwd != p
+                tab.pwd = p
+                flushPendingInput(tab)
+                if changed { refreshFooter(tab) }
+            }
             return true
         case .progressReport, .commandFinished, .mouseShape, .colorScheme: return true
         case .quit: NSApp.terminate(nil); return true

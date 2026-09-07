@@ -37,6 +37,13 @@ struct DetailView: View {
     @Environment(TabStore.self) private var tabs
 
     var body: some View {
+        VStack(spacing: 0) {
+            terminalArea
+            if let tab = tabs.selectedTab { Divider(); TabFooter(tab: tab) }
+        }
+    }
+
+    private var terminalArea: some View {
         ZStack {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -55,6 +62,53 @@ struct DetailView: View {
                 }
             }
         }
+    }
+}
+
+/// Model, branch and cwd for the selected tab (milestone 2, Collins footer).
+struct TabFooter: View {
+    let tab: Tab
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let model = tab.model {
+                Label(Self.shortModel(model), systemImage: "cpu").help(model)
+            }
+            if let branch = tab.gitBranch {
+                Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+            }
+            if let pwd = tab.pwd {
+                Button {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pwd, forType: .string)
+                } label: {
+                    Label(Self.abbreviate(pwd), systemImage: "folder").lineLimit(1).truncationMode(.head)
+                }
+                .buttonStyle(.plain)
+                .help("Click to copy: \(pwd)")
+            }
+            Spacer()
+            if let pid = tab.surface.foregroundPID { Text("pid " + String(pid)).foregroundStyle(.tertiary).monospacedDigit() }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    static func abbreviate(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// "claude-opus-5" → "Opus 5", "claude-haiku-4-5-20251001" → "Haiku 4.5".
+    static func shortModel(_ id: String) -> String {
+        var parts = id.split(separator: "-").map(String.init)
+        if parts.first == "claude" { parts.removeFirst() }
+        parts.removeAll { $0.count == 8 && Int($0) != nil }
+        guard let family = parts.first else { return id }
+        let version = parts.dropFirst().joined(separator: ".")
+        return family.capitalized + (version.isEmpty ? "" : " " + version)
     }
 }
 
