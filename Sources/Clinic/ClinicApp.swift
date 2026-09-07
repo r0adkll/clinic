@@ -44,7 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// disable transcript saving. Shells spawned by libghostty inherit Clinic's environment, so unset them here.
     private func scrubInheritedClaudeEnvironment() {
         let keep: Set<String> = ["CLAUDE_CONFIG_DIR"]
-        for key in ProcessInfo.processInfo.environment.keys where (key == "CLAUDECODE" || key.hasPrefix("CLAUDE_CODE_")) && !keep.contains(key) {
+        let exact: Set<String> = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"]
+        for key in ProcessInfo.processInfo.environment.keys where (exact.contains(key) || key.hasPrefix("CLAUDE_CODE_")) && !keep.contains(key) {
             unsetenv(key)
         }
     }
