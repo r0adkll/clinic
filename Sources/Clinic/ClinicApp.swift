@@ -26,12 +26,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        scrubInheritedClaudeEnvironment()
         notifications.requestAuthorization()
         hooks.start()
         sessions.start()
         tabs.start()
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") { tabs.newShell() }
+        // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
+        if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
+            tabs.newSession(projectPath: path, model: "haiku", worktree: false)
+        }
+    }
+
+    /// If Clinic was launched from inside a Claude Code session (e.g. `open` from a terminal), the CLI's
+    /// marker variables would make every session Clinic starts look like a nested child session and
+    /// disable transcript saving. Shells spawned by libghostty inherit Clinic's environment, so unset them here.
+    private func scrubInheritedClaudeEnvironment() {
+        let keep: Set<String> = ["CLAUDE_CONFIG_DIR"]
+        for key in ProcessInfo.processInfo.environment.keys where (key == "CLAUDECODE" || key.hasPrefix("CLAUDE_CODE_")) && !keep.contains(key) {
+            unsetenv(key)
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

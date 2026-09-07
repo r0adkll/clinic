@@ -15,12 +15,15 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
       - name: Tools
         run: brew install xcodegen zig@0.15 gettext
+      - name: Submodule revision
+        id: sub
+        run: echo "sha=$(git -C vendor/ghostty rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache GhosttyKit.xcframework
         id: ghostty-cache
         uses: actions/cache@v4
         with:
           path: Packages/GhosttyBridge/GhosttyKit.xcframework
-          key: ghosttykit-${{ hashFiles('.gitmodules') }}-${{ hashFiles('vendor/ghostty/build.zig.zon') }}-$(git -C vendor/ghostty rev-parse HEAD)-zig0.15.2
+          key: ghosttykit-${{ steps.sub.outputs.sha }}-zig0.15.2-${{ runner.arch }}
       - name: Metal toolchain
         if: steps.ghostty-cache.outputs.cache-hit != 'true'
         run: xcodebuild -downloadComponent MetalToolchain || true

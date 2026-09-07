@@ -10,6 +10,8 @@ final class SessionStore {
     private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "sessions")
 
     private(set) var sessions: [SessionID: SessionSummary] = [:]
+    /// Clinic-launched sessions whose transcript has not appeared on disk yet (ADR-017).
+    private var pending: [SessionID: SessionSummary] = [:]
     private(set) var projects: [Project] = []
     private(set) var state = ClinicState()
     private(set) var isScanning = false
@@ -40,7 +42,8 @@ final class SessionStore {
         isScanning = true
         let found = await scanner.scanAll()
         var map: [SessionID: SessionSummary] = [:]
-        for s in found { map[s.id] = s }
+        for s in found { map[s.id] = s; pending[s.id] = nil }
+        for (id, p) in pending where map[id] == nil { map[id] = p }
         sessions = map
         rebuildProjects()
         isScanning = false
@@ -49,6 +52,7 @@ final class SessionStore {
     /// Re-read one transcript (called when a hook reports activity so the sidebar updates before the watcher fires).
     func refresh(transcriptPath: String) async {
         if let s = await scanner.scan(file: URL(fileURLWithPath: transcriptPath)) {
+            pending[s.id] = nil
             sessions[s.id] = s
             rebuildProjects()
         }
@@ -88,7 +92,9 @@ final class SessionStore {
         guard sessions[id] == nil else { return }
         let paths = ClaudePaths()
         let path = paths.projectsDirectory.appendingPathComponent(ClaudePaths.encodedProjectDirectoryName(for: cwd)).appendingPathComponent("\(id.rawValue).jsonl").path
-        sessions[id] = SessionSummary(id: id, transcriptPath: path, cwd: cwd, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
+        let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
+        pending[id] = placeholder
+        sessions[id] = placeholder
         rebuildProjects()
     }
 }
