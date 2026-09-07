@@ -22,7 +22,6 @@ struct GitPage: View {
                 }
             }
         }
-        .frame(minWidth: 380)
         .alert(model.confirmDiscardTitle, isPresented: Binding(get: { model.confirmDiscard != nil }, set: { if !$0 { model.confirmDiscard = nil } })) {
             Button("Discard", role: .destructive) { model.confirmDiscard?(); model.confirmDiscard = nil }
             Button("Cancel", role: .cancel) { model.confirmDiscard = nil }

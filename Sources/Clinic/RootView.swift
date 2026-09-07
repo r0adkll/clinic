@@ -79,15 +79,9 @@ struct TabSurfaces: View {
     var body: some View {
         switch tab.rightPane {
         case .git:
-            HSplitView {
-                terminals.frame(minWidth: 360).layoutPriority(1)
-                if let git = tab.gitPage { GitPage(tab: tab, model: git).frame(minWidth: 380, maxWidth: .infinity) }
-            }
+            RightSplit { terminals } right: { if let git = tab.gitPage { GitPage(tab: tab, model: git) } }
         case .pr(let ref):
-            HSplitView {
-                terminals.frame(minWidth: 360).layoutPriority(1)
-                PRPage(tab: tab, ref: ref).frame(minWidth: 380, maxWidth: .infinity)
-            }
+            RightSplit { terminals } right: { PRPage(tab: tab, ref: ref) }
         case .none:
             terminals
         }

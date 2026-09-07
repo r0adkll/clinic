@@ -35,7 +35,6 @@ struct PRPage: View {
             }
             if let error = prs.errors[ref.id], prs.pullRequest(for: ref) != nil { Divider(); Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).padding(6) }
         }
-        .frame(minWidth: 380)
         .task(id: ref.id) { if prs.pullRequest(for: ref) == nil { await prs.refresh(ref) } }
         .alert(confirm?.title ?? "", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button("Cancel", role: .cancel) { confirm = nil }
