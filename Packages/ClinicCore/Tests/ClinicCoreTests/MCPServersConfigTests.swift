@@ -21,7 +21,7 @@ import Testing
     @Test func redactsSecrets() {
         #expect(MCPServerEntry.redact("npx mcp-remote https://x/ --header Authorization: Bearer QNKf1v1YLxJQe6") == "npx mcp-remote https://x/ --header Authorization: Bearer ••••••")
         #expect(MCPServerEntry.redact("https://api.example.com/mcp?token=abc123def") == "https://api.example.com/mcp?token=••••••")
-        #expect(MCPServerEntry.redact("--key sk-ant-1234567890abcdef") == "--key sk-a••••••")
+        #expect(MCPServerEntry.redact("--key sk-ant-1234567890abcdef") == "--key sk-ant-••••••")
         #expect(MCPServerEntry.redact("hardcover mcp serve") == "hardcover mcp serve")
     }
 }
