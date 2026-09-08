@@ -17,7 +17,7 @@ struct ProjectHeader: View {
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: Capsule())
             Spacer(minLength: 4)
             if hovering {
-                Button { tabs.startNewChat(projectPath: project.path) } label: {
+                Button { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) } label: {
                     Image(systemName: "plus.circle.fill").font(.body)
                 }.buttonStyle(.borderless).help("New session in \(project.name)")
             }
@@ -41,7 +41,7 @@ struct ProjectMenu: View {
     @State private var remote: URL?
 
     var body: some View {
-        Button("New Session") { tabs.startNewChat(projectPath: project.path) }
+        Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }
         Divider()

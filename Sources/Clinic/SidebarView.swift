@@ -26,10 +26,8 @@ struct SidebarView: View {
             }
             ForEach(sessions.projects) { project in
                 let rows = sessions.sessions(in: project).filter { sessions.matches($0, query: query) }
-                let drafts = query.isEmpty ? sessions.state.newChatDrafts.filter { $0.projectPath == project.path } : []
                 if !rows.isEmpty || query.isEmpty {
                     Section {
-                        ForEach(drafts) { d in DraftRow(draft: d).tag(SidebarItem.draft(d.id)) }
                         ForEach(rows) { summary in row(summary) }
                     } header: {
                         ProjectHeader(project: project, count: rows.count)
@@ -58,34 +56,12 @@ struct SidebarView: View {
 enum SidebarItem: Hashable {
     case session(SessionID)
     case tab(UUID)
-    case draft(UUID)
-}
-
-struct DraftRow: View {
-    @Environment(TabStore.self) private var tabs
-    let draft: ClinicState.NewChatDraft
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "pencil").font(.caption).foregroundStyle(.secondary).frame(width: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(draft.title).lineLimit(1)
-                Text("Draft · \(draft.updatedAt, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
-        .contextMenu {
-            Button("Open") { tabs.openDraft(draft) }
-            Button("Discard", role: .destructive) { tabs.discardDraft(NewChatDraftModel(draft)) }
-        }
-    }
 }
 
 extension SidebarView {
     var selection: Binding<SidebarItem?> {
         Binding(
             get: {
-                if let d = tabs.editingDraft { return .draft(d.id) }
                 guard let tab = tabs.selectedTab else { return nil }
                 if let id = tab.sessionId { return .session(id) }
                 return .tab(tab.id)
@@ -97,8 +73,6 @@ extension SidebarView {
                     else if let summary = sessions.sessions[id] { tabs.open(session: summary) }
                 case .tab(let id)?:
                     tabs.selectedTabId = id
-                case .draft(let id)?:
-                    if let d = sessions.state.newChatDrafts.first(where: { $0.id == id }) { tabs.openDraft(d) }
                 case nil:
                     break
                 }

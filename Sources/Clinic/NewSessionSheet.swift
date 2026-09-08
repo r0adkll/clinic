@@ -12,8 +12,10 @@ struct NewSessionSheet: View {
     @State private var modelChoice: String = "default"
     @State private var customModel: String = ""
     @State private var worktree = false
+    @State private var effort = "default"
 
     private let modelChoices = ["default", "sonnet", "opus", "haiku", "custom"]
+    private let effortChoices = ["default", "low", "medium", "high", "xhigh", "max"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -28,6 +30,9 @@ struct NewSessionSheet: View {
                     ForEach(modelChoices, id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 if modelChoice == "custom" { TextField("Model id", text: $customModel) }
+                Picker("Effort", selection: $effort) {
+                    ForEach(effortChoices, id: \.self) { Text($0 == "xhigh" ? "Extra high" : $0.capitalized).tag($0) }
+                }
                 Toggle("Start in a new git worktree", isOn: $worktree)
             }
             .formStyle(.grouped)
@@ -64,8 +69,7 @@ struct NewSessionSheet: View {
 
     private func start() {
         let model: String? = switch modelChoice { case "default": nil; case "custom": customModel.isEmpty ? nil : customModel; default: modelChoice }
-        sessions.update { s in s.lastModelByProject[projectPath] = model; s.lastWorktreeByProject[projectPath] = worktree }
+        tabs.newSession(projectPath: projectPath, model: model, worktree: worktree, effort: effort == "default" ? nil : effort)
         dismiss()
-        tabs.startNewChat(projectPath: projectPath)
     }
 }

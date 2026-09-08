@@ -20,18 +20,6 @@ import Testing
         #expect(s.archived[SessionID("22222222-2222-3333-4444-555555555555")] != nil)
     }
 
-    @Test func draftsRoundTrip() throws {
-        var s = ClinicState()
-        s.sessionDrafts[SessionID("11111111-2222-3333-4444-555555555555")] = "half-written"
-        s.newChatDrafts.append(ClinicState.NewChatDraft(projectPath: "/p", prompt: "First line\nmore", model: "opus", effort: "high", worktree: true))
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        let back = try d.decode(ClinicState.self, from: try e.encode(s))
-        #expect(back.sessionDrafts.count == 1)
-        #expect(back.newChatDrafts.first?.title == "First line")
-        #expect(back.newChatDrafts.first?.worktree == true)
-    }
-
     @Test func sessionMapsEncodeAsObjects() throws {
         var s = ClinicState(); s.manualNames[SessionID("11111111-2222-3333-4444-555555555555")] = "x"
         let data = try JSONEncoder().encode(s)

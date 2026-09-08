@@ -33,8 +33,6 @@ final class Tab: Identifiable {
     var rightPane: RightPane = .none
     var gitPage: GitPageModel?
     var gitPageVisible: Bool { rightPane == .git }
-    /// Composer docked under the terminal (ADR-054).
-    var composerVisible = false
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -56,8 +54,6 @@ final class TabStore {
     var lastSurfaceError: String?
     private(set) var tabs: [Tab] = []
     var selectedTabId: UUID? { didSet { applySelection() } }
-    /// The new-chat screen currently shown in the content area, if any (ADR-054).
-    var editingDraft: NewChatDraftModel? { didSet { if editingDraft != nil { selectedTabId = nil } } }
 
     let sessions: SessionStore
     let hooks: HookService
@@ -140,58 +136,6 @@ final class TabStore {
         selectedTabId = tab.id
     }
 
-    // MARK: New-chat drafts (ADR-054)
-
-    /// Opens the new-chat screen for a project, or the folder picker when none is known.
-    func startNewChat(projectPath: String? = nil) {
-        guard let path = projectPath ?? selectedTab?.projectPath ?? editingDraft?.projectPath else {
-            NotificationCenter.default.post(name: .clinicNewSession, object: nil); return
-        }
-        let draft = ClinicState.NewChatDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false)
-        editingDraft = NewChatDraftModel(draft)
-    }
-
-    func openDraft(_ d: ClinicState.NewChatDraft) {
-        if let current = editingDraft, current.id == d.id { return }
-        editingDraft = NewChatDraftModel(d)
-    }
-
-    func persistDraft(_ model: NewChatDraftModel) {
-        let snap = model.snapshot
-        let hasText = !snap.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        sessions.update { s in
-            s.newChatDrafts.removeAll { $0.id == snap.id }
-            if hasText { s.newChatDrafts.append(snap) }
-        }
-    }
-
-    func discardDraft(_ model: NewChatDraftModel) {
-        let id = model.id
-        sessions.update { s in s.newChatDrafts.removeAll { $0.id == id } }
-        if editingDraft?.id == id { editingDraft = nil; selectedTabId = tabs.last?.id }
-    }
-
-    func closeDraftScreen() {
-        if let d = editingDraft { persistDraft(d) }
-        editingDraft = nil
-        selectedTabId = tabs.last?.id
-    }
-
-    func sendDraft(_ model: NewChatDraftModel) {
-        let snap = model.snapshot
-        let prompt = snap.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let id = model.id
-        sessions.update { s in s.newChatDrafts.removeAll { $0.id == id } }
-        editingDraft = nil
-        newSession(projectPath: snap.projectPath, model: snap.model, worktree: snap.worktree, effort: snap.effort, prompt: prompt.isEmpty ? nil : prompt)
-    }
-
-    /// ⌘.: toggle the composer under the selected session.
-    func toggleComposer(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab, tab.sessionId != nil else { return }
-        tab.composerVisible.toggle()
-    }
-
     func newShell(in directory: String? = nil) {
         let dir = directory ?? selectedTab?.pwd ?? selectedTab?.projectPath ?? FileManager.default.homeDirectoryForCurrentUser.path
         guard let tab = makeTab(kind: .shell, cwd: dir, projectPath: ProjectGrouping.projectPath(forCwd: dir), initialInput: nil, title: "Shell") else { return }
@@ -256,7 +200,6 @@ final class TabStore {
     // MARK: Selection / close (ADR-019, ADR-037)
 
     private func applySelection() {
-        if selectedTabId != nil, let d = editingDraft { persistDraft(d); editingDraft = nil }
         for t in tabs {
             let hidden = (t.id != selectedTabId)
             t.surface.isOccluded = hidden
