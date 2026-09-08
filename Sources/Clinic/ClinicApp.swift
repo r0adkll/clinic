@@ -79,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        if UserDefaults.standard.bool(forKey: "ClinicMCPServersOnLaunch") {
+            Task { try? await Task.sleep(for: .seconds(1)); NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }
+        }
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             tabs.newSession(projectPath: path, model: "haiku", worktree: false)
@@ -147,6 +150,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut("k", modifiers: .command)
         }
         CommandGroup(after: .sidebar) {
+            Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut("m", modifiers: [.command, .shift])
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
         }
@@ -171,4 +175,5 @@ extension Notification.Name {
     static let clinicNewSession = Notification.Name("com.r0adkll.clinic.newSession")
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
     static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
+    static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
 }

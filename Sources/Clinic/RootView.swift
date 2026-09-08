@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var showNewSession = false
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
+    @State private var showMCPServers = false
     @State private var newSessionProject: String?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
@@ -22,6 +23,8 @@ struct RootView: View {
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
+        .sheet(isPresented: $showMCPServers) { MCPServersSheet() }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in showMCPServers = true }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
             else if let id = tabs.selectedTab?.sessionId { detailsFor = sessions.sessions[id] }
