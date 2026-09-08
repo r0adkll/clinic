@@ -50,7 +50,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
         }
         args += ["--settings", settingsFilePath]
         if let mcpConfigPath, !mcpConfigPath.isEmpty { args += ["--mcp-config", mcpConfigPath] }
-        if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.append(prompt) }
+        // The prompt goes FIRST: `--mcp-config` (and other variadic options) would otherwise swallow it as another path.
+        if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.insert(prompt, at: 0) }
         return args
     }
 

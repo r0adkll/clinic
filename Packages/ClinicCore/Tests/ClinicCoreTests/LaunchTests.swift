@@ -17,9 +17,11 @@ import Testing
 
     @Test func promptAndEffortAreAppended() {
         let l = ClaudeLaunch(mode: .new(id: id), model: "opus", effort: "xhigh", settingsFilePath: "/tmp/h.json", prompt: "Fix the flaky test\nthen push")
-        #expect(l.arguments == ["--session-id", id.rawValue, "--model", "opus", "--effort", "xhigh", "--settings", "/tmp/h.json", "Fix the flaky test\nthen push"])
-        #expect(l.shellLine.hasSuffix("'Fix the flaky test\nthen push'\n"))
-        #expect(ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json", prompt: "   ").arguments.last == "/tmp/h.json")
+        #expect(l.arguments == ["Fix the flaky test\nthen push", "--session-id", id.rawValue, "--model", "opus", "--effort", "xhigh", "--settings", "/tmp/h.json"])
+        #expect(l.shellLine.hasPrefix("claude 'Fix the flaky test\nthen push' --session-id"))
+        #expect(ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json", prompt: "   ").arguments.first == "--session-id")
+        var m = ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json", prompt: "Where are we?"); m.mcpConfigPath = "/tmp/mcp.json"
+        #expect(m.arguments.first == "Where are we?" && m.arguments.suffix(2) == ["--mcp-config", "/tmp/mcp.json"])
     }
 
     @Test func mcpConfigFlagAndFile() throws {
