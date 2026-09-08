@@ -84,7 +84,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         showApp()
         tabs.selectedTabId = id
     }
-    @objc private func showApp() { NSApp.activate(); NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil) }
+    @objc private func showApp() { WindowLifecycle.showMainWindow() }
     @objc private func newSession() { showApp(); NotificationCenter.default.post(name: .clinicNewSession, object: tabs.selectedTab?.projectPath) }
     @objc private func quit() { NSApp.terminate(nil) }
 }

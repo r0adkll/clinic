@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let backgroundAgents = BackgroundAgentsService()
     let updates = UpdateCheck()
     var statusItem: StatusItemController?
+    lazy var windowLifecycle = WindowLifecycle(tabs: tabs)
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
         statusItem = StatusItemController(tabs: tabs, history: history)
+        DispatchQueue.main.async { [weak self] in
+            if let w = NSApp.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) }) { self?.windowLifecycle.attach(to: w) }
+        }
         updates.start { [weak self] version, url in
             self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
         }
@@ -140,12 +144,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let running = tabs.runningCount
-        if running > 0 && !tabs.confirmClose(count: running) { return .terminateCancel }
-        for tab in tabs.tabs { tab.surface.free() }
+        if running > 0 {
+            switch WindowLifecycle.quitChoice(runningCount: running) {
+            case .cancel: return .terminateCancel
+            case .hide: NSApp.windows.forEach { if $0.canBecomeMain { $0.orderOut(nil) } }; return .terminateCancel
+            case .backgroundAll:
+                for tab in tabs.tabs where tab.sessionId != nil && tab.state == .idle { tabs.background(tab) }
+                Task { try? await Task.sleep(for: .seconds(3)); self.finishTermination() }
+                return .terminateLater
+            case .quit:
+                for tab in tabs.tabs where tab.isRunningClaude && !tab.isAttached { tabs.stop(tab) }
+                Task {
+                    // Bounded wait for clean exits, then tear down.
+                    for _ in 0..<25 { if self.tabs.tabs.allSatisfy({ $0.state == .exited || $0.state == nil || $0.childExited }) { break }; try? await Task.sleep(for: .milliseconds(200)) }
+                    self.finishTermination()
+                }
+                return .terminateLater
+            }
+        }
+        finishTermination()
+        return .terminateLater
+    }
+
+    private func finishTermination() {
+        for tab in tabs.tabs { tab.surface.free(); tab.panelSurface?.free() }
         hooks.stop()
         mcp.stop()
         Task { await sessions.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { WindowLifecycle.showMainWindow() }
+        return true
     }
 }
 

@@ -20,6 +20,7 @@ struct PreferencesView: View {
     @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
     @AppStorage("ClinicCheckForUpdates") private var checkForUpdates = true
     @AppStorage("ClinicShowStatusItem") private var showStatusItem = true
+    @AppStorage("ClinicQuitBehaviour") private var quitBehaviour = "ask"
 
     var body: some View {
         TabView {
@@ -27,6 +28,9 @@ struct PreferencesView: View {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
                 Toggle("Check for updates daily", isOn: $checkForUpdates)
                 Toggle("Show menu bar icon", isOn: $showStatusItem)
+                Picker("When quitting with running sessions", selection: $quitBehaviour) {
+                    Text("Ask").tag("ask"); Text("Quit (stop cleanly)").tag("quit"); Text("Background all").tag("background"); Text("Hide the window instead").tag("hide")
+                }
                 Toggle("Show tab bar", isOn: $showTabBar)
                 Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
                 Picker("When archiving a session in a worktree", selection: $archiveWorktree) {
