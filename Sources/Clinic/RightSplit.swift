@@ -1,43 +1,72 @@
 import SwiftUI
+import AppKit
+import ClinicCore
 
-/// Terminal on the left, a page on the right, with a draggable divider. The right width is clamped so
-/// neither side can overflow the window, and it is remembered across launches.
-struct RightSplit<Left: View, Right: View>: View {
-    @AppStorage("ClinicRightPaneWidth") private var rightWidth: Double = 480
+/// Terminal on the left, a page on the right, in a native NSSplitView: smooth live resize, native divider hit
+/// area and cursor, position remembered by AppKit's autosave. Environment objects are re-injected into the
+/// hosted SwiftUI trees because NSHostingView does not inherit them.
+struct RightSplit<Left: View, Right: View>: NSViewRepresentable {
+    @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
+    @Environment(PRStore.self) private var prs
+    @Environment(NotificationStore.self) private var history
+    @Environment(UsageService.self) private var usage
     let leftMin: CGFloat
     let rightMin: CGFloat
     @ViewBuilder let left: () -> Left
     @ViewBuilder let right: () -> Right
-    @State private var dragStart: Double?
 
     init(leftMin: CGFloat = 360, rightMin: CGFloat = 320, @ViewBuilder left: @escaping () -> Left, @ViewBuilder right: @escaping () -> Right) {
         self.leftMin = leftMin; self.rightMin = rightMin; self.left = left; self.right = right
     }
 
-    var body: some View {
-        GeometryReader { geo in
-            let total = geo.size.width
-            let maxRight = max(rightMin, total - leftMin - 8)
-            let width = min(max(CGFloat(rightWidth), rightMin), maxRight)
-            let dividerWidth: CGFloat = 8
-            HStack(spacing: 0) {
-                left().frame(width: max(0, total - width - dividerWidth))
-                ZStack {
-                    Color(nsColor: .windowBackgroundColor)
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
-                    Capsule().fill(Color(nsColor: .tertiaryLabelColor)).frame(width: 3, height: 36)
-                }
-                .frame(width: dividerWidth)
-                .contentShape(Rectangle())
-                .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-                .gesture(DragGesture(minimumDistance: 1)
-                    .onChanged { v in
-                        if dragStart == nil { dragStart = Double(width) }
-                        rightWidth = Double(min(max(CGFloat(dragStart!) - v.translation.width, rightMin), maxRight))
-                    }
-                    .onEnded { _ in dragStart = nil })
-                right().frame(width: width)
-            }
+    func makeCoordinator() -> Coordinator { Coordinator(leftMin: leftMin, rightMin: rightMin) }
+
+    func makeNSView(context: Context) -> NSSplitView {
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.delegate = context.coordinator
+        let leftHost = NSHostingView(rootView: inject(left()))
+        let rightHost = NSHostingView(rootView: inject(right()))
+        leftHost.translatesAutoresizingMaskIntoConstraints = false
+        rightHost.translatesAutoresizingMaskIntoConstraints = false
+        split.addArrangedSubview(leftHost)
+        split.addArrangedSubview(rightHost)
+        split.setHoldingPriority(.defaultLow, forSubviewAt: 0)          // the terminal absorbs window resizes
+        split.setHoldingPriority(.defaultLow + 1, forSubviewAt: 1)      // the page keeps its width
+        split.autosaveName = "ClinicRightPane"
+        context.coordinator.leftHost = leftHost
+        context.coordinator.rightHost = rightHost
+        DispatchQueue.main.async {
+            // First appearance without a saved position: give the page a sensible width.
+            if split.subviews[1].frame.width < rightMin { split.setPosition(max(leftMin, split.bounds.width - 480), ofDividerAt: 0) }
         }
+        return split
+    }
+
+    func updateNSView(_ split: NSSplitView, context: Context) {
+        context.coordinator.leftHost?.rootView = inject(left())
+        context.coordinator.rightHost?.rootView = inject(right())
+    }
+
+    private func inject<V: View>(_ v: V) -> AnyView {
+        AnyView(v.environment(tabs).environment(sessions).environment(prs).environment(history).environment(usage))
+    }
+
+    final class Coordinator: NSObject, NSSplitViewDelegate {
+        let leftMin: CGFloat
+        let rightMin: CGFloat
+        var leftHost: NSHostingView<AnyView>?
+        var rightHost: NSHostingView<AnyView>?
+        init(leftMin: CGFloat, rightMin: CGFloat) { self.leftMin = leftMin; self.rightMin = rightMin }
+
+        func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+            max(proposedMinimumPosition, leftMin)
+        }
+        func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+            min(proposedMaximumPosition, splitView.bounds.width - rightMin - splitView.dividerThickness)
+        }
+        func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
     }
 }
