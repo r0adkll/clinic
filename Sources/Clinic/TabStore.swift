@@ -8,12 +8,14 @@ import GhosttyBridge
 @MainActor
 @Observable
 final class Tab: Identifiable {
-    enum Kind: Hashable { case session(SessionID), shell }
+    enum Kind: Hashable { case session(SessionID), shell, replay(SessionID) }
 
     let id = UUID()
     let kind: Kind
     let projectPath: String
     let surface: GhosttySurfaceView
+    /// Replay tabs carry a model instead of a live process (ADR-059).
+    var replay: ReplayModel?
     var state: SessionState?
     var unread = false
     var errorBadge = false
@@ -42,6 +44,7 @@ final class Tab: Identifiable {
     }
 
     var sessionId: SessionID? { if case .session(let id) = kind { return id } else { return nil } }
+    var isReplay: Bool { if case .replay = kind { return true } else { return false } }
     var isRunningClaude: Bool { state != nil && state != .exited && !childExited }
 }
 
@@ -141,6 +144,23 @@ final class TabStore {
             s.lastWorktreeByProject[projectPath] = worktree
             if !s.addedProjects.contains(projectPath) && !worktree { /* project appears via its session */ }
         }
+        selectedTabId = tab.id
+    }
+
+    /// Opens a transcript as a replay tab; focuses an existing one (ADR-059).
+    func openReplay(_ summary: SessionSummary) {
+        if let existing = tabs.first(where: { $0.kind == .replay(summary.id) }) { selectedTabId = existing.id; return }
+        guard let runtime else { return }
+        // A replay tab still needs a Tab; give it an idle surface it never shows (cheapest way to keep Tab uniform).
+        var options = GhosttySurfaceOptions()
+        options.command = "/usr/bin/true"
+        options.workingDirectory = summary.lastCwd ?? summary.cwd
+        guard let surface = try? GhosttySurfaceView(runtime: runtime, options: options) else { return }
+        surface.isOccluded = true
+        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary))
+        tab.replay = ReplayModel(sessionId: summary.id, transcriptPath: summary.transcriptPath)
+        tab.state = nil
+        tabs.append(tab)
         selectedTabId = tab.id
     }
 

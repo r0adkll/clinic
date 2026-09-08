@@ -7,6 +7,7 @@ struct RootView: View {
     @Environment(SessionStore.self) private var sessions
     @State private var showNewSession = false
     @State private var showSwitcher = false
+    @State private var detailsFor: SessionSummary?
     @State private var newSessionProject: String?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
@@ -20,6 +21,11 @@ struct RootView: View {
         .frame(minWidth: 800, minHeight: 480)
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
+        .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
+            if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
+            else if let id = tabs.selectedTab?.sessionId { detailsFor = sessions.sessions[id] }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in showSwitcher = true }
         .alert("Could not open a terminal", isPresented: Binding(get: { tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -45,7 +51,7 @@ struct DetailView: View {
         VStack(spacing: 0) {
             if showTabBar && !tabs.tabs.isEmpty { TabBarView(); Divider() }
             terminalArea
-            if let tab = tabs.selectedTab { Divider(); TabFooter(tab: tab) }
+            if let tab = tabs.selectedTab, !tab.isReplay { Divider(); TabFooter(tab: tab) }
         }
     }
 
@@ -59,9 +65,11 @@ struct DetailView: View {
             } else {
                 // Every open tab keeps its surface mounted; only the selected one is visible (ADR-019).
                 ForEach(tabs.tabs) { tab in
-                    TabSurfaces(tab: tab, isSelected: tab.id == tabs.selectedTabId)
-                        .opacity(tab.id == tabs.selectedTabId ? 1 : 0)
-                        .allowsHitTesting(tab.id == tabs.selectedTabId)
+                    Group {
+                        if let replay = tab.replay { ReplayView(model: replay) } else { TabSurfaces(tab: tab, isSelected: tab.id == tabs.selectedTabId) }
+                    }
+                    .opacity(tab.id == tabs.selectedTabId ? 1 : 0)
+                    .allowsHitTesting(tab.id == tabs.selectedTabId)
                 }
                 if let tab = tabs.selectedTab, tab.childExited {
                     ExitedOverlay(tab: tab)

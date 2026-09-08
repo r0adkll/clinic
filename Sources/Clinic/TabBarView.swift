@@ -24,7 +24,9 @@ struct TabChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if tab.kind == .shell { Image(systemName: "terminal").font(.caption).foregroundStyle(.secondary) } else { StateGlyph(tab: tab) }
+            if tab.kind == .shell { Image(systemName: "terminal").font(.caption).foregroundStyle(.secondary) }
+            else if tab.isReplay { Image(systemName: "play.circle").font(.caption).foregroundStyle(.secondary) }
+            else { StateGlyph(tab: tab) }
             Text(tab.title).lineLimit(1).font(.callout)
             Button { tabs.close(tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
                 .buttonStyle(.borderless).opacity(hovering || selected ? 1 : 0).help("Close (⌘W)")

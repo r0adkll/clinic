@@ -88,6 +88,8 @@ struct SessionContextMenu: View {
     var body: some View {
         Button("Open") { tabs.open(session: summary) }
         if let tab = tabs.tab(for: summary.id) { Button("Close Tab") { tabs.close(tab) } }
+        Button("Replay…") { tabs.openReplay(summary) }
+        Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: summary.id.rawValue) }
         Divider()
         Button("Rename…") { SessionActions.rename(summary, sessions: sessions) }
         if sessions.state.manualNames[summary.id] != nil { Button("Clear Custom Name") { sessions.rename(summary.id, to: nil) } }

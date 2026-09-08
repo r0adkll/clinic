@@ -69,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task {
                 await sessions.initialScan?.value
                 if let s = sessions.sessions[SessionID(raw)] {
+                    if UserDefaults.standard.bool(forKey: "ClinicReplayOnLaunch") { tabs.openReplay(s); return }
+                    if UserDefaults.standard.bool(forKey: "ClinicDetailsOnLaunch") {
+                        try? await Task.sleep(for: .seconds(1))
+                        NotificationCenter.default.post(name: .clinicSessionDetails, object: s.id.rawValue); return
+                    }
                     tabs.open(session: s)
                     if UserDefaults.standard.bool(forKey: "ClinicOpenPRPageOnLaunch") { tabs.togglePRPage() }
                 }
@@ -133,6 +138,10 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .shift]).disabled(selectedSession == nil)
             Button("Undo Archive") { sessions.undoArchive() }
                 .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!sessions.canUndoArchive)
+            Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: nil) }
+                .keyboardShortcut("i", modifiers: .command).disabled(selectedSession == nil)
+            Button("Replay…") { if let s = selectedSession { tabs.openReplay(s) } }
+                .keyboardShortcut("r", modifiers: [.command, .option]).disabled(selectedSession == nil)
             Divider()
             Button("Jump to Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: nil) }
                 .keyboardShortcut("k", modifiers: .command)
@@ -161,4 +170,5 @@ struct ClinicCommands: Commands {
 extension Notification.Name {
     static let clinicNewSession = Notification.Name("com.r0adkll.clinic.newSession")
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
+    static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
 }
