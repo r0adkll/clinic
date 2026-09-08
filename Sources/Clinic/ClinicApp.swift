@@ -59,6 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
             if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") { tabs.toggleGitPage() }
+            if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
+                tabs.toggleEditor()
+                if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.editor?.open(absolute: file) }
+            }
         }
         // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
         if let raw = UserDefaults.standard.string(forKey: "ClinicOpenSessionOnLaunch"), !raw.isEmpty {
@@ -140,6 +144,7 @@ struct ClinicCommands: Commands {
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
             Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
+            Button("Toggle Editor") { tabs.toggleEditor() }.keyboardShortcut("e", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
             Button("Toggle Attachments") { tabs.toggleAttachments() }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()

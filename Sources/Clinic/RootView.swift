@@ -84,6 +84,8 @@ struct TabSurfaces: View {
             RightSplit { terminals } right: { PRPage(tab: tab, ref: ref) }
         case .attachments:
             RightSplit { terminals } right: { AttachmentsPanel(tab: tab) }
+        case .editor:
+            RightSplit(rightMin: 520) { terminals } right: { if let e = tab.editor { EditorPanel(tab: tab, model: e) } }
         case .none:
             terminals
         }
@@ -128,6 +130,7 @@ struct TabFooter: View {
             HStack(spacing: 6) {
                 FooterToggle(title: "Panel", symbol: "rectangle.bottomthird.inset.filled", active: tab.panelVisible, help: "Shell panel below the session (⌘J)") { tabs.togglePanel(tab) }
                 FooterToggle(title: tab.gitBranch ?? "Git", symbol: "arrow.triangle.branch", active: tab.gitPageVisible, help: "Git page (⌘⇧G)") { tabs.toggleGitPage(tab) }
+                FooterToggle(title: "Files", symbol: "doc.text.magnifyingglass", active: tab.rightPane == .editor, help: "Editor (⌘⇧E)") { tabs.toggleEditor(tab) }
                 if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
                     FooterToggle(title: "Images (\(n))", symbol: "photo.on.rectangle", active: tab.rightPane == .attachments, help: "Attachments (⌘⇧I)") { tabs.toggleAttachments(tab) }
                 }

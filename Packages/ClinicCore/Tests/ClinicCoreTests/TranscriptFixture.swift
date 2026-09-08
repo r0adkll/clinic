@@ -43,6 +43,12 @@ struct TranscriptFixture {
         append(o)
     }
 
+    mutating func toolUse(name: String, input: [String: Any], at ts: String = "2026-09-07T10:00:06.000Z") {
+        var o = base("assistant", timestamp: ts)
+        o["message"] = ["role": "assistant", "model": "claude-sonnet-5", "content": [["type": "tool_use", "id": "toolu_" + UUID().uuidString.prefix(8), "name": name, "input": input]]]
+        append(o)
+    }
+
     mutating func aiTitle(_ t: String) { append(["type": "ai-title", "aiTitle": t, "sessionId": sessionId.rawValue]) }
     mutating func customTitle(_ t: String) { append(["type": "custom-title", "customTitle": t, "sessionId": sessionId.rawValue]) }
     mutating func costState(_ usd: Double) { append(["type": "cost-state", "totalCostUSD": usd, "sessionId": sessionId.rawValue]) }

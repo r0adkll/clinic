@@ -35,6 +35,6 @@ jobs:
       - name: Generate project
         run: cp -n Local.xcconfig.example Local.xcconfig; xcodegen generate
       - name: Build app
-        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO build | tail -50
+        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO build | tail -50
       - name: Bridge smoke test
-        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -derivedDataPath build CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO test | tail -50
+        run: xcodebuild -project Clinic.xcodeproj -scheme Clinic -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=NO test | tail -50

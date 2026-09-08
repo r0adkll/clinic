@@ -64,7 +64,17 @@ public struct TranscriptReader: Sendable {
                 for ref in PullRequestRef.refs(in: text, fromPrompt: true) { Self.link(ref, into: &s) }
             }
         case "assistant":
-            if let message = obj["message"] as? [String: Any], let model = message["model"] as? String, !model.isEmpty { s.model = model }
+            if let message = obj["message"] as? [String: Any] {
+                if let model = message["model"] as? String, !model.isEmpty { s.model = model }
+                for block in message["content"] as? [[String: Any]] ?? [] where block["type"] as? String == "tool_use" {
+                    guard let name = block["name"] as? String, Self.writingTools.contains(name),
+                          let input = block["input"] as? [String: Any],
+                          let path = (input["file_path"] as? String) ?? (input["notebook_path"] as? String), path.hasPrefix("/") else { continue }
+                    s.recentFiles.removeAll { $0 == path }
+                    s.recentFiles.append(path)
+                    if s.recentFiles.count > 50 { s.recentFiles.removeFirst(s.recentFiles.count - 50) }
+                }
+            }
         case "ai-title":
             if let t = obj["aiTitle"] as? String, !t.isEmpty { s.aiTitle = t }
         case "custom-title":
@@ -97,6 +107,8 @@ public struct TranscriptReader: Sendable {
         }
         s.pullRequests.append(ref)
     }
+
+    static let writingTools: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
 
     private static func userText(from message: Any?) -> String? {
         guard let message = message as? [String: Any] else { return nil }

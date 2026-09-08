@@ -31,6 +31,10 @@ struct RightSplit<Left: View, Right: View>: NSViewRepresentable {
         let rightHost = NSHostingView(rootView: inject(right()))
         leftHost.translatesAutoresizingMaskIntoConstraints = false
         rightHost.translatesAutoresizingMaskIntoConstraints = false
+        // Hosted SwiftUI trees must not push min/max/intrinsic size constraints up to the window;
+        // the split view alone decides their frames. (Without this the editor panel collapsed the window.)
+        leftHost.sizingOptions = []
+        rightHost.sizingOptions = []
         split.addArrangedSubview(leftHost)
         split.addArrangedSubview(rightHost)
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)          // the terminal absorbs window resizes

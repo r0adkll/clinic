@@ -12,7 +12,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 [ -f Local.xcconfig ] || { echo "error: Local.xcconfig missing (copy Local.xcconfig.example)" >&2; exit 1; }
 [ -d Packages/GhosttyBridge/GhosttyKit.xcframework ] || scripts/build-ghostty.sh
 xcodegen generate >/dev/null
-xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Release -archivePath "$OUT/Clinic.xcarchive" archive | tail -5
+xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Release -skipPackagePluginValidation -skipMacroValidation -archivePath "$OUT/Clinic.xcarchive" archive | tail -5
 cat > "$OUT/export.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

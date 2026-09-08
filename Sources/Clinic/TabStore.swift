@@ -29,10 +29,12 @@ final class Tab: Identifiable {
     var panelSurface: GhosttySurfaceView?
     var panelVisible = false
     /// Right column: git page (ADR-052) or PR page (ADR-053). One at a time.
-    enum RightPane: Equatable { case none, git, pr(PullRequestRef), attachments }
+    enum RightPane: Equatable { case none, git, pr(PullRequestRef), attachments, editor }
     var rightPane: RightPane = .none
     var gitPage: GitPageModel?
     var gitPageVisible: Bool { rightPane == .git }
+    /// Editor panel (ADR-057), created on first open.
+    var editor: EditorModel?
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
@@ -244,6 +246,7 @@ final class TabStore {
         tab.panelSurface?.free()
         tab.panelSurface = nil
         tab.gitPage?.stopWatching()
+        tab.editor?.stop()
         if let id = tab.sessionId { sessions.removePending(id: id) }
         updateBadge()
         return true
@@ -282,6 +285,15 @@ final class TabStore {
         if tab.gitPage == nil { tab.gitPage = GitPageModel() }
         tab.rightPane = tab.rightPane == .git ? .none : .git
         if !tab.gitPageVisible { tab.gitPage?.stopWatching() }
+    }
+
+    /// ⌘⇧E: editor panel.
+    func toggleEditor(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        if tab.rightPane == .editor { tab.rightPane = .none; return }
+        if tab.editor == nil { tab.editor = EditorModel(root: tab.pwd ?? tab.projectPath) }
+        tab.gitPage?.stopWatching()
+        tab.rightPane = .editor
     }
 
     /// ⌘⇧I: attachments panel.

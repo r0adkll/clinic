@@ -22,6 +22,9 @@ packages:
     path: Packages/ClinicCore
   GhosttyBridge:
     path: Packages/GhosttyBridge
+  CodeEditSourceEditor:
+    url: https://github.com/CodeEditApp/CodeEditSourceEditor
+    exactVersion: "0.15.2"
 targets:
   Clinic:
     type: application
@@ -31,6 +34,7 @@ targets:
     dependencies:
       - package: ClinicCore
       - package: GhosttyBridge
+      - package: CodeEditSourceEditor
       - target: clinic-hook
         embed: true
         codeSign: true

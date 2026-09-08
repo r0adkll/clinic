@@ -13,7 +13,7 @@ project:
 	xcodegen generate
 
 build: project
-	xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build build | tail -20
+	xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation build | tail -20
 
 test:
 	swift test --package-path Packages/ClinicCore

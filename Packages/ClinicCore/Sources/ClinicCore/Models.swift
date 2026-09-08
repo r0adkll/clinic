@@ -41,6 +41,8 @@ public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
     public var fileModifiedAt: Date
     /// Pull requests linked from the transcript (`pr-link` records) or mentioned in the first prompt, oldest first, unique by URL.
     public var pullRequests: [PullRequestRef] = []
+    /// Absolute paths the agent wrote (Write/Edit/MultiEdit/NotebookEdit), newest last, de-duplicated, capped at 50.
+    public var recentFiles: [String] = []
 
     public init(id: SessionID, transcriptPath: String, cwd: String? = nil, lastCwd: String? = nil, gitBranch: String? = nil,
                 firstPrompt: String? = nil, aiTitle: String? = nil, customTitle: String? = nil, model: String? = nil,
@@ -70,6 +72,7 @@ public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
         fileSize = try c.decode(Int64.self, forKey: .fileSize)
         fileModifiedAt = try c.decode(Date.self, forKey: .fileModifiedAt)
         pullRequests = try c.decodeIfPresent([PullRequestRef].self, forKey: .pullRequests) ?? []
+        recentFiles = try c.decodeIfPresent([String].self, forKey: .recentFiles) ?? []
     }
 
     /// Best-effort "last activity" for ordering (ADR-040): last record timestamp, else file mtime.
