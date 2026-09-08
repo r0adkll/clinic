@@ -11,7 +11,8 @@ final class Tab: Identifiable {
     enum Kind: Hashable { case session(SessionID), shell, replay(SessionID) }
 
     let id = UUID()
-    let kind: Kind
+    /// Mutable so a fork/continue tab can rebind to the id the CLI reports (ADR-063).
+    var kind: Kind
     let projectPath: String
     let surface: GhosttySurfaceView
     /// Replay tabs carry a model instead of a live process (ADR-059).
@@ -26,6 +27,10 @@ final class Tab: Identifiable {
     /// Set when the user chose Background: the tab closes itself once `/bg` detaches the CLI (ADR-061).
     var detaching = false
     var isAttached = false
+    /// Awaiting `SessionStart` to learn the real session id (fork / continue).
+    var awaitingId = false
+    /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
+    var closingGracefully = false
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
     var pendingInput: String?
     var gitBranch: String?
@@ -154,6 +159,44 @@ final class TabStore {
         selectedTabId = tab.id
     }
 
+    /// `claude --resume <id> --fork-session` in a new tab; rebinds on SessionStart (ADR-063).
+    func fork(_ summary: SessionSummary) {
+        let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: true), settingsFilePath: hooks.settingsFileURL.path)
+        launch.mcpConfigPath = nil   // the per-session config is written once the fork's id is known
+        guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
+                                initialInput: launch.shellLine, title: "Fork of " + sessions.displayName(for: summary)) else { return }
+        tab.awaitingId = true
+        selectedTabId = tab.id
+    }
+
+    /// `claude --continue` in a project directory (ADR-063).
+    func continueLast(in projectPath: String) {
+        let launch = ClaudeLaunch(mode: .continueLast, settingsFilePath: hooks.settingsFileURL.path)
+        guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "Continue last session") else { return }
+        tab.awaitingId = true
+        selectedTabId = tab.id
+    }
+
+    /// Resume in a standalone Ghostty window (ADR-063).
+    func openInGhostty(_ summary: SessionSummary) {
+        guard let ghostty = Self.ghosttyBinary else { return }
+        let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: ghostty)
+        p.arguments = ["--working-directory=\(cwd)", "-e"] + [launch.executable] + launch.arguments
+        var env = ProcessInfo.processInfo.environment
+        for k in env.keys where k == "CLAUDECODE" || k.hasPrefix("CLAUDE_CODE_") { env[k] = nil }
+        p.environment = env
+        try? p.run()
+    }
+
+    static var ghosttyBinary: String? {
+        let candidates = ["/Applications/Ghostty.app/Contents/MacOS/ghostty", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Ghostty.app/Contents/MacOS/ghostty").path]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
     /// Opens a transcript as a replay tab; focuses an existing one (ADR-059).
     func openReplay(_ summary: SessionSummary) {
         if let existing = tabs.first(where: { $0.kind == .replay(summary.id) }) { selectedTabId = existing.id; return }
@@ -270,7 +313,8 @@ final class TabStore {
             switch confirmCloseTab(tab) {
             case .cancel: return false
             case .background: background(tab); return false
-            case .close: break
+            case .close:
+                if tab.state != nil, !tab.isAttached { closeGracefully(tab); return false }
             }
         }
         tabs.removeAll { $0.id == tab.id }
@@ -286,6 +330,25 @@ final class TabStore {
     }
 
     func closeSelected() { if let t = selectedTab { close(t) } }
+
+    /// Ctrl‑C twice: Claude Code's clean exit (ADR-063). The shell stays in the tab.
+    func stop(_ tab: Tab) {
+        guard tab.isRunningClaude else { return }
+        tab.surface.sendInterrupt()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { tab.surface.sendInterrupt() }
+    }
+
+    var canStopSelected: Bool { selectedTab?.isRunningClaude ?? false }
+
+    /// Stop, then close once the CLI reports `SessionEnd` (5 s fallback).
+    func closeGracefully(_ tab: Tab) {
+        tab.closingGracefully = true
+        stop(tab)
+        Task { [weak self, weak tab] in
+            try? await Task.sleep(for: .seconds(5))
+            if let tab, tab.closingGracefully, self?.tabs.contains(where: { $0.id == tab.id }) == true { self?.close(tab, confirm: false) }
+        }
+    }
 
     /// Detach the session with `/bg`; the tab closes when the CLI hands the shell back (ADR-061).
     func background(_ tab: Tab) {
@@ -375,8 +438,8 @@ final class TabStore {
         alert.messageText = "Close this session?"
         let canBackground = tab.sessionId != nil && tab.state == .idle
         alert.informativeText = canBackground
-            ? "Claude Code is still running. Close ends the process (you can resume later); Background keeps it running detached so you can attach again."
-            : "Claude Code is still running in this tab. Closing it will end the process; you can resume the session later."
+            ? "Claude Code is still running. Close asks it to exit cleanly (you can resume later); Background keeps it running detached so you can attach again."
+            : "Claude Code is still running in this tab. Close asks it to exit cleanly; you can resume the session later."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Close")
         if canBackground { alert.addButton(withTitle: "Background") }
@@ -409,10 +472,23 @@ final class TabStore {
     // MARK: Hooks → state (ADR-026, ADR-033)
 
     private func handle(hookEvent event: HookEvent) {
-        guard let tab = tab(for: event.sessionId) else {
+        var found = tab(for: event.sessionId)
+        if found == nil, event.hookEventName == "SessionStart", let waiting = tabs.first(where: { $0.awaitingId && $0.sessionId != nil }) {
+            // Fork / continue: adopt the id the CLI reports (ADR-063).
+            waiting.kind = .session(event.sessionId)
+            waiting.awaitingId = false
+            let cwd = event.cwd ?? waiting.pwd ?? waiting.projectPath
+            sessions.registerPending(id: event.sessionId, cwd: cwd)
+            var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+            resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)
+            waiting.lastResume = resume
+            found = waiting
+        }
+        guard let tab = found else {
             Self.log.debug("hook for unknown session \(event.sessionId.rawValue, privacy: .public): \(event.hookEventName, privacy: .public)")
             return
         }
+        if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
             Task { await sessions.refresh(transcriptPath: path); self.refreshTitle(tab); self.refreshFooter(tab) }

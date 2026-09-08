@@ -90,6 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             tabs.newSession(projectPath: path, model: "haiku", worktree: false)
+            // `-ClinicStopAfterLaunch <seconds>`: exercise the graceful Stop path (ADR-063).
+            let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopAfterLaunch")
+            if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
+        }
+        // `-ClinicForkOnLaunch <session-id>`: fork an existing session (ADR-063).
+        if let raw = UserDefaults.standard.string(forKey: "ClinicForkOnLaunch"), !raw.isEmpty {
+            Task { await sessions.initialScan?.value; if let s = sessions.sessions[SessionID(raw)] { tabs.fork(s) } }
         }
     }
 
@@ -146,6 +153,9 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .shift]).disabled(selectedSession == nil)
             Button("Undo Archive") { sessions.undoArchive() }
                 .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!sessions.canUndoArchive)
+            Button("Stop Session") { if let t = tabs.selectedTab { tabs.stop(t) } }
+                .keyboardShortcut(".", modifiers: .command).disabled(!tabs.canStopSelected)
+            Button("Fork Session") { if let s = selectedSession { tabs.fork(s) } }.disabled(selectedSession == nil)
             Button("Background This Session") { if let t = tabs.selectedTab { tabs.background(t) } }
                 .keyboardShortcut("b", modifiers: [.command, .option]).disabled(!tabs.canBackgroundSelected)
             Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: nil) }

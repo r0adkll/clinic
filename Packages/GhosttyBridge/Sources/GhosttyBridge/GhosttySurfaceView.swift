@@ -292,6 +292,9 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         _ = perform(action: "text:\\x1b[200~" + escaped + "\\x1b[201~")
     }
 
+    /// Writes Ctrl‑C (0x03) to the pty. Claude Code exits cleanly on two of them (ADR-063).
+    public func sendInterrupt() { _ = perform(action: "text:\\x03") }
+
     /// Pastes `text` and presses Return.
     public func sendPastedLine(_ text: String) {
         sendPaste(text)

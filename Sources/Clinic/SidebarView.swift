@@ -1,5 +1,6 @@
 import SwiftUI
 import ClinicCore
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @Environment(TabStore.self) private var tabs
@@ -115,8 +116,12 @@ struct SessionContextMenu: View {
         Button(agent?.isRunning == true ? "Attach" : "Open") { tabs.open(session: summary) }
         if let tab = tabs.tab(for: summary.id) {
             Button("Close Tab") { tabs.close(tab) }
+            if tab.isRunningClaude { Button("Stop") { tabs.stop(tab) } }
             if tab.state == .idle { Button("Background") { tabs.background(tab) } }
         }
+        Button("Fork Session") { tabs.fork(summary) }
+        if TabStore.ghosttyBinary != nil { Button("Open in Ghostty") { tabs.openInGhostty(summary) } }
+        OpenInMenu(path: summary.lastCwd ?? summary.cwd ?? "")
         if let agent {
             Divider()
             if agent.isRunning { Button("Stop Detached Session") { Task { await background.stopAgent(agent) } } }
@@ -140,6 +145,30 @@ struct SessionContextMenu: View {
         Divider()
         Button("Copy Session ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(summary.id.rawValue, forType: .string) }
         Button("Reveal Transcript in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: summary.transcriptPath)]) }
+        Button("Export as Markdown…") { SessionActions.exportMarkdown(summary, sessions: sessions) }
+    }
+}
+
+/// "Open In…" submenu: Finder, Ghostty, and installed editors (ADR-063).
+struct OpenInMenu: View {
+    let path: String
+    static let editors: [(String, String)] = [
+        ("Xcode", "com.apple.dt.Xcode"), ("Visual Studio Code", "com.microsoft.VSCode"), ("Cursor", "com.todesktop.230313mzl4w4u92"),
+        ("Zed", "dev.zed.Zed"), ("IntelliJ IDEA", "com.jetbrains.intellij"), ("Android Studio", "com.google.android.studio"),
+    ]
+    var body: some View {
+        Menu("Open In") {
+            Button("Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+            if TabStore.ghosttyBinary != nil {
+                Button("Ghostty") { let p = Process(); p.executableURL = URL(fileURLWithPath: TabStore.ghosttyBinary!); p.arguments = ["--working-directory=\(path)"]; try? p.run() }
+            }
+            ForEach(Self.editors, id: \.1) { name, bundle in
+                if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
+                    Button(name) { NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) }
+                }
+            }
+        }
+        .disabled(path.isEmpty)
     }
 }
 
@@ -156,6 +185,18 @@ enum SessionActions {
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
         if alert.runModal() == .alertFirstButtonReturn { sessions.rename(summary.id, to: field.stringValue) }
+    }
+
+    static func exportMarkdown(_ summary: SessionSummary, sessions: SessionStore) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = sessions.displayName(for: summary).replacingOccurrences(of: "/", with: "-") + ".md"
+        panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = summary.transcriptPath, title = sessions.displayName(for: summary)
+        Task.detached {
+            guard let r = try? TranscriptTurns.read(fileAt: path) else { return }
+            try? TranscriptTurns.markdown(r, title: title).write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 
     /// Archiving an open session closes its tab first (with the usual confirmation if Claude is running).
@@ -190,6 +231,7 @@ struct SessionRow: View {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
                 if hovering {
                     HStack(spacing: 10) {
+                        if let tab, tab.isRunningClaude { Button("Stop") { tabs.stop(tab) } }
                         if let tab { Button("Close") { tabs.close(tab) } }
                         Button(sessions.isArchived(summary.id) ? "Unarchive" : "Archive") {
                             if sessions.isArchived(summary.id) { sessions.unarchive(summary.id) } else { SessionActions.archive(summary, sessions: sessions, tabs: tabs) }

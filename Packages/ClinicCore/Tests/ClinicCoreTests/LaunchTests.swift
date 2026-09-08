@@ -34,6 +34,10 @@ import Testing
         #expect(MCPToolSpec.all.first { $0.name == "run_in_terminal" }?.defaultEnabled == false)
     }
 
+    @Test func continueLine() {
+        #expect(ClaudeLaunch(mode: .continueLast, settingsFilePath: "/tmp/h.json").arguments == ["--continue", "--settings", "/tmp/h.json"])
+    }
+
     @Test func attachLine() {
         let l = ClaudeLaunch(mode: .attach(agentId: "abc-123"), model: "opus", settingsFilePath: "/tmp/h.json")
         #expect(l.shellLine == "claude attach abc-123\n")

@@ -147,6 +147,31 @@ public enum TranscriptTurns {
     }
 }
 
+extension TranscriptTurns {
+    /// A readable Markdown rendering of a transcript (ADR-063).
+    public static func markdown(_ result: Result, title: String) -> String {
+        var out = "# \(title)\n\n"
+        let s = result.stats
+        out += "- Messages: \(s.userMessages) from you, \(s.assistantMessages) from Claude\n"
+        out += "- Tool calls: \(s.totalToolCalls)\n"
+        if !s.models.isEmpty { out += "- Models: \(s.models.joined(separator: ", "))\n" }
+        if let c = s.totalCostUSD { out += String(format: "- Cost: $%.2f\n", c) }
+        if let a = s.firstAt, let b = s.lastAt { out += "- From \(a.formatted(date: .abbreviated, time: .shortened)) to \(b.formatted(date: .abbreviated, time: .shortened))\n" }
+        out += "\n---\n\n"
+        for turn in result.turns {
+            switch turn {
+            case .user(let t, _): out += "## You\n\n\(t)\n\n"
+            case .assistant(let t, _): out += "## Claude\n\n\(t)\n\n"
+            case .toolUse(let name, let summary, _, _): out += "> **\(name)** `\(summary.replacingOccurrences(of: "`", with: "'"))`\n\n"
+            case .toolResult(let summary, let isError, _, _):
+                guard !summary.isEmpty else { continue }
+                out += (isError ? "<details><summary>Result (error)</summary>\n\n" : "<details><summary>Result</summary>\n\n") + "```\n\(summary)\n```\n\n</details>\n\n"
+            }
+        }
+        return out
+    }
+}
+
 public enum TranscriptError: Error, CustomStringConvertible {
     case tooLarge(Int64)
     public var description: String {

@@ -49,6 +49,9 @@ final class SessionStore {
         for s in found { map[s.id] = s; pending[s.id] = nil }
         for (id, p) in pending where map[id] == nil { map[id] = p }
         sessions = map
+        // Owned ids whose transcript never appeared (a session closed before its first prompt while the app was quit) are stale.
+        let stale = state.ownedSessions.keys.filter { map[$0] == nil }
+        if !stale.isEmpty { update { s in for id in stale { s.ownedSessions[id] = nil } } }
         rebuildProjects()
         isScanning = false
     }

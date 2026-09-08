@@ -24,6 +24,15 @@ import Testing
         #expect(r.stats.duration == 9)
     }
 
+    @Test func markdownExport() {
+        var f = TranscriptFixture()
+        f.user("Hello")
+        f.raw(#"{"type":"assistant","timestamp":"2026-09-07T10:00:05.000Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"Hi!"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#)
+        let md = TranscriptTurns.markdown(TranscriptTurns.parse(f.data), title: "Test")
+        #expect(md.hasPrefix("# Test\n"))
+        #expect(md.contains("## You\n\nHello") && md.contains("## Claude\n\nHi!") && md.contains("> **Bash** `ls`"))
+    }
+
     @Test func summariesPerTool() {
         #expect(TranscriptTurns.toolSummary(name: "Read", input: ["file_path": "/a/b.swift"]) == "/a/b.swift")
         #expect(TranscriptTurns.toolSummary(name: "Grep", input: ["pattern": "foo", "path": "src"]) == "foo in src")

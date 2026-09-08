@@ -7,6 +7,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
         case resume(id: SessionID, fork: Bool)
         /// Re-attach to a session running detached (ADR-061).
         case attach(agentId: String)
+        /// `claude --continue`: most recent conversation in the directory (ADR-063).
+        case continueLast
     }
 
     public var mode: Mode
@@ -35,6 +37,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
         case .attach(let agentId):
             // `claude attach <id>` takes no other options.
             return ["attach", agentId]
+        case .continueLast:
+            args.append("--continue")
         }
         if let model, !model.isEmpty { args += ["--model", model] }
         if let effort, !effort.isEmpty { args += ["--effort", effort] }

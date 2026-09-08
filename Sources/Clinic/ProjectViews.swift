@@ -59,10 +59,11 @@ struct ProjectMenu: View {
     var body: some View {
         Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
+        Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }
         Divider()
         Button("Open Shell Here") { tabs.newShell(in: project.path) }
-        Button("Open in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)]) }
+        OpenInMenu(path: project.path)
         Button("Open on GitHub") { if let remote { NSWorkspace.shared.open(remote) } }
             .disabled(remote == nil)
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }
