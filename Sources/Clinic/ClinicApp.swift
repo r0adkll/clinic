@@ -19,7 +19,7 @@ struct ClinicApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
         .commands { ClinicCommands(tabs: appDelegate.tabs) }
-        Settings { PreferencesView() }
+        Settings { PreferencesView().environment(appDelegate.usage) }
     }
 }
 

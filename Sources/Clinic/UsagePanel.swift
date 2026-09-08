@@ -14,8 +14,13 @@ final class UsageService {
     private var timer: Task<Void, Never>?
     static let interval: Duration = .seconds(300)
 
+    /// The user has explicitly connected their Claude account (ADR-070). Nothing touches the Keychain before this.
+    static let connectedKey = "ClinicUsageConnected"
+    var isConnected: Bool { UserDefaults.standard.bool(forKey: Self.connectedKey) }
+
+    /// Starts polling only if the user connected earlier.
     func start() {
-        guard timer == nil else { return }
+        guard isConnected, timer == nil else { return }
         timer = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
@@ -26,7 +31,22 @@ final class UsageService {
 
     func stop() { timer?.cancel(); timer = nil }
 
+    /// User action: read the CLI's sign-in (the Keychain prompt appears here, once) and start polling.
+    func connect() async {
+        UserDefaults.standard.set(true, forKey: Self.connectedKey)
+        await refresh()
+        if error == nil { start() } else { UserDefaults.standard.set(false, forKey: Self.connectedKey) }
+    }
+
+    func disconnect() {
+        stop()
+        UserDefaults.standard.set(false, forKey: Self.connectedKey)
+        snapshot = nil
+        error = nil
+    }
+
     func refresh() async {
+        guard isConnected else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -74,11 +94,22 @@ struct UsagePanel: View {
                     }
                 }.buttonStyle(.plain)
                 Spacer()
-                Button { Task { await usage.refresh() } } label: { Image(systemName: "arrow.clockwise").font(.caption2) }
-                    .buttonStyle(.plain).disabled(usage.isLoading).help("Refresh")
+                if usage.isConnected {
+                    Button { Task { await usage.refresh() } } label: { Image(systemName: "arrow.clockwise").font(.caption2) }
+                        .buttonStyle(.plain).disabled(usage.isLoading).help("Refresh")
+                } else if !expanded {
+                    Button("Connect") { expanded = true; Task { await usage.connect() } }.controlSize(.mini)
+                }
             }
             if expanded {
-                if let snap = usage.snapshot {
+                if !usage.isConnected {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Show your plan limits from Claude Code's sign-in. Clinic reads the token from your Keychain only after you connect; macOS will ask once.")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button("Connect Claude account") { Task { await usage.connect() } }.controlSize(.small)
+                        if let error = usage.error { Text(error).font(.caption2).foregroundStyle(.red).lineLimit(3) }
+                    }
+                } else if let snap = usage.snapshot {
                     ForEach(snap.bars) { bar in UsageBarView(bar: bar) }
                     if let c = snap.credits {
                         HStack {

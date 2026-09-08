@@ -10,6 +10,7 @@ enum Prefs {
 }
 
 struct PreferencesView: View {
+    @Environment(UsageService.self) private var usage
     @AppStorage(Prefs.reopenLastSession) private var reopenLastSession = false
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage(Prefs.notificationSound) private var notificationSound = false
@@ -33,6 +34,14 @@ struct PreferencesView: View {
                 }
                 Toggle("Show tab bar", isOn: $showTabBar)
                 Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
+                LabeledContent("Claude account") {
+                    if usage.isConnected {
+                        HStack { Text("Connected").foregroundStyle(.secondary); Button("Disconnect") { usage.disconnect() } }
+                    } else {
+                        Button("Connect…") { Task { await usage.connect() } }
+                    }
+                }
+                Text("Connecting reads Claude Code's sign-in from your Keychain to show plan usage; nothing is stored by Clinic.").font(.caption).foregroundStyle(.secondary)
                 Picker("When archiving a session in a worktree", selection: $archiveWorktree) {
                     Text("Ask").tag("ask"); Text("Always trash the worktree").tag("always"); Text("Never trash").tag("never")
                 }
