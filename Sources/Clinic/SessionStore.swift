@@ -187,8 +187,11 @@ final class SessionStore {
         update { s in if s.favorites.contains(id) { s.favorites.remove(id) } else { s.favorites.insert(id) } }
     }
 
+    var onArchive: ((SessionID) -> Void)?
+
     func archive(_ id: SessionID, trashedWorktree: RepoUpkeep.TrashedWorktree? = nil) {
         archiveUndoStack.append((id, trashedWorktree))
+        onArchive?(id)
         update { s in s.archived[id] = Date() }
     }
 

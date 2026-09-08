@@ -5,6 +5,7 @@ import GhosttyBridge
 struct RootView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(NotificationStore.self) private var history
     @State private var showNewSession = false
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
@@ -20,6 +21,7 @@ struct RootView: View {
             DetailView()
         }
         .frame(minWidth: 800, minHeight: 480)
+        .overlay(alignment: .topTrailing) { NotificationCard().animation(.easeOut(duration: 0.25), value: history.card?.id) }
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }

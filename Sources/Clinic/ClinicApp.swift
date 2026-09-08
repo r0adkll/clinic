@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let prs = PRStore()
     let mcp = MCPToolService()
     let backgroundAgents = BackgroundAgentsService()
+    let updates = UpdateCheck()
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -40,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scrubInheritedClaudeEnvironment()
         notifications.requestAuthorization()
         hooks.start()
+        sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }
         sessions.start()
         tabs.start()
         if UserDefaults.standard.bool(forKey: "ClinicShowUsage") { usage.start() }
@@ -51,7 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabs.mcp = mcp
         tabs.backgroundAgents = backgroundAgents
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
+        backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
+        updates.start { [weak self] version, url in
+            self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
+        }
         mcp.start(tabs: tabs, sessions: sessions, history: history, notifications: notifications, prs: prs)
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
@@ -97,6 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopAfterLaunch")
             if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
+        }
+        // `-ClinicSelectTabAfterLaunch <index>`: select a tab once launch tabs exist (attention smoke tests).
+        if UserDefaults.standard.object(forKey: "ClinicSelectTabAfterLaunch") != nil {
+            let i = UserDefaults.standard.integer(forKey: "ClinicSelectTabAfterLaunch")
+            Task { try? await Task.sleep(for: .seconds(4)); tabs.selectIndex(i) }
         }
         // `-ClinicForkOnLaunch <session-id>`: fork an existing session (ADR-063).
         if let raw = UserDefaults.standard.string(forKey: "ClinicForkOnLaunch"), !raw.isEmpty {

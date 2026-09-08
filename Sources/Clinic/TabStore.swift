@@ -81,11 +81,27 @@ final class TabStore {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
     }
 
-    /// Records to history and posts a system notification unless the session is muted (ADR-033, milestone 2).
+    /// Single router for attention (ADR-066): history always; then by focus — looking at it: nothing more;
+    /// app active elsewhere: in-app card (+ sound pref); app inactive: system notification. Muted sessions get history only.
+    func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind, url: URL? = nil) {
+        let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url)
+        if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
+        let lookingAtIt = NSApp.isActive && tab != nil && selectedTabId == tab?.id
+        if lookingAtIt { return }
+        if NSApp.isActive {
+            history.showCard(entry)
+            if UserDefaults.standard.bool(forKey: Prefs.notificationSound) { NSSound(named: "Ping")?.play() }
+        } else if let sessionId {
+            notifications.post(sessionId: sessionId, title: title, body: body)
+        } else {
+            notifications.post(sessionId: SessionID(UUID().uuidString), title: title, body: body)
+        }
+        tab?.unread = true
+        updateBadge()
+    }
+
     private func notify(_ tab: Tab, sessionId: SessionID, body: String, kind: NotificationStore.Entry.Kind) {
-        history.record(sessionId: sessionId, title: tab.title, body: body, kind: kind)
-        guard !sessions.state.mutedSessions.contains(sessionId) else { return }
-        notifications.post(sessionId: sessionId, title: tab.title, body: body)
+        notify(tab, sessionId: sessionId, title: tab.title, body: body, kind: kind)
     }
 
     var selectedTab: Tab? { tabs.first { $0.id == selectedTabId } }
@@ -535,7 +551,7 @@ final class TabStore {
     }
 
     func updateBadge() {
-        notifications.setBadge(tabs.filter { $0.unread || ($0.state?.isWaiting ?? false) }.count)
+        notifications.setBadge(tabs.filter { $0.unread || ($0.state?.isWaiting ?? false) }.count + history.entries.filter { !$0.read && $0.sessionId == nil }.count)
     }
 
     // MARK: libghostty actions (ADR-035)
@@ -557,7 +573,11 @@ extension TabStore: GhosttySurfaceDelegate {
         switch action {
         case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
         case .openURL(let url, _): NSWorkspace.shared.open(url); return true
-        case .ringBell: NSSound.beep(); return true
+        case .ringBell:
+            if let tab, tab.id != selectedTabId || !NSApp.isActive {
+                notify(tab, sessionId: tab.sessionId, title: tab.title, body: "Rang the bell", kind: .bell)
+            } else { NSSound.beep() }
+            return true
         case .setTitle(let t): if let tab, tab.kind == .shell, !isPanel { tab.title = t.isEmpty ? "Shell" : t }; return true
         case .pwd(let p):
             if let tab, !isPanel {

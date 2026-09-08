@@ -16,6 +16,8 @@ final class BackgroundAgentsService {
     private weak var history: NotificationStore?
     private weak var notifications: NotificationService?
     var isAttachedProvider: (() -> Bool)?
+    /// Set by the app to route through TabStore.notify (ADR-066).
+    var router: ((SessionID, String, String, NotificationStore.Entry.Kind) -> Void)?
     static let interval: Duration = .seconds(15)
 
     var background: [BackgroundAgent] { agents.filter(\.isBackground) }
@@ -61,8 +63,11 @@ final class BackgroundAgentsService {
         default: body = "Detached session finished"; kind = .finished
         }
         guard let sid = a.sessionId else { return }
-        history?.record(sessionId: sid, title: title, body: body, kind: kind)
-        if !(sessions?.state.mutedSessions.contains(sid) ?? false) { notifications?.post(sessionId: sid, title: title, body: body) }
+        if let router { router(sid, title, body, kind) }
+        else {
+            history?.record(sessionId: sid, title: title, body: body, kind: kind)
+            if !(sessions?.state.mutedSessions.contains(sid) ?? false) { notifications?.post(sessionId: sid, title: title, body: body) }
+        }
     }
 
     func stopAgent(_ a: BackgroundAgent) async { _ = await BackgroundAgentsCLI.stop(a.id); await refresh() }

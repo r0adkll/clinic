@@ -82,12 +82,7 @@ final class MCPToolService {
             let message = args["message"] as? String ?? ""
             let title = args["title"] as? String ?? tab.title
             let lookingAtIt = NSApp.isActive && tabs?.selectedTabId == tab.id
-            history?.record(sessionId: sessionId, title: title, body: message, kind: .needsInput)
-            if !lookingAtIt, !(sessions?.state.mutedSessions.contains(sessionId) ?? false) {
-                notifications?.post(sessionId: sessionId, title: title, body: message)
-                tab.unread = true
-                tabs?.updateBadge()
-            }
+            tabs?.notify(tab, sessionId: sessionId, title: title, body: message, kind: .needsInput)
             return MCPToolSpec.textResult(lookingAtIt ? "The user is looking at this session; the message was added to their history without a notification." : "Notification delivered.")
 
         case "show_image":
