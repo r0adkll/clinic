@@ -261,6 +261,20 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         _ = ghostty_surface_key(surface, ev)
     }
 
+    /// The text currently visible in the viewport (what the user sees), for the agent's `read_terminal` tool.
+    public var visibleText: String? {
+        guard let surface else { return nil }
+        var selection = ghostty_selection_s()
+        selection.top_left = ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
+        selection.bottom_right = ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
+        selection.rectangle = false
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let ptr = text.text else { return "" }
+        return String(decoding: UnsafeBufferPointer(start: UnsafeRawPointer(ptr).assumingMemoryBound(to: UInt8.self), count: Int(text.text_len)), as: UTF8.self)
+    }
+
     /// Delivers `text` to the pty as a bracketed paste (ESC[200~ … ESC[201~) via the `text:` binding action, which
     /// writes raw bytes with Ghostty's string-escape parsing. Multi-line prompts arrive intact in Claude Code's input box.
     public func sendPaste(_ text: String) {

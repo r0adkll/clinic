@@ -17,8 +17,18 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var ownedSessions: [SessionID: OwnedSession] = [:]
     /// Projects the user removed from the sidebar (ADR-050); their sessions stay owned but hidden.
     public var removedProjects: Set<String> = []
+    /// Images shown via `show_image` (ADR-056), newest last.
+    public var attachments: [SessionID: [Attachment]] = [:]
 
     public init() {}
+
+    public struct Attachment: Codable, Sendable, Equatable, Identifiable {
+        public var id: UUID
+        public var path: String
+        public var caption: String?
+        public var addedAt: Date
+        public init(id: UUID = UUID(), path: String, caption: String? = nil, addedAt: Date = Date()) { self.id = id; self.path = path; self.caption = caption; self.addedAt = addedAt }
+    }
 
     public struct OwnedSession: Codable, Sendable, Equatable {
         public var projectPath: String
@@ -30,7 +40,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects
+        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -49,6 +59,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         mutedSessions = try c.decodeIfPresent(Set<SessionID>.self, forKey: .mutedSessions) ?? []
         ownedSessions = (try? c.decodeIfPresent([SessionID: OwnedSession].self, forKey: .ownedSessions)) ?? [:]
         removedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .removedProjects) ?? []
+        attachments = (try? c.decodeIfPresent([SessionID: [Attachment]].self, forKey: .attachments)) ?? [:]
     }
 
     /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that

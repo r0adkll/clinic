@@ -115,6 +115,14 @@ final class SessionStore {
             }
     }
 
+    /// PRs attached by the `attach_pr` tool are merged into the session's transcript-derived list.
+    func attachPullRequest(_ ref: PullRequestRef, to id: SessionID) {
+        guard var s = sessions[id], !s.pullRequests.contains(where: { $0.url == ref.url }) else { return }
+        s.pullRequests.append(ref)
+        sessions[id] = s
+        pending[id] = pending[id] != nil ? s : nil
+    }
+
     func removeProject(_ project: Project) {
         update { s in
             s.removedProjects.insert(project.path)

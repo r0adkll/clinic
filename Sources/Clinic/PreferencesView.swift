@@ -43,6 +43,13 @@ struct PreferencesView: View {
             .tabItem { Label("Notifications", systemImage: "bell") }
 
             Form {
+                Text("Tools the agent can call on Clinic through MCP. Each session started from Clinic sees the enabled ones.").font(.caption).foregroundStyle(.secondary)
+                ForEach(MCPToolSpec.all) { spec in ToolToggle(spec: spec) }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Session tools", systemImage: "wrench.and.screwdriver") }
+
+            Form {
                 Toggle("Record hook payloads to a trace file", isOn: $hookTrace)
                 LabeledContent("Trace and state files") {
                     Button("Reveal in Finder") {
@@ -61,6 +68,21 @@ struct PreferencesView: View {
             .formStyle(.grouped)
             .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
         }
-        .frame(width: 480, height: 260)
+        .frame(width: 520, height: 360)
+    }
+}
+
+struct ToolToggle: View {
+    let spec: MCPToolSpec
+    @State private var on: Bool = false
+    var body: some View {
+        Toggle(isOn: $on) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(spec.name).font(.system(.body, design: .monospaced))
+                Text(spec.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .onAppear { on = MCPToolService.isEnabled(spec) }
+        .onChange(of: on) { UserDefaults.standard.set(on, forKey: "ClinicTool_" + spec.name) }
     }
 }

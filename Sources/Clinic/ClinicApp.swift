@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let history = NotificationStore()
     let usage = UsageService()
     let prs = PRStore()
+    let mcp = MCPToolService()
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return self.tabs.tabs.flatMap { tab in self.tabs.pullRequests(for: tab) }
         }
         prs.start()
+        tabs.mcp = mcp
+        mcp.start(tabs: tabs, sessions: sessions, history: history, notifications: notifications, prs: prs)
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
                 await sessions.initialScan?.value
@@ -98,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if running > 0 && !tabs.confirmClose(count: running) { return .terminateCancel }
         for tab in tabs.tabs { tab.surface.free() }
         hooks.stop()
+        mcp.stop()
         Task { await sessions.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
@@ -136,6 +140,7 @@ struct ClinicCommands: Commands {
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
             Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
+            Button("Toggle Attachments") { tabs.toggleAttachments() }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()
             Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut("]", modifiers: [.command, .shift])

@@ -29,7 +29,7 @@ final class Tab: Identifiable {
     var panelSurface: GhosttySurfaceView?
     var panelVisible = false
     /// Right column: git page (ADR-052) or PR page (ADR-053). One at a time.
-    enum RightPane: Equatable { case none, git, pr(PullRequestRef) }
+    enum RightPane: Equatable { case none, git, pr(PullRequestRef), attachments }
     var rightPane: RightPane = .none
     var gitPage: GitPageModel?
     var gitPageVisible: Bool { rightPane == .git }
@@ -59,6 +59,8 @@ final class TabStore {
     let hooks: HookService
     let notifications: NotificationService
     let history: NotificationStore
+    /// Set by the app after construction (ADR-056).
+    var mcp: MCPToolService?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -113,7 +115,8 @@ final class TabStore {
         if let existing = tab(for: summary.id) { selectedTabId = existing.id; return }
         sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        launch.mcpConfigPath = mcp?.configPath(for: summary.id)
         guard let tab = makeTab(kind: .session(summary.id), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: sessions.displayName(for: summary)) else { return }
         tab.lastResume = launch
@@ -123,9 +126,12 @@ final class TabStore {
     /// New session with a pre-assigned id (ADR-017, ADR-032). `prompt` becomes the first turn (ADR-054).
     func newSession(projectPath: String, model: String?, worktree: Bool, effort: String? = nil, prompt: String? = nil) {
         let id = SessionID.generate()
-        let launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
+        var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
+        launch.mcpConfigPath = mcp?.configPath(for: id)
         guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }
-        tab.lastResume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        resume.mcpConfigPath = launch.mcpConfigPath
+        tab.lastResume = resume
         tab.model = model
         sessions.registerPending(id: id, cwd: projectPath)
         sessions.update { s in
@@ -276,6 +282,12 @@ final class TabStore {
         if tab.gitPage == nil { tab.gitPage = GitPageModel() }
         tab.rightPane = tab.rightPane == .git ? .none : .git
         if !tab.gitPageVisible { tab.gitPage?.stopWatching() }
+    }
+
+    /// ⌘⇧I: attachments panel.
+    func toggleAttachments(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab, tab.sessionId != nil else { return }
+        if tab.rightPane == .attachments { tab.rightPane = .none } else { tab.gitPage?.stopWatching(); tab.rightPane = .attachments }
     }
 
     /// PR refs known for a tab's session (from the transcript).

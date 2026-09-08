@@ -82,6 +82,8 @@ struct TabSurfaces: View {
             RightSplit { terminals } right: { if let git = tab.gitPage { GitPage(tab: tab, model: git) } }
         case .pr(let ref):
             RightSplit { terminals } right: { PRPage(tab: tab, ref: ref) }
+        case .attachments:
+            RightSplit { terminals } right: { AttachmentsPanel(tab: tab) }
         case .none:
             terminals
         }
@@ -105,6 +107,7 @@ struct TabSurfaces: View {
 /// Model, branch and cwd for the selected tab (milestone 2, Collins footer).
 struct TabFooter: View {
     @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
     let tab: Tab
 
     var body: some View {
@@ -125,6 +128,9 @@ struct TabFooter: View {
             HStack(spacing: 6) {
                 FooterToggle(title: "Panel", symbol: "rectangle.bottomthird.inset.filled", active: tab.panelVisible, help: "Shell panel below the session (⌘J)") { tabs.togglePanel(tab) }
                 FooterToggle(title: tab.gitBranch ?? "Git", symbol: "arrow.triangle.branch", active: tab.gitPageVisible, help: "Git page (⌘⇧G)") { tabs.toggleGitPage(tab) }
+                if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
+                    FooterToggle(title: "Images (\(n))", symbol: "photo.on.rectangle", active: tab.rightPane == .attachments, help: "Attachments (⌘⇧I)") { tabs.toggleAttachments(tab) }
+                }
                 ForEach(tabs.pullRequests(for: tab)) { ref in
                     PRChip(ref: ref, active: tab.rightPane == .pr(ref)) { tabs.togglePRPage(tab, ref: ref) }
                 }

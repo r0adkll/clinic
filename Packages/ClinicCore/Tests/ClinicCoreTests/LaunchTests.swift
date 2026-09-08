@@ -22,6 +22,18 @@ import Testing
         #expect(ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json", prompt: "   ").arguments.last == "/tmp/h.json")
     }
 
+    @Test func mcpConfigFlagAndFile() throws {
+        var l = ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json")
+        l.mcpConfigPath = "/tmp/mcp/\(id.rawValue).json"
+        #expect(l.arguments.suffix(2) == ["--mcp-config", "/tmp/mcp/\(id.rawValue).json"])
+        let data = try MCPConfig.json(helperPath: "/Applications/Clinic.app/Contents/MacOS/clinic-hook", socketPath: "/tmp/mcp.sock", sessionId: id)
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let server = try #require((root["mcpServers"] as? [String: Any])?["clinic"] as? [String: Any])
+        #expect(server["args"] as? [String] == ["mcp", "/tmp/mcp.sock", id.rawValue])
+        #expect(MCPToolSpec.all.map(\.name).contains("notify_user"))
+        #expect(MCPToolSpec.all.first { $0.name == "run_in_terminal" }?.defaultEnabled == false)
+    }
+
     @Test func shellQuoting() {
         #expect(ClaudeLaunch.shellQuote("it's") == "'it'\\''s'")
         #expect(ClaudeLaunch.shellQuote("plain-1.0") == "plain-1.0")

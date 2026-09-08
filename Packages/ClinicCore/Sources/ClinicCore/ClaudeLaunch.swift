@@ -13,8 +13,10 @@ public struct ClaudeLaunch: Sendable, Hashable {
     public var worktree: Bool
     public var settingsFilePath: String
     public var executable: String = "claude"
-    /// First turn, passed as the CLI's positional prompt (ADR-054).
+    /// First turn, passed as the CLI's positional prompt.
     public var prompt: String?
+    /// Per-session MCP config file (ADR-056).
+    public var mcpConfigPath: String?
 
     public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude", prompt: String? = nil) {
         self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable; self.prompt = prompt
@@ -33,6 +35,7 @@ public struct ClaudeLaunch: Sendable, Hashable {
         if let effort, !effort.isEmpty { args += ["--effort", effort] }
         if worktree, case .new = mode { args.append("-w") }
         args += ["--settings", settingsFilePath]
+        if let mcpConfigPath, !mcpConfigPath.isEmpty { args += ["--mcp-config", mcpConfigPath] }
         if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.append(prompt) }
         return args
     }
