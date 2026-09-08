@@ -55,6 +55,7 @@ struct ProjectMenu: View {
     @Environment(SessionStore.self) private var sessions
     let project: Project
     @State private var remote: URL?
+    @State private var checkoutTarget: String?
 
     var body: some View {
         Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
@@ -69,6 +70,12 @@ struct ProjectMenu: View {
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.path, forType: .string) }
         Divider()
+        Button("Git Pull") { Task { if let out = await RepoUpkeep.pull(project: project) { RepoUpkeep.showError("Git pull", out) } } }
+        Button("Checkout \(checkoutTarget ?? "default branch")") { Task { await RepoUpkeep.checkoutDefault(project: project) } }
+            .disabled(checkoutTarget == nil)
+            .task { checkoutTarget = await RepoUpkeep.checkoutTarget(project: project) }
+        Divider()
+        Button("Archive Project") { sessions.archiveProject(project) }
         Button("Reset Project Order") { sessions.resetProjectOrder() }.disabled(sessions.state.projectOrder.isEmpty)
         Button("Remove Project", role: .destructive) { sessions.removeProject(project) }
     }

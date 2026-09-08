@@ -16,7 +16,7 @@ final class SessionStore {
     private(set) var state = ClinicState()
     private(set) var isScanning = false
     var showArchived = false { didSet { rebuildProjects() } }
-    private var archiveUndoStack: [SessionID] = []
+    private var archiveUndoStack: [(SessionID, RepoUpkeep.TrashedWorktree?)] = []
 
     private let scanner: SessionScanner
     private let watcher: DirectoryWatcher
@@ -187,9 +187,16 @@ final class SessionStore {
         update { s in if s.favorites.contains(id) { s.favorites.remove(id) } else { s.favorites.insert(id) } }
     }
 
-    func archive(_ id: SessionID) {
-        archiveUndoStack.append(id)
+    func archive(_ id: SessionID, trashedWorktree: RepoUpkeep.TrashedWorktree? = nil) {
+        archiveUndoStack.append((id, trashedWorktree))
         update { s in s.archived[id] = Date() }
+    }
+
+    /// Archives every visible session of a project and hides the project (ADR-065).
+    func archiveProject(_ project: Project) {
+        let ids = sessions(in: project).map(\.id)
+        for id in ids { archiveUndoStack.append((id, nil)) }
+        update { s in for id in ids { s.archived[id] = Date() }; s.addedProjects.removeAll { $0 == project.path } }
     }
 
     func unarchive(_ id: SessionID) {
@@ -199,8 +206,9 @@ final class SessionStore {
     var canUndoArchive: Bool { !archiveUndoStack.isEmpty }
 
     func undoArchive() {
-        guard let id = archiveUndoStack.popLast() else { return }
+        guard let (id, trashed) = archiveUndoStack.popLast() else { return }
         unarchive(id)
+        if let trashed { Task { await RepoUpkeep.restore(trashed) } }
     }
 
     /// Case-insensitive substring match over name, prompt, project, branch and id. Empty query matches everything.

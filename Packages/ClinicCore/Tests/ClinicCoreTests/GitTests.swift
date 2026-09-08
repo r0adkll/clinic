@@ -400,3 +400,26 @@ import Testing
         #expect(!FSEventsWatcher.isIgnored("/repo/src/objects/a.swift"))
     }
 }
+
+
+@Suite(.serialized) struct GitUpkeepTests {
+    @Test func worktreesCheckoutAndPrune() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clinic-upkeep-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func sh(_ a: [String]) throws { let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = a; p.currentDirectoryURL = dir; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice; try p.run(); p.waitUntilExit() }
+        try sh(["git", "init", "-q", "-b", "main"]); try sh(["git", "config", "user.email", "t@t"]); try sh(["git", "config", "user.name", "t"]); try sh(["git", "config", "commit.gpgsign", "false"])
+        try "a".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try sh(["git", "add", "."]); try sh(["git", "commit", "-q", "-m", "init"])
+        let repo = GitRepository(root: dir.path)
+        let wt = dir.appendingPathComponent(".claude/worktrees/feature").path
+        try sh(["git", "worktree", "add", "-q", "-b", "feature", wt])
+        let list = try await repo.worktrees()
+        #expect(list.count == 2 && list[0].isMain && list[1].branch == "feature" && list[1].path.hasSuffix("/feature"))
+        await #expect(throws: GitError.self) { try await repo.checkout("feature") }   // branch is held by the worktree
+        try await repo.removeWorktree(wt)
+        #expect(try await repo.worktrees().count == 1)
+        try await repo.addWorktree(path: wt, branch: "feature")
+        #expect(try await repo.worktrees().count == 2)
+        try await repo.pruneWorktrees()
+    }
+}

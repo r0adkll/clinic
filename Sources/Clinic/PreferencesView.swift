@@ -17,6 +17,7 @@ struct PreferencesView: View {
     @AppStorage("ClinicShowUsage") private var showUsage = true
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
+    @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
 
     var body: some View {
         TabView {
@@ -24,6 +25,9 @@ struct PreferencesView: View {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
                 Toggle("Show tab bar", isOn: $showTabBar)
                 Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
+                Picker("When archiving a session in a worktree", selection: $archiveWorktree) {
+                    Text("Ask").tag("ask"); Text("Always trash the worktree").tag("always"); Text("Never trash").tag("never")
+                }
                 Picker("Merge pull requests with", selection: $mergeMethod) {
                     Text("Squash").tag("squash"); Text("Merge commit").tag("merge"); Text("Rebase").tag("rebase")
                 }

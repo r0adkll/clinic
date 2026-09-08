@@ -215,6 +215,56 @@ public actor GitRepository {
     }
 
     /// Short branch name; nil when detached or not a repository.
+    // MARK: Upkeep (ADR-065)
+
+    /// `git pull --ff-only`; returns git's output.
+    public func pull() async throws -> String {
+        let r = try await git(["pull", "--ff-only"])
+        return r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func checkout(_ branch: String) async throws {
+        _ = try await git(["checkout", branch])
+    }
+
+    public struct Worktree: Sendable, Hashable {
+        public var path: String
+        public var head: String?
+        public var branch: String?     // refs/heads/… stripped
+        public var isMain: Bool
+    }
+
+    /// `git worktree list --porcelain`.
+    public func worktrees() async throws -> [Worktree] {
+        let r = try await git(["worktree", "list", "--porcelain"])
+        var out: [Worktree] = []
+        var current: Worktree?
+        for line in r.stdoutString.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("worktree ") {
+                if let c = current { out.append(c) }
+                current = Worktree(path: String(line.dropFirst(9)), head: nil, branch: nil, isMain: out.isEmpty)
+            } else if line.hasPrefix("HEAD ") { current?.head = String(line.dropFirst(5)) }
+            else if line.hasPrefix("branch ") { current?.branch = String(line.dropFirst(7)).replacingOccurrences(of: "refs/heads/", with: "") }
+        }
+        if let c = current { out.append(c) }
+        return out
+    }
+
+    /// Unregisters a worktree whose directory may already be gone (`--force`).
+    public func removeWorktree(_ path: String) async throws {
+        _ = try await git(["worktree", "remove", "--force", path])
+    }
+
+    /// Re-registers a worktree for an existing branch at `path` (used by Undo).
+    public func addWorktree(path: String, branch: String) async throws {
+        _ = try await git(["worktree", "add", path, branch])
+    }
+
+    /// Prunes stale worktree entries (after a directory was moved away).
+    public func pruneWorktrees() async throws {
+        _ = try await git(["worktree", "prune"])
+    }
+
     public func currentBranch() async -> String? {
         let r = await GitProcess.run(["symbolic-ref", "--short", "-q", "HEAD"], in: root)
         guard r.status == 0 else { return nil }

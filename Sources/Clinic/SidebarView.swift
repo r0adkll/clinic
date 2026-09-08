@@ -199,10 +199,13 @@ enum SessionActions {
         }
     }
 
-    /// Archiving an open session closes its tab first (with the usual confirmation if Claude is running).
+    /// Archiving an open session closes its tab first (with the usual confirmation if Claude is running), then offers to trash its worktree (ADR-065).
     static func archive(_ summary: SessionSummary, sessions: SessionStore, tabs: TabStore) {
         if let tab = tabs.tab(for: summary.id), !tabs.close(tab) { return }
-        sessions.archive(summary.id)
+        Task { @MainActor in
+            let trashed = await RepoUpkeep.offerWorktreeTrash(for: summary, tabs: tabs, agents: tabs.backgroundAgents)
+            sessions.archive(summary.id, trashedWorktree: trashed)
+        }
     }
 }
 
