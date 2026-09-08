@@ -65,6 +65,10 @@ final class SessionStore {
         }
     }
 
+    /// Shared scratch directory for chats (ADR-068).
+    static let chatsDirectory: String = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Clinic/Chats", isDirectory: true).path
+    static func isChats(_ path: String) -> Bool { path == chatsDirectory }
+
     private func rebuildProjects() {
         var byPath: [String: Date] = [:]
         for s in sessions.values {
@@ -73,9 +77,10 @@ final class SessionStore {
         }
         for added in state.addedProjects where byPath[added] == nil && !state.removedProjects.contains(added) { byPath[added] = .distantPast }
         // ADR-062: manual order first, then the rest by activity.
-        let pinned = state.projectOrder.filter { byPath[$0] != nil }
-        let rest = byPath.keys.filter { !pinned.contains($0) }.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }
-        projects = (pinned + rest).map(Project.init(path:))
+        let chats = byPath[Self.chatsDirectory] != nil ? [Self.chatsDirectory] : []
+        let pinned = state.projectOrder.filter { byPath[$0] != nil && !Self.isChats($0) }
+        let rest = byPath.keys.filter { !pinned.contains($0) && !Self.isChats($0) }.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }
+        projects = (chats + pinned + rest).map(Project.init(path:))
     }
 
     // MARK: Project groups (ADR-062)

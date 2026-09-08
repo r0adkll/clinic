@@ -106,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopAfterLaunch")
             if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
         }
+        if UserDefaults.standard.bool(forKey: "ClinicNewChatOnLaunch") { tabs.newChat() }
         // `-ClinicSelectTabAfterLaunch <index>`: select a tab once launch tabs exist (attention smoke tests).
         if UserDefaults.standard.object(forKey: "ClinicSelectTabAfterLaunch") != nil {
             let i = UserDefaults.standard.integer(forKey: "ClinicSelectTabAfterLaunch")
@@ -156,6 +157,7 @@ struct ClinicCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: tabs.selectedTab?.projectPath) }.keyboardShortcut("n", modifiers: .command)
+            Button("New Chat") { tabs.newChat() }.keyboardShortcut("n", modifiers: [.command, .option])
             Button("New Shell") { tabs.newShell() }.keyboardShortcut("t", modifiers: .command)
             Divider()
             Button("Close Tab") { tabs.closeSelected() }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil)

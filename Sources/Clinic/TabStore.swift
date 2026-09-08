@@ -188,6 +188,14 @@ final class TabStore {
         selectedTabId = tab.id
     }
 
+    /// A session in the shared Chats scratch directory (ADR-068).
+    func newChat() {
+        let dir = SessionStore.chatsDirectory
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let model = UserDefaults.standard.string(forKey: Prefs.defaultModel).flatMap { $0 == "default" ? nil : $0 }
+        newSession(projectPath: dir, model: model, worktree: false)
+    }
+
     /// `claude --continue` in a project directory (ADR-063).
     func continueLast(in projectPath: String) {
         let launch = ClaudeLaunch(mode: .continueLast, settingsFilePath: hooks.settingsFileURL.path)

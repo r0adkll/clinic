@@ -20,7 +20,8 @@ struct ProjectHeader: View {
             }
             .buttonStyle(.plain).help(collapsed ? "Expand" : "Collapse")
             ProjectIcon(project: project)
-            Text(project.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1).help(project.path + "\nClick to start a session here")
+            Text(project.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: Capsule())
             Spacer(minLength: 4)
@@ -37,7 +38,7 @@ struct ProjectHeader: View {
         .textCase(nil)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
-        .onTapGesture { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
+        .onTapGesture { if SessionStore.isChats(project.path) { tabs.newChat() } else { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) } }
         .onHover { hovering = $0 }
         .contextMenu { ProjectMenu(project: project) }
         .draggable(project.path)
@@ -58,6 +59,7 @@ struct ProjectMenu: View {
     @State private var checkoutTarget: String?
 
     var body: some View {
+        if SessionStore.isChats(project.path) { Button("New Chat") { tabs.newChat() } }
         Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
         Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }
@@ -88,7 +90,12 @@ struct ProjectIcon: View {
 
     var body: some View {
         Group {
-            if let image = ProjectIconCache.shared.image(for: project.path) {
+            if SessionStore.isChats(project.path) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: size * 0.22).fill(Color.accentColor)
+                    Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.5)).foregroundStyle(.white)
+                }
+            } else if let image = ProjectIconCache.shared.image(for: project.path) {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else {
