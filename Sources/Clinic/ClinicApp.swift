@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let mcp = MCPToolService()
     let backgroundAgents = BackgroundAgentsService()
     let updates = UpdateCheck()
+    var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -55,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
+        statusItem = StatusItemController(tabs: tabs, history: history)
         updates.start { [weak self] version, url in
             self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
         }

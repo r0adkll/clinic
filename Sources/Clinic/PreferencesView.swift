@@ -19,12 +19,14 @@ struct PreferencesView: View {
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
     @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
     @AppStorage("ClinicCheckForUpdates") private var checkForUpdates = true
+    @AppStorage("ClinicShowStatusItem") private var showStatusItem = true
 
     var body: some View {
         TabView {
             Form {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
                 Toggle("Check for updates daily", isOn: $checkForUpdates)
+                Toggle("Show menu bar icon", isOn: $showStatusItem)
                 Toggle("Show tab bar", isOn: $showTabBar)
                 Toggle("Show Claude usage in the sidebar", isOn: $showUsage)
                 Picker("When archiving a session in a worktree", selection: $archiveWorktree) {
