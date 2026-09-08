@@ -160,6 +160,13 @@ struct ClinicCommands: Commands {
             Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut("m", modifiers: [.command, .shift])
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
+            Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))
+            Picker("Sort Sessions By", selection: Binding(get: { UserDefaults.standard.string(forKey: "ClinicSessionSort") ?? "activity" }, set: { UserDefaults.standard.set($0, forKey: "ClinicSessionSort"); sessions.update { _ in } })) {
+                Text("Last Activity").tag("activity"); Text("Creation Time").tag("created")
+            }
+            Divider()
+            Button("Collapse All Projects") { sessions.collapseAll() }
+            Button("Expand All Projects") { sessions.expandAll() }
         }
         CommandMenu("Tabs") {
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)

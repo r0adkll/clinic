@@ -69,14 +69,55 @@ final class SessionStore {
             byPath[p.path] = max(byPath[p.path] ?? .distantPast, s.activityDate)
         }
         for added in state.addedProjects where byPath[added] == nil && !state.removedProjects.contains(added) { byPath[added] = .distantPast }
-        projects = byPath.keys.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }.map(Project.init(path:))
+        // ADR-062: manual order first, then the rest by activity.
+        let pinned = state.projectOrder.filter { byPath[$0] != nil }
+        let rest = byPath.keys.filter { !pinned.contains($0) }.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }
+        projects = (pinned + rest).map(Project.init(path:))
     }
+
+    // MARK: Project groups (ADR-062)
+
+    func isCollapsed(_ project: Project) -> Bool { state.collapsedProjects.contains(project.path) }
+    func setCollapsed(_ project: Project, _ collapsed: Bool) {
+        let path = project.path
+        update { s in if collapsed { s.collapsedProjects.insert(path) } else { s.collapsedProjects.remove(path) } }
+    }
+    func collapseAll() { let all = Set(projects.map(\.path)); update { s in s.collapsedProjects = all } }
+    func expandAll() { update { s in s.collapsedProjects = [] } }
+
+    /// Moves `path` so it sits at `target`'s position; writes the complete visible order.
+    func moveProject(_ path: String, before target: String) {
+        guard path != target else { return }
+        var order = projects.map(\.path)
+        guard let from = order.firstIndex(of: path), let to = order.firstIndex(of: target) else { return }
+        order.remove(at: from)
+        let insertAt = order.firstIndex(of: target) ?? to
+        order.insert(path, at: insertAt)
+        let final = order
+        update { s in s.projectOrder = final }
+    }
+
+    func resetProjectOrder() { update { s in s.projectOrder = [] } }
+
+    func addProject(_ path: String) {
+        update { s in
+            s.removedProjects.remove(path)
+            if !s.addedProjects.contains(path) { s.addedProjects.append(path) }
+        }
+    }
+
+    var sessionSort: String { UserDefaults.standard.string(forKey: "ClinicSessionSort") ?? "activity" }
 
     /// Sessions for a project, most recent first (ADR-040). Archived hidden unless `showArchived`.
     func sessions(in project: Project) -> [SessionSummary] {
-        sessions.values
+        let byCreated = sessionSort == "created"
+        return sessions.values
             .filter { isVisible($0) && ProjectGrouping.project(for: $0)?.path == project.path }
-            .sorted { ($0.activityDate, $0.id.rawValue) > ($1.activityDate, $1.id.rawValue) }
+            .sorted { a, b in
+                let ka = byCreated ? (a.createdAt ?? a.activityDate) : a.activityDate
+                let kb = byCreated ? (b.createdAt ?? b.activityDate) : b.activityDate
+                return (ka, a.id.rawValue) > (kb, b.id.rawValue)
+            }
     }
 
     /// Favorited sessions across projects, most recent first.

@@ -8,12 +8,35 @@ struct SidebarView: View {
     @State private var query = ""
 
     @AppStorage("ClinicShowUsage") private var showUsage = true
+    @AppStorage("ClinicShowFolderPaths") private var showFolderPaths = false
 
     var body: some View {
         VStack(spacing: 0) {
+            sidebarToolbar
+            Divider()
             sessionList
             if showUsage { Divider(); UsagePanel() }
         }
+    }
+
+    /// Collapse-all / expand-all and add-project (ADR-062).
+    private var sidebarToolbar: some View {
+        HStack(spacing: 6) {
+            Text("Sessions").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+            Button { sessions.collapseAll() } label: { Image(systemName: "chevron.up.chevron.down") }.help("Collapse all")
+            Button { sessions.expandAll() } label: { Image(systemName: "chevron.down") }.help("Expand all")
+            Button { addProject() } label: { Image(systemName: "plus") }.help("Add project folder")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 12).padding(.vertical, 5)
+    }
+
+    private func addProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.message = "Choose a project folder to show in the sidebar"
+        if panel.runModal() == .OK, let url = panel.url { sessions.addProject(url.path) }
     }
 
     private var sessionList: some View {
@@ -26,11 +49,12 @@ struct SidebarView: View {
             }
             ForEach(sessions.projects) { project in
                 let rows = sessions.sessions(in: project).filter { sessions.matches($0, query: query) }
+                let collapsed = query.isEmpty && sessions.isCollapsed(project)
                 if !rows.isEmpty || query.isEmpty {
                     Section {
-                        ForEach(rows) { summary in row(summary) }
+                        if !collapsed { ForEach(rows) { summary in row(summary) } }
                     } header: {
-                        ProjectHeader(project: project, count: rows.count)
+                        ProjectHeader(project: project, count: rows.count, collapsed: collapsed)
                     }
                 }
             }
@@ -46,7 +70,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func row(_ summary: SessionSummary) -> some View {
-        SessionRow(summary: summary, tab: tabs.tab(for: summary.id))
+        SessionRow(summary: summary, tab: tabs.tab(for: summary.id), showPath: showFolderPaths)
             .tag(SidebarItem.session(summary.id))
             .contextMenu { SessionContextMenu(summary: summary) }
     }
@@ -147,6 +171,7 @@ struct SessionRow: View {
     @Environment(BackgroundAgentsService.self) private var background
     let summary: SessionSummary
     let tab: Tab?
+    var showPath = false
     @State private var hovering = false
 
     var body: some View {
@@ -173,7 +198,13 @@ struct SessionRow: View {
                     }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(Color.accentColor)
                 } else {
-                    Text(summary.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(summary.activityDate, format: .relative(presentation: .named))
+                        if showPath, let cwd = summary.lastCwd ?? summary.cwd {
+                            Text("·"); Text(TabFooter.abbreviate(cwd)).lineLimit(1).truncationMode(.head)
+                        }
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 0)

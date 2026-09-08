@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import ClinicCore
 
 /// Project header: icon, name, count, "+" and a menu (ADR-050).
@@ -7,12 +8,19 @@ struct ProjectHeader: View {
     @Environment(SessionStore.self) private var sessions
     let project: Project
     let count: Int
+    var collapsed = false
     @State private var hovering = false
+    @State private var dropTargeted = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            Button { sessions.setCollapsed(project, !collapsed) } label: {
+                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90)).frame(width: 12)
+            }
+            .buttonStyle(.plain).help(collapsed ? "Expand" : "Collapse")
             ProjectIcon(project: project)
-            Text(project.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1).help(project.path)
+            Text(project.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1).help(project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: Capsule())
             Spacer(minLength: 4)
@@ -29,8 +37,16 @@ struct ProjectHeader: View {
         .textCase(nil)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .onTapGesture { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
         .onHover { hovering = $0 }
         .contextMenu { ProjectMenu(project: project) }
+        .draggable(project.path)
+        .dropDestination(for: String.self) { items, _ in
+            guard let moved = items.first, moved != project.path else { return false }
+            sessions.moveProject(moved, before: project.path)
+            return true
+        } isTargeted: { dropTargeted = $0 }
+        .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accentColor).frame(height: 2) } }
     }
 }
 
@@ -52,6 +68,7 @@ struct ProjectMenu: View {
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.path, forType: .string) }
         Divider()
+        Button("Reset Project Order") { sessions.resetProjectOrder() }.disabled(sessions.state.projectOrder.isEmpty)
         Button("Remove Project", role: .destructive) { sessions.removeProject(project) }
     }
 }

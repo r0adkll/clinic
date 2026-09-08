@@ -19,6 +19,8 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var removedProjects: Set<String> = []
     /// Images shown via `show_image` (ADR-056), newest last.
     public var attachments: [SessionID: [Attachment]] = [:]
+    /// Folded project groups (ADR-062).
+    public var collapsedProjects: Set<String> = []
 
     public init() {}
 
@@ -40,7 +42,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments
+        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -60,6 +62,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         ownedSessions = (try? c.decodeIfPresent([SessionID: OwnedSession].self, forKey: .ownedSessions)) ?? [:]
         removedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .removedProjects) ?? []
         attachments = (try? c.decodeIfPresent([SessionID: [Attachment]].self, forKey: .attachments)) ?? [:]
+        collapsedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .collapsedProjects) ?? []
     }
 
     /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that
