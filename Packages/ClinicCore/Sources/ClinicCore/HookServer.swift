@@ -22,7 +22,7 @@ public final class HookServer: @unchecked Sendable {
         continuation = c
     }
 
-    public static func defaultSocketPath(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) -> String {
+    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport) -> String {
         appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("hook.sock").path
     }
 

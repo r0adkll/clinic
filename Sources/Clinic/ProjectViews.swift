@@ -61,6 +61,7 @@ struct ProjectMenu: View {
     var body: some View {
         if SessionStore.isChats(project.path) { Button("New Chat") { tabs.newChat() } }
         Button("New Session") { tabs.startNewSession(projectPath: project.path) }
+        Button("New Session in New Window") { tabs.startNewSession(projectPath: project.path, inNewWindow: true) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
         Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }

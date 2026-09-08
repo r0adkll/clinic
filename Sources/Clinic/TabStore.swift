@@ -14,6 +14,8 @@ final class Tab: Identifiable {
     /// Mutable so a fork/continue tab can rebind to the id the CLI reports (ADR-063).
     var kind: Kind
     let projectPath: String
+    /// The window showing this tab (ADR-072).
+    var windowId: UUID
     let surface: GhosttySurfaceView
     /// Replay tabs carry a model instead of a live process (ADR-059).
     var replay: ReplayModel?
@@ -49,8 +51,8 @@ final class Tab: Identifiable {
     /// Editor panel (ADR-057), created on first open.
     var editor: EditorModel?
 
-    init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
-        self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
+    init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String, windowId: UUID) {
+        self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title; self.windowId = windowId
         self.contentView = TabContentView(surface: surface)
         self.state = { if case .session = kind { return .launching } else { return nil } }()
     }
@@ -70,10 +72,105 @@ final class TabStore {
     private(set) var startupError: String?
     var lastSurfaceError: String?
     private(set) var tabs: [Tab] = []
-    var selectedTabId: UUID? { didSet { applySelection() } }
-    /// The new-session screen shown in the content area (ADR-071); selecting a tab dismisses it (text kept per project).
-    var editingDraft: NewSessionDraft? { didSet { if editingDraft != nil, selectedTabId != nil { selectedTabId = nil } } }
     private var drafts: [String: NewSessionDraft] = [:]
+
+    // MARK: Windows (ADR-072)
+
+    /// The window the system opens at launch; others are opened by value.
+    static let primaryWindowId = UUID()
+    private(set) var windows: [WindowState] = []
+    /// The last key window; commands and new tabs go here.
+    var activeWindowId: UUID?
+
+    var activeWindow: WindowState {
+        if let id = activeWindowId, let w = windows.first(where: { $0.id == id }) { return w }
+        return windows.first ?? windowState(id: Self.primaryWindowId)
+    }
+
+    /// The state for a window id, created on first sight.
+    func windowState(id: UUID) -> WindowState {
+        if let w = windows.first(where: { $0.id == id }) { return w }
+        let w = WindowState(id: id, isPrimary: id == Self.primaryWindowId)
+        w.store = self
+        windows.append(w)
+        return w
+    }
+
+    func window(of tab: Tab) -> WindowState { windowState(id: tab.windowId) }
+    func tabs(in window: WindowState) -> [Tab] { tabs.filter { $0.windowId == window.id } }
+    func selectedTab(in window: WindowState) -> Tab? { tabs.first { $0.id == window.selectedTabId } }
+
+    /// Selection and draft of the active window; existing call sites keep working.
+    var selectedTabId: UUID? {
+        get { activeWindow.selectedTabId }
+        set { activeWindow.selectedTabId = newValue }
+    }
+    var editingDraft: NewSessionDraft? {
+        get { activeWindow.editingDraft }
+        set { activeWindow.editingDraft = newValue }
+    }
+
+    /// Called once the SwiftUI hierarchy of a window has an NSWindow: close handling, key tracking, geometry.
+    func bind(_ nsWindow: NSWindow, to window: WindowState) {
+        guard window.nsWindow !== nsWindow else { return }
+        window.nsWindow = nsWindow
+        nsWindow.isRestorable = false
+        let lifecycle = window.lifecycle ?? WindowLifecycle(tabs: self, window: window)
+        window.lifecycle = lifecycle
+        lifecycle.attach(to: nsWindow)
+        if window.isPrimary {
+            nsWindow.setFrameAutosaveName("ClinicMainWindow")
+        } else if let key = windows.first(where: { $0.id != window.id && $0.nsWindow?.isKeyWindow == true })?.nsWindow
+                    ?? windows.first(where: { $0.id != window.id && $0.nsWindow?.isVisible == true })?.nsWindow {
+            let rect = NSRect(x: key.frame.minX + 28, y: key.frame.minY - 28, width: key.frame.width, height: key.frame.height)
+            nsWindow.setFrame(nsWindow.constrainFrameRect(rect, to: key.screen), display: true)
+        }
+        if nsWindow.isKeyWindow { activeWindowId = window.id }
+        for o in window.observers { NotificationCenter.default.removeObserver(o) }
+        window.observers = [
+            NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nsWindow, queue: .main) { [weak self, weak window] _ in
+                MainActor.assumeIsolated { if let window { self?.activeWindowId = window.id } }
+            },
+        ]
+    }
+
+    /// Registers a window and asks the active RootView to open it (`openWindow` is a view-side action).
+    @discardableResult
+    func openNewWindow() -> WindowState {
+        let w = windowState(id: UUID())
+        NotificationCenter.default.post(name: .clinicOpenWindow, object: w.id)
+        return w
+    }
+
+    func moveToNewWindow(_ tab: Tab) { move(tab, to: openNewWindow()) }
+
+    func move(_ tab: Tab, to target: WindowState) {
+        let from = window(of: tab)
+        guard from.id != target.id else { return }
+        tab.windowId = target.id
+        if from.selectedTabId == tab.id { from.selectedTabId = tabs(in: from).last?.id }
+        target.selectedTabId = tab.id
+        selectionChanged(in: from)
+        target.nsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// A window that is not the last one is closing: its tabs move to another window, nothing is stopped.
+    func windowWillClose(_ window: WindowState) {
+        guard windows.count > 1, let target = windows.first(where: { $0.id != window.id && $0.nsWindow?.isVisible == true }) ?? windows.first(where: { $0.id != window.id }) else { return }
+        let moving = tabs(in: window)
+        for tab in moving { tab.windowId = target.id }
+        if target.selectedTabId == nil, let last = moving.last { target.selectedTabId = last.id }
+        selectionChanged(in: target)
+        for o in window.observers { NotificationCenter.default.removeObserver(o) }
+        window.observers = []
+        windows.removeAll { $0.id == window.id }
+        if activeWindowId == window.id { activeWindowId = target.id }
+    }
+
+    /// "Looking at it" (ADR-066): app active, the tab's window is the active one, and the tab is selected there.
+    func isFrontAndSelected(_ tab: Tab) -> Bool {
+        NSApp.isActive && activeWindowId == tab.windowId && window(of: tab).selectedTabId == tab.id
+    }
 
     let sessions: SessionStore
     let hooks: HookService
@@ -85,6 +182,9 @@ final class TabStore {
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
+        let primary = WindowState(id: Self.primaryWindowId, isPrimary: true)
+        primary.store = self
+        windows = [primary]
     }
 
     /// Single router for attention (ADR-066): history always; then by focus — looking at it: nothing more;
@@ -92,8 +192,7 @@ final class TabStore {
     func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind, url: URL? = nil) {
         let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url)
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
-        let lookingAtIt = NSApp.isActive && tab != nil && selectedTabId == tab?.id
-        if lookingAtIt { return }
+        if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
             history.showCard(entry)
             if UserDefaults.standard.bool(forKey: Prefs.notificationSound) { NSSound(named: "Ping")?.play() }
@@ -110,7 +209,7 @@ final class TabStore {
         notify(tab, sessionId: sessionId, title: tab.title, body: body, kind: kind)
     }
 
-    var selectedTab: Tab? { tabs.first { $0.id == selectedTabId } }
+    var selectedTab: Tab? { selectedTab(in: activeWindow) }
 
     func start() {
         Self.adoptInstalledGhosttyResources()
@@ -149,7 +248,7 @@ final class TabStore {
 
     /// Opens (or focuses, ADR-041) a session known from disk.
     func open(session summary: SessionSummary) {
-        if let existing = tab(for: summary.id) { selectedTabId = existing.id; return }
+        if let existing = tab(for: summary.id) { select(existing); return }
         sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         let running = backgroundAgents?.runningAgent(for: summary.id)
@@ -166,30 +265,37 @@ final class TabStore {
     // MARK: New-session screen (ADR-071)
 
     /// Opens the screen for a project (reusing unsent text), or the folder picker when no project is known.
-    func startNewSession(projectPath: String? = nil) {
+    /// `inNewWindow` puts the screen in a fresh window (ADR-072).
+    func startNewSession(projectPath: String? = nil, inNewWindow: Bool = false) {
         guard let path = projectPath ?? selectedTab?.projectPath ?? editingDraft?.projectPath else {
             NotificationCenter.default.post(name: .clinicNewSession, object: nil); return
         }
-        if let d = drafts[path] { editingDraft = d; return }
+        let window = inNewWindow ? openNewWindow() : activeWindow
+        if let d = drafts[path] { window.editingDraft = d; return }
         let d = NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false)
         drafts[path] = d
-        editingDraft = d
+        window.editingDraft = d
     }
+
+    private func window(showing d: NewSessionDraft) -> WindowState? { windows.first { $0.editingDraft?.id == d.id } }
 
     func discardDraft(_ d: NewSessionDraft) {
         drafts[d.projectPath] = nil
-        if editingDraft?.id == d.id { editingDraft = nil; selectedTabId = tabs.last?.id }
+        if let w = window(showing: d) { w.editingDraft = nil; w.selectedTabId = tabs(in: w).last?.id }
     }
 
     func closeDraftScreen() {
-        editingDraft = nil
-        selectedTabId = tabs.last?.id
+        let w = activeWindow
+        w.editingDraft = nil
+        w.selectedTabId = tabs(in: w).last?.id
     }
 
     func sendDraft(_ d: NewSessionDraft, empty: Bool = false) {
         let prompt = empty ? nil : d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         drafts[d.projectPath] = nil
-        editingDraft = nil
+        let window = window(showing: d) ?? activeWindow
+        window.editingDraft = nil
+        if activeWindowId != window.id { activeWindowId = window.id }
         newSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: d.worktree, worktreeName: d.worktree ? d.worktreeName : nil,
                    effort: d.resolvedEffort, prompt: (prompt?.isEmpty ?? true) ? nil : prompt)
     }
@@ -270,7 +376,7 @@ final class TabStore {
         options.workingDirectory = summary.lastCwd ?? summary.cwd
         guard let surface = try? GhosttySurfaceView(runtime: runtime, options: options) else { return }
         surface.isOccluded = true
-        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary))
+        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary), windowId: activeWindow.id)
         tab.replay = ReplayModel(sessionId: summary.id, transcriptPath: summary.transcriptPath)
         tab.state = nil
         tabs.append(tab)
@@ -299,7 +405,7 @@ final class TabStore {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.15))
                 surface = try GhosttySurfaceView(runtime: runtime, options: options)
             }
-            let tab = Tab(kind: kind, projectPath: projectPath, surface: surface, title: title)
+            let tab = Tab(kind: kind, projectPath: projectPath, surface: surface, title: title, windowId: activeWindow.id)
             tab.pwd = cwd
             tab.pendingInput = initialInput
             surface.delegate = self
@@ -340,14 +446,14 @@ final class TabStore {
 
     // MARK: Selection / close (ADR-019, ADR-037)
 
-    private func applySelection() {
-        if selectedTabId != nil, editingDraft != nil { editingDraft = nil }
-        for t in tabs {
-            let hidden = (t.id != selectedTabId)
+    /// Occlusion follows each window's selection (ADR-019); called by `WindowState` when its selection changes.
+    func selectionChanged(in window: WindowState) {
+        for t in tabs(in: window) {
+            let hidden = (t.id != window.selectedTabId)
             t.surface.isOccluded = hidden
             t.panelSurface?.isOccluded = hidden || !t.panelVisible
         }
-        if let tab = selectedTab {
+        if let tab = selectedTab(in: window) {
             tab.unread = false
             if let id = tab.sessionId { history.markRead(sessionId: id) }
             if let id = tab.sessionId { sessions.update { $0.selectedSessionId = id } }
@@ -355,20 +461,26 @@ final class TabStore {
         }
     }
 
-    func select(_ tab: Tab) { selectedTabId = tab.id }
+    /// Selects a tab in its own window and brings that window forward (ADR-041 across windows).
+    func select(_ tab: Tab) {
+        let w = window(of: tab)
+        w.selectedTabId = tab.id
+        if activeWindowId != w.id || w.nsWindow?.isKeyWindow == false { w.nsWindow?.makeKeyAndOrderFront(nil) }
+    }
 
     func reveal(sessionId: SessionID) {
-        if let tab = tab(for: sessionId) { selectedTabId = tab.id }
+        if let tab = tab(for: sessionId) { select(tab) }
         else if let summary = sessions.sessions[sessionId] { open(session: summary) }
     }
 
     func selectNext(_ delta: Int) {
-        guard !tabs.isEmpty else { return }
-        let idx = tabs.firstIndex { $0.id == selectedTabId } ?? 0
-        selectedTabId = tabs[((idx + delta) % tabs.count + tabs.count) % tabs.count].id
+        let w = activeWindow, list = tabs(in: w)
+        guard !list.isEmpty else { return }
+        let idx = list.firstIndex { $0.id == w.selectedTabId } ?? 0
+        w.selectedTabId = list[((idx + delta) % list.count + list.count) % list.count].id
     }
 
-    func selectIndex(_ i: Int) { if tabs.indices.contains(i) { selectedTabId = tabs[i].id } }
+    func selectIndex(_ i: Int) { let list = tabs(in: activeWindow); if list.indices.contains(i) { activeWindow.selectedTabId = list[i].id } }
 
     /// Returns false if the user cancelled.
     @discardableResult
@@ -381,8 +493,9 @@ final class TabStore {
                 if tab.state != nil, !tab.isAttached { closeGracefully(tab); return false }
             }
         }
+        let w = window(of: tab)
         tabs.removeAll { $0.id == tab.id }
-        if selectedTabId == tab.id { selectedTabId = tabs.last?.id }
+        if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
         tab.panelSurface?.free()
         tab.panelSurface = nil
@@ -578,7 +691,7 @@ final class TabStore {
         guard let old = tab.state, let new = SessionStateMachine.reduce(old, event: event) else { return }
         tab.state = new
         tab.errorBadge = (event.hookEventName == "StopFailure")
-        let isFrontAndSelected = NSApp.isActive && selectedTabId == tab.id
+        let isFrontAndSelected = isFrontAndSelected(tab)
         if event.hookEventName == "StopFailure" {
             notify(tab, sessionId: event.sessionId, body: event.message ?? "The turn ended with an API error", kind: .error)
         } else if SessionStateMachine.isFinishedEdge(from: old, to: new) {
@@ -620,7 +733,7 @@ extension TabStore: GhosttySurfaceDelegate {
         case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
         case .openURL(let url, _): NSWorkspace.shared.open(url); return true
         case .ringBell:
-            if let tab, tab.id != selectedTabId || !NSApp.isActive {
+            if let tab, !isFrontAndSelected(tab) {
                 notify(tab, sessionId: tab.sessionId, title: tab.title, body: "Rang the bell", kind: .bell)
             } else { NSSound.beep() }
             return true

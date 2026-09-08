@@ -16,7 +16,7 @@ final class HookService {
     let traceDirectory: URL
     var traceEnabled: Bool { UserDefaults.standard.bool(forKey: Prefs.hookTrace) }
 
-    init(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) {
+    init(appSupport: URL = ClinicPaths.appSupport) {
         let dir = appSupport.appendingPathComponent("Clinic", isDirectory: true)
         settingsFileURL = dir.appendingPathComponent("hooks.json")
         traceDirectory = dir.appendingPathComponent("trace", isDirectory: true)

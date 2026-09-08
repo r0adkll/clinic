@@ -9,11 +9,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var item: NSStatusItem?
     private let tabs: TabStore
     private let history: NotificationStore
+    private let caffeine: CaffeineController
     private let menu = NSMenu()
     private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "statusitem")
 
-    init(tabs: TabStore, history: NotificationStore) {
-        self.tabs = tabs; self.history = history
+    init(tabs: TabStore, history: NotificationStore, caffeine: CaffeineController) {
+        self.tabs = tabs; self.history = history; self.caffeine = caffeine
         super.init()
         menu.delegate = self
         applyPreference()
@@ -75,15 +76,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let show = NSMenuItem(title: "Show Clinic", action: #selector(showApp), keyEquivalent: ""); show.target = self; menu.addItem(show)
         let new = NSMenuItem(title: "New Session…", action: #selector(newSession), keyEquivalent: ""); new.target = self; menu.addItem(new)
+        let caf = NSMenuItem(title: "Caffeine Mode", action: #selector(toggleCaffeine), keyEquivalent: ""); caf.target = self; caf.state = caffeine.isOn ? .on : .off; menu.addItem(caf)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Clinic", action: #selector(quit), keyEquivalent: ""); quit.target = self; menu.addItem(quit)
     }
 
     @objc private func reveal(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
+        guard let id = sender.representedObject as? UUID, let tab = tabs.tabs.first(where: { $0.id == id }) else { return }
         showApp()
-        tabs.selectedTabId = id
+        tabs.select(tab)
     }
+    @objc private func toggleCaffeine() { caffeine.isOn.toggle() }
     @objc private func showApp() { WindowLifecycle.showMainWindow() }
     @objc private func newSession() { showApp(); NotificationCenter.default.post(name: .clinicNewSession, object: tabs.selectedTab?.projectPath) }
     @objc private func quit() { NSApp.terminate(nil) }

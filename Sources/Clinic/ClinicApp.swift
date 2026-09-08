@@ -7,19 +7,22 @@ struct ClinicApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Clinic") {
-            RootView()
+        // One window group; the launch window carries no value (primary), others are opened by id (ADR-072).
+        WindowGroup("Clinic", id: "main", for: UUID.self) { $value in
+            RootView(windowValue: value)
                 .environment(appDelegate.tabs)
                 .environment(appDelegate.sessions)
                 .environment(appDelegate.history)
                 .environment(appDelegate.usage)
                 .environment(appDelegate.prs)
                 .environment(appDelegate.backgroundAgents)
+                .environment(appDelegate.bindings)
+                .environment(appDelegate.caffeine)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
-        .commands { ClinicCommands(tabs: appDelegate.tabs) }
-        Settings { PreferencesView().environment(appDelegate.usage) }
+        .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine) }
+        Settings { PreferencesView().environment(appDelegate.usage).environment(appDelegate.bindings) }
     }
 }
 
@@ -34,9 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let mcp = MCPToolService()
     let backgroundAgents = BackgroundAgentsService()
     let updates = UpdateCheck()
+    let bindings = KeyBindings()
+    let caffeine = CaffeineController()
     var statusItem: StatusItemController?
-    lazy var windowLifecycle = WindowLifecycle(tabs: tabs)
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
+
+    /// ADR-042/ADR-072: open tabs are never restored, the primary window keeps its frame through an autosave name,
+    /// and AppKit state restoration is opted out — saved state from a build with another scene shape would otherwise
+    /// be "restored" into no window at all.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.set(true, forKey: "ApplePersistenceIgnoreState")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
@@ -57,10 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
-        statusItem = StatusItemController(tabs: tabs, history: history)
-        DispatchQueue.main.async { [weak self] in
-            if let w = NSApp.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) }) { self?.windowLifecycle.attach(to: w) }
-        }
+        statusItem = StatusItemController(tabs: tabs, history: history, caffeine: caffeine)
         updates.start { [weak self] version, url in
             self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
         }
@@ -121,6 +129,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let i = UserDefaults.standard.integer(forKey: "ClinicSelectTabAfterLaunch")
             Task { try? await Task.sleep(for: .seconds(4)); tabs.selectIndex(i) }
         }
+        // `-ClinicMoveToNewWindowAfterLaunch <seconds>`: move the selected tab to a new window (ADR-072 smoke test).
+        let moveAfter = UserDefaults.standard.double(forKey: "ClinicMoveToNewWindowAfterLaunch")
+        if moveAfter > 0 { Task { try? await Task.sleep(for: .seconds(moveAfter)); if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } } }
+        // `-ClinicPreferencesOnLaunch <tab>`: open Preferences (ADR-073 smoke test).
+        if UserDefaults.standard.bool(forKey: "ClinicPreferencesOnLaunch") {
+            Task { try? await Task.sleep(for: .seconds(2)); NotificationCenter.default.post(name: .clinicOpenSettings, object: nil) }
+        }
+        // `-ClinicCaffeineOnLaunch YES`: hold the sleep assertion (ADR-075 smoke test; check with `pmset -g assertions`).
+        if UserDefaults.standard.bool(forKey: "ClinicCaffeineOnLaunch") { caffeine.isOn = true }
+        // `-ClinicCloseSecondaryAfterLaunch <seconds>`: close the newest secondary window so its tabs re-home (ADR-072 smoke test).
+        let closeAfter = UserDefaults.standard.double(forKey: "ClinicCloseSecondaryAfterLaunch")
+        if closeAfter > 0 { Task { try? await Task.sleep(for: .seconds(closeAfter)); tabs.windows.last(where: { !$0.isPrimary })?.nsWindow?.performClose(nil) } }
+        // `-ClinicSelectModeOnLaunch YES`: sidebar select mode (ADR-074 smoke test).
+        if UserDefaults.standard.bool(forKey: "ClinicSelectModeOnLaunch") { Task { try? await Task.sleep(for: .seconds(2)); tabs.activeWindow.selectMode = true } }
         // `-ClinicForkOnLaunch <session-id>`: fork an existing session (ADR-063).
         if let raw = UserDefaults.standard.string(forKey: "ClinicForkOnLaunch"), !raw.isEmpty {
             Task { await sessions.initialScan?.value; if let s = sessions.sessions[SessionID(raw)] { tabs.fork(s) } }
@@ -186,43 +208,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ClinicCommands: Commands {
     let tabs: TabStore
+    let bindings: KeyBindings
+    let caffeine: CaffeineController
     var sessions: SessionStore { tabs.sessions }
     private var selectedSession: SessionSummary? { tabs.selectedTab?.sessionId.flatMap { sessions.sessions[$0] } }
+    private func key(_ a: ShortcutAction) -> KeyboardShortcut? { bindings.shortcut(for: a) }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") { tabs.startNewSession() }.keyboardShortcut("n", modifiers: .command)
-            Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("New Chat") { tabs.newChat() }.keyboardShortcut("n", modifiers: [.command, .option])
-            Button("New Shell") { tabs.newShell() }.keyboardShortcut("t", modifiers: .command)
+            Button("New Session") { tabs.startNewSession() }.keyboardShortcut(key(.newSession))
+            Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut(key(.newSessionInFolder))
+            Button("New Chat") { tabs.newChat() }.keyboardShortcut(key(.newChat))
+            Button("New Shell") { tabs.newShell() }.keyboardShortcut(key(.newShell))
+            Button("New Window") { tabs.openNewWindow() }.keyboardShortcut(key(.newWindow))
             Divider()
-            Button("Close Tab") { if tabs.editingDraft != nil { tabs.closeDraftScreen() } else { tabs.closeSelected() } }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
+            Button("Close Tab") { if tabs.editingDraft != nil { tabs.closeDraftScreen() } else { tabs.closeSelected() } }.keyboardShortcut(key(.closeTab)).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
         }
         CommandMenu("Session") {
             Button("Rename…") { if let s = selectedSession { SessionActions.rename(s, sessions: sessions) } }
-                .keyboardShortcut("r", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+                .keyboardShortcut(key(.renameSession)).disabled(selectedSession == nil)
             Button(selectedSession.map { sessions.isFavorite($0.id) } == true ? "Remove from Favorites" : "Add to Favorites") {
                 if let s = selectedSession { sessions.toggleFavorite(s.id) }
-            }.keyboardShortcut("d", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+            }.keyboardShortcut(key(.toggleFavorite)).disabled(selectedSession == nil)
             Button("Archive") { if let s = selectedSession { SessionActions.archive(s, sessions: sessions, tabs: tabs) } }
-                .keyboardShortcut("a", modifiers: [.command, .shift]).disabled(selectedSession == nil)
+                .keyboardShortcut(key(.archiveSession)).disabled(selectedSession == nil)
             Button("Undo Archive") { sessions.undoArchive() }
-                .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!sessions.canUndoArchive)
+                .keyboardShortcut(key(.undoArchive)).disabled(!sessions.canUndoArchive)
             Button("Stop Session") { if let t = tabs.selectedTab { tabs.stop(t) } }
-                .keyboardShortcut(".", modifiers: .command).disabled(!tabs.canStopSelected)
-            Button("Fork Session") { if let s = selectedSession { tabs.fork(s) } }.disabled(selectedSession == nil)
+                .keyboardShortcut(key(.stopSession)).disabled(!tabs.canStopSelected)
+            Button("Fork Session") { if let s = selectedSession { tabs.fork(s) } }.keyboardShortcut(key(.forkSession)).disabled(selectedSession == nil)
             Button("Background This Session") { if let t = tabs.selectedTab { tabs.background(t) } }
-                .keyboardShortcut("b", modifiers: [.command, .option]).disabled(!tabs.canBackgroundSelected)
+                .keyboardShortcut(key(.backgroundSession)).disabled(!tabs.canBackgroundSelected)
             Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: nil) }
-                .keyboardShortcut("i", modifiers: .command).disabled(selectedSession == nil)
+                .keyboardShortcut(key(.sessionDetails)).disabled(selectedSession == nil)
             Button("Replay…") { if let s = selectedSession { tabs.openReplay(s) } }
-                .keyboardShortcut("r", modifiers: [.command, .option]).disabled(selectedSession == nil)
+                .keyboardShortcut(key(.replaySession)).disabled(selectedSession == nil)
             Divider()
             Button("Jump to Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: nil) }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut(key(.jumpToSession))
         }
         CommandGroup(after: .sidebar) {
-            Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
+            Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
+            Toggle("Caffeine Mode", isOn: Binding(get: { caffeine.isOn }, set: { caffeine.isOn = $0 })).keyboardShortcut(key(.caffeine))
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
             Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))
@@ -234,14 +262,16 @@ struct ClinicCommands: Commands {
             Button("Expand All Projects") { sessions.expandAll() }
         }
         CommandMenu("Tabs") {
-            Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
-            Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
-            Button("Toggle Editor") { tabs.toggleEditor() }.keyboardShortcut("e", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
-            Button("Toggle Attachments") { tabs.toggleAttachments() }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(tabs.selectedTab?.sessionId == nil)
-            Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
+            Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
+            Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut(key(.toggleGitPage)).disabled(tabs.selectedTab == nil)
+            Button("Toggle Editor") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
+            Button("Toggle Attachments") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
+            Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()
-            Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
-            Button("Previous Tab") { tabs.selectNext(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Move Tab to New Window") { if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } }.keyboardShortcut(key(.moveTabToNewWindow)).disabled(tabs.selectedTab == nil)
+            Divider()
+            Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut(key(.nextTab))
+            Button("Previous Tab") { tabs.selectNext(-1) }.keyboardShortcut(key(.previousTab))
             Divider()
             ForEach(0..<9, id: \.self) { i in
                 Button("Tab \(i + 1)") { tabs.selectIndex(i) }.keyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command)
@@ -255,4 +285,6 @@ extension Notification.Name {
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
     static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
+    static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
+    static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")
 }

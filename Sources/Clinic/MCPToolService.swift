@@ -14,7 +14,7 @@ final class MCPToolService {
     private weak var notifications: NotificationService?
     private weak var prs: PRStore?
 
-    init(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) {
+    init(appSupport: URL = ClinicPaths.appSupport) {
         server = MCPServer(socketPath: MCPServer.defaultSocketPath(appSupport: appSupport))
         configDirectory = appSupport.appendingPathComponent("Clinic/mcp", isDirectory: true)
     }
@@ -81,7 +81,7 @@ final class MCPToolService {
         case "notify_user":
             let message = args["message"] as? String ?? ""
             let title = args["title"] as? String ?? tab.title
-            let lookingAtIt = NSApp.isActive && tabs?.selectedTabId == tab.id
+            let lookingAtIt = tabs?.isFrontAndSelected(tab) ?? false
             tabs?.notify(tab, sessionId: sessionId, title: title, body: message, kind: .needsInput)
             return MCPToolSpec.textResult(lookingAtIt ? "The user is looking at this session; the message was added to their history without a notification." : "Notification delivered.")
 

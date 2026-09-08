@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(WindowState.self) private var window
+    @Environment(KeyBindings.self) private var bindings
     @Binding var showNewSession: Bool
     @State private var query = ""
 
@@ -16,15 +18,28 @@ struct SidebarView: View {
             sidebarToolbar
             Divider()
             sessionList
+            if bulkActive { Divider(); BulkActionBar(ids: bulkIds) }
             if showUsage { Divider(); UsagePanel() }
         }
     }
 
-    /// Collapse-all / expand-all and add-project (ADR-062).
+    /// Select mode, or a ⌘/⇧-click multi-selection (ADR-074).
+    private var bulkActive: Bool { window.selectMode || window.bulkSelection.count > 1 }
+    private var bulkIds: [SessionID] { Self.sessionIds(window.bulkSelection, sessions: sessions) }
+
+    static func sessionIds(_ items: Set<SidebarItem>, sessions: SessionStore) -> [SessionID] {
+        items.compactMap { if case .session(let id) = $0, sessions.sessions[id] != nil { return id } else { return nil } }
+            .sorted { ($0.rawValue) < ($1.rawValue) }
+    }
+
+    /// Collapse-all / expand-all, select mode and add-project (ADR-062, ADR-074).
     private var sidebarToolbar: some View {
         HStack(spacing: 6) {
             Text("Sessions").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Spacer()
+            Button { window.selectMode.toggle() } label: {
+                Image(systemName: window.selectMode ? "checklist.checked" : "checklist").foregroundStyle(window.selectMode ? Color.accentColor : Color.primary)
+            }.help((window.selectMode ? "Done selecting" : "Select sessions") + bindings.hint(.selectSessions))
             Button { sessions.collapseAll() } label: { Image(systemName: "chevron.up.chevron.down") }.help("Collapse all")
             Button { sessions.expandAll() } label: { Image(systemName: "chevron.down") }.help("Expand all")
             Button { addProject() } label: { Image(systemName: "plus") }.help("Add project folder")
@@ -61,6 +76,12 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .contextMenu(forSelectionType: SidebarItem.self) { items in
+            let ids = Self.sessionIds(items, sessions: sessions)
+            if ids.count > 1 { BulkSessionMenu(ids: ids) }
+            else if let id = ids.first, let s = sessions.sessions[id] { SessionContextMenu(summary: s) }
+        }
+        .onExitCommand { if window.selectMode { window.selectMode = false } else { window.bulkSelection = [] } }
         .searchable(text: $query, placement: .sidebar, prompt: "Filter sessions")
         .overlay {
             if sessions.projects.isEmpty && !sessions.isScanning {
@@ -71,9 +92,11 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func row(_ summary: SessionSummary) -> some View {
-        SessionRow(summary: summary, tab: tabs.tab(for: summary.id), showPath: showFolderPaths)
-            .tag(SidebarItem.session(summary.id))
-            .contextMenu { SessionContextMenu(summary: summary) }
+        let item = SidebarItem.session(summary.id)
+        SessionRow(summary: summary, tab: tabs.tab(for: summary.id), showPath: showFolderPaths,
+                   checked: window.selectMode ? window.bulkSelection.contains(item) : nil,
+                   onToggle: { if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) } })
+            .tag(item)
     }
 }
 
@@ -84,24 +107,99 @@ enum SidebarItem: Hashable {
 }
 
 extension SidebarView {
-    var selection: Binding<SidebarItem?> {
+    /// Plain click opens one session; ⌘/⇧-click or select mode builds a multi-selection instead (ADR-074).
+    var selection: Binding<Set<SidebarItem>> {
         Binding(
             get: {
-                guard let tab = tabs.selectedTab else { return nil }
-                if let id = tab.sessionId { return .session(id) }
-                return .tab(tab.id)
+                if window.selectMode || window.bulkSelection.count > 1 { return window.bulkSelection }
+                guard let tab = tabs.selectedTab(in: window) else { return [] }
+                return [tab.sessionId.map(SidebarItem.session) ?? .tab(tab.id)]
             },
-            set: { item in
-                switch item {
+            set: { items in
+                if window.selectMode || items.count > 1 { window.bulkSelection = items; return }
+                // ⌘-clicking a multi-selection down to one row is a deselect, not an open.
+                if window.bulkSelection.count > 1, items.isSubset(of: window.bulkSelection) { window.bulkSelection = []; return }
+                window.bulkSelection = []
+                switch items.first {
                 case .session(let id)?:
-                    if let tab = tabs.tab(for: id) { tabs.selectedTabId = tab.id }
+                    if let tab = tabs.tab(for: id) { tabs.select(tab) }
                     else if let summary = sessions.sessions[id] { tabs.open(session: summary) }
                 case .tab(let id)?:
-                    tabs.selectedTabId = id
+                    if let tab = tabs.tabs.first(where: { $0.id == id }) { tabs.select(tab) }
                 case nil:
                     break
                 }
             })
+    }
+}
+
+/// Bulk actions over several sessions (ADR-074). Archive runs the per-session flow (tab close confirmation, worktree offer).
+@MainActor
+enum BulkSessionActions {
+    static func open(_ ids: [SessionID], sessions: SessionStore, tabs: TabStore) {
+        for id in ids { if let s = sessions.sessions[id] { tabs.open(session: s) } }
+    }
+    static func closeTabs(_ ids: [SessionID], tabs: TabStore) {
+        for id in ids { if let t = tabs.tab(for: id) { tabs.close(t) } }
+    }
+    static func allFavorites(_ ids: [SessionID], sessions: SessionStore) -> Bool { !ids.isEmpty && ids.allSatisfy { sessions.isFavorite($0) } }
+    static func toggleFavorites(_ ids: [SessionID], sessions: SessionStore) {
+        let remove = allFavorites(ids, sessions: sessions)
+        sessions.update { s in for id in ids { if remove { s.favorites.remove(id) } else { s.favorites.insert(id) } } }
+    }
+    static func allMuted(_ ids: [SessionID], sessions: SessionStore) -> Bool { !ids.isEmpty && ids.allSatisfy { sessions.state.mutedSessions.contains($0) } }
+    static func toggleMute(_ ids: [SessionID], sessions: SessionStore) {
+        let unmute = allMuted(ids, sessions: sessions)
+        sessions.update { s in for id in ids { if unmute { s.mutedSessions.remove(id) } else { s.mutedSessions.insert(id) } } }
+    }
+    static func archive(_ ids: [SessionID], sessions: SessionStore, tabs: TabStore, window: WindowState) {
+        for id in ids { if let s = sessions.sessions[id], !sessions.isArchived(id) { SessionActions.archive(s, sessions: sessions, tabs: tabs) } }
+        window.bulkSelection = []
+    }
+    static func openCount(_ ids: [SessionID], tabs: TabStore) -> Int { ids.filter { tabs.tab(for: $0) != nil }.count }
+}
+
+struct BulkSessionMenu: View {
+    @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
+    @Environment(WindowState.self) private var window
+    let ids: [SessionID]
+
+    var body: some View {
+        Button("Open \(ids.count) Sessions") { BulkSessionActions.open(ids, sessions: sessions, tabs: tabs) }
+        Button("Close Tabs") { BulkSessionActions.closeTabs(ids, tabs: tabs) }.disabled(BulkSessionActions.openCount(ids, tabs: tabs) == 0)
+        Divider()
+        Button(BulkSessionActions.allFavorites(ids, sessions: sessions) ? "Remove from Favorites" : "Add to Favorites") { BulkSessionActions.toggleFavorites(ids, sessions: sessions) }
+        Button(BulkSessionActions.allMuted(ids, sessions: sessions) ? "Unmute Notifications" : "Mute Notifications") { BulkSessionActions.toggleMute(ids, sessions: sessions) }
+        Button("Archive \(ids.count) Sessions") { BulkSessionActions.archive(ids, sessions: sessions, tabs: tabs, window: window) }
+    }
+}
+
+/// Bottom bar in select mode / with a multi-selection: count plus the bulk actions.
+struct BulkActionBar: View {
+    @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
+    @Environment(WindowState.self) private var window
+    let ids: [SessionID]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(ids.isEmpty ? "Select sessions" : "\(ids.count) selected").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { window.selectMode = false; window.bulkSelection = [] }.font(.caption)
+            }
+            HStack(spacing: 6) {
+                Button("Open") { BulkSessionActions.open(ids, sessions: sessions, tabs: tabs) }
+                Button("Close") { BulkSessionActions.closeTabs(ids, tabs: tabs) }.disabled(BulkSessionActions.openCount(ids, tabs: tabs) == 0)
+                Button(BulkSessionActions.allFavorites(ids, sessions: sessions) ? "Unstar" : "Star") { BulkSessionActions.toggleFavorites(ids, sessions: sessions) }
+                Button(BulkSessionActions.allMuted(ids, sessions: sessions) ? "Unmute" : "Mute") { BulkSessionActions.toggleMute(ids, sessions: sessions) }
+                Button("Archive") { BulkSessionActions.archive(ids, sessions: sessions, tabs: tabs, window: window) }
+            }
+            .controlSize(.small)
+            .disabled(ids.isEmpty)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 }
 
@@ -120,6 +218,7 @@ struct SessionContextMenu: View {
             if tab.state == .idle { Button("Background") { tabs.background(tab) } }
         }
         Button("Fork Session") { tabs.fork(summary) }
+        if let tab = tabs.tab(for: summary.id) { MoveToWindowMenu(tab: tab) }
         if TabStore.ghosttyBinary != nil { Button("Open in Ghostty") { tabs.openInGhostty(summary) } }
         OpenInMenu(path: summary.lastCwd ?? summary.cwd ?? "")
         if let agent {
@@ -216,10 +315,18 @@ struct SessionRow: View {
     let summary: SessionSummary
     let tab: Tab?
     var showPath = false
+    /// Non-nil in select mode: shows a checkbox (ADR-074).
+    var checked: Bool? = nil
+    var onToggle: () -> Void = {}
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
+            if let checked {
+                Button(action: onToggle) {
+                    Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                }.buttonStyle(.plain)
+            }
             if let tab, tab.isAttached, !tab.childExited {
                 Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(Color.accentColor).frame(width: 10)
                     .help("Attached to a detached session (state not reported)")

@@ -27,7 +27,7 @@ public final class MCPServer: @unchecked Sendable {
 
     public init(socketPath: String) { self.socketPath = socketPath }
 
-    public static func defaultSocketPath(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) -> String {
+    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport) -> String {
         appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("mcp.sock").path
     }
 

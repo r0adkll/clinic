@@ -4,11 +4,12 @@ import ClinicCore
 /// Open tabs above the terminal (ADR-049). View → Show Tab Bar toggles it.
 struct TabBarView: View {
     @Environment(TabStore.self) private var tabs
+    @Environment(WindowState.self) private var window
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                ForEach(tabs.tabs) { tab in TabChip(tab: tab, selected: tab.id == tabs.selectedTabId) }
+                ForEach(tabs.tabs(in: window)) { tab in TabChip(tab: tab, selected: tab.id == window.selectedTabId) }
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
         }
@@ -42,6 +43,8 @@ struct TabChip: View {
         .contextMenu {
             Button("Close Tab") { tabs.close(tab) }
             if tab.sessionId != nil { Button("Toggle Terminal Panel") { tabs.togglePanel(tab) } }
+            Divider()
+            MoveToWindowMenu(tab: tab)
         }
     }
 }

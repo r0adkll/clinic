@@ -1,14 +1,15 @@
 import AppKit
 import ClinicCore
 
-/// Close-window and quit behaviour (ADR-069).
+/// Close-window and quit behaviour (ADR-069), one per window (ADR-072).
 @MainActor
 final class WindowLifecycle: NSObject, NSWindowDelegate {
     private let tabs: TabStore
+    private let state: WindowState
     private weak var original: NSWindowDelegate?
     private weak var window: NSWindow?
 
-    init(tabs: TabStore) { self.tabs = tabs }
+    init(tabs: TabStore, window: WindowState) { self.tabs = tabs; self.state = window }
 
     /// Wraps the main window's existing delegate so only `windowShouldClose` is intercepted.
     func attach(to window: NSWindow) {
@@ -24,6 +25,8 @@ final class WindowLifecycle: NSObject, NSWindowDelegate {
     override func forwardingTarget(for aSelector: Selector!) -> Any? { original }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Not the last window: its tabs move elsewhere, nothing is stopped (ADR-072).
+        if tabs.windows.count > 1 { tabs.windowWillClose(state); return true }
         guard tabs.runningCount > 0 else { return true }
         let alert = NSAlert()
         alert.messageText = "Keep sessions running?"

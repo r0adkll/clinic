@@ -66,7 +66,7 @@ final class SessionStore {
     }
 
     /// Shared scratch directory for chats (ADR-068).
-    static let chatsDirectory: String = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Clinic/Chats", isDirectory: true).path
+    static let chatsDirectory: String = ClinicPaths.appSupport.appendingPathComponent("Clinic/Chats", isDirectory: true).path
     static func isChats(_ path: String) -> Bool { path == chatsDirectory }
 
     private func rebuildProjects() {

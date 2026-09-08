@@ -4,6 +4,7 @@ import ClinicCore
 /// Toolbar bell with unread badge and a history popover.
 struct NotificationBell: View {
     @Environment(NotificationStore.self) private var store
+    @Environment(KeyBindings.self) private var bindings
     @State private var showPanel = false
 
     var body: some View {
@@ -12,8 +13,8 @@ struct NotificationBell: View {
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(store.unreadCount > 0 ? Color.accentColor : Color.primary, Color.primary)
         }
-        .help(store.unreadCount > 0 ? "\(store.unreadCount) unread" : "Notification history")
-        .keyboardShortcut("b", modifiers: [.command, .shift])
+        .help((store.unreadCount > 0 ? "\(store.unreadCount) unread" : "Notification history") + bindings.hint(.notifications))
+        .keyboardShortcut(bindings.shortcut(for: .notifications))
         .popover(isPresented: $showPanel, arrowEdge: .bottom) { NotificationPanel() }
     }
 }

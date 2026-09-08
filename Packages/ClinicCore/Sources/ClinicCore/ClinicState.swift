@@ -94,7 +94,7 @@ public actor StateStore {
         self.initialState = loaded
     }
 
-    public static func defaultURL(appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) -> URL {
+    public static func defaultURL(appSupport: URL = ClinicPaths.appSupport) -> URL {
         appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("state.json")
     }
 

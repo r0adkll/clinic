@@ -4,9 +4,15 @@ import ClinicCore
 import GhosttyBridge
 
 struct RootView: View {
+    /// Which `WindowState` this window renders (ADR-072); nil = the primary window the system opened.
+    let windowValue: UUID?
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
     @Environment(NotificationStore.self) private var history
+    @Environment(KeyBindings.self) private var bindings
+    @Environment(CaffeineController.self) private var caffeine
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @State private var showNewSession = false
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
@@ -14,84 +20,104 @@ struct RootView: View {
     @State private var newSessionProject: String?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
+    private var windowId: UUID { windowValue ?? TabStore.primaryWindowId }
+    private var window: WindowState { tabs.windowState(id: windowId) }
+    /// App-wide requests (⌘K, details, folder picker…) are answered by the active window only.
+    private var isActive: Bool { (tabs.activeWindowId ?? tabs.windows.first?.id) == windowId }
+
     var body: some View {
+        let window = self.window
         NavigationSplitView {
             SidebarView(showNewSession: $showNewSession)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 420)
         } detail: {
             DetailView()
         }
+        .environment(window)
+        .background(WindowAccessor { tabs.bind($0, to: window) })
         .frame(minWidth: 800, minHeight: 480)
-        .overlay(alignment: .topTrailing) { NotificationCard().animation(.easeOut(duration: 0.25), value: history.card?.id) }
+        .overlay(alignment: .topTrailing) { if isActive { NotificationCard().animation(.easeOut(duration: 0.25), value: history.card?.id) } }
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(isPresented: $showMCPServers) { MCPServersSheet() }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in showMCPServers = true }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { showMCPServers = true } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
+            guard isActive else { return }
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
-            else if let id = tabs.selectedTab?.sessionId { detailsFor = sessions.sessions[id] }
+            else if let id = tabs.selectedTab(in: window)?.sessionId { detailsFor = sessions.sessions[id] }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in showSwitcher = true }
-        .alert("Could not open a terminal", isPresented: Binding(get: { tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
+        .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in if isActive { showSwitcher = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { _ in if isActive { openSettings() } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicOpenWindow)) { n in
+            guard isActive, let id = n.object as? UUID else { return }
+            openWindow(id: "main", value: id)
+        }
+        .alert("Could not open a terminal", isPresented: Binding(get: { isActive && tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(tabs.lastSurfaceError ?? "") }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { n in newSessionProject = n.object as? String; showNewSession = true }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { n in
+            guard isActive else { return }
+            newSessionProject = n.object as? String; showNewSession = true
+        }
         .toolbar {
             ToolbarItemGroup {
-                Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
-                Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab (⌘T)")
+                Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session" + bindings.hint(.newSession))
+                Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab" + bindings.hint(.newShell))
+                Button { caffeine.isOn.toggle() } label: {
+                    Label("Caffeine", systemImage: caffeine.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+                        .foregroundStyle(caffeine.isOn ? Color.accentColor : Color.primary)
+                }
+                .help(caffeine.isOn ? "Caffeine mode is on: the Mac will not sleep" + bindings.hint(.caffeine) : "Caffeine mode: keep the Mac awake" + bindings.hint(.caffeine))
                 NotificationBell()
             }
         }
-        .navigationTitle(tabs.editingDraft != nil ? "New session" : (tabs.selectedTab?.title ?? "Clinic"))
+        .navigationTitle(window.editingDraft != nil ? "New session" : (tabs.selectedTab(in: window)?.title ?? "Clinic"))
     }
 }
 
 struct DetailView: View {
     @Environment(TabStore.self) private var tabs
-
+    @Environment(WindowState.self) private var window
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
     var body: some View {
+        let mine = tabs.tabs(in: window)
+        let selected = mine.first { $0.id == window.selectedTabId }
         VStack(spacing: 0) {
-            if showTabBar && !tabs.tabs.isEmpty && tabs.editingDraft == nil { TabBarView(); Divider() }
-            terminalArea
-            if tabs.editingDraft == nil, let tab = tabs.selectedTab, !tab.isReplay { Divider(); TabFooter(tab: tab) }
+            if showTabBar && !mine.isEmpty && window.editingDraft == nil { TabBarView(); Divider() }
+            terminalArea(mine: mine, selected: selected)
+            if window.editingDraft == nil, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
         }
     }
 
-    private var terminalArea: some View {
-        ZStack {
+    private func terminalArea(mine: [Tab], selected: Tab?) -> some View {
+        let live = mine.filter { $0.replay == nil }
+        let showTerminals = tabs.startupError == nil && window.editingDraft == nil && !mine.isEmpty && selected?.replay == nil
+        return ZStack {
+            // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
+            TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
+                          keys: live.map { "\($0.id)|\($0.panelVisible)|\(String(describing: $0.rightPane))|\($0.panelSurface == nil)|\($0.gitPage == nil)|\($0.editor == nil)" })
+            ForEach(mine.filter { $0.replay != nil }) { tab in
+                ReplayView(model: tab.replay!)
+                    .opacity(tab.id == window.selectedTabId ? 1 : 0)
+                    .allowsHitTesting(tab.id == window.selectedTabId)
+            }
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
-            } else if let draft = tabs.editingDraft {
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            } else if let draft = window.editingDraft {
                 NewSessionScreen(draft: draft)
-            } else if tabs.tabs.isEmpty {
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            } else if mine.isEmpty {
                 ContentUnavailableView("No session open", systemImage: "rectangle.on.rectangle.slash",
                                        description: Text("Pick a session from the sidebar, or press ⌘N to start a new one."))
-            } else {
-                // Every open tab keeps its surface mounted; only the selected one is visible (ADR-019).
-                ForEach(tabs.tabs) { tab in
-                    Group {
-                        if let replay = tab.replay { ReplayView(model: replay) } else { TabSurfaces(tab: tab, isSelected: tab.id == tabs.selectedTabId) }
-                    }
-                    .opacity(tab.id == tabs.selectedTabId ? 1 : 0)
-                    .allowsHitTesting(tab.id == tabs.selectedTabId)
-                }
-                if let tab = tabs.selectedTab, tab.childExited {
-                    ExitedOverlay(tab: tab)
-                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            } else if let tab = selected, tab.childExited {
+                ExitedOverlay(tab: tab)
             }
         }
     }
-}
-
-/// Main surface, optional shell panel, and right-column page, all inside the tab's persistent AppKit view.
-struct TabSurfaces: View {
-    let tab: Tab
-    let isSelected: Bool
-    var body: some View { TabContentRepresentable(tab: tab, isSelected: isSelected) }
 }
 
 /// Model, branch and cwd for the selected tab (milestone 2, Collins footer).

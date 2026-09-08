@@ -22,9 +22,11 @@ struct PreferencesView: View {
     @AppStorage("ClinicCheckForUpdates") private var checkForUpdates = true
     @AppStorage("ClinicShowStatusItem") private var showStatusItem = true
     @AppStorage("ClinicQuitBehaviour") private var quitBehaviour = "ask"
+    /// Smoke tests pick a tab with `-ClinicPreferencesTab <name>`.
+    @State private var tab = UserDefaults.standard.string(forKey: "ClinicPreferencesTab") ?? "general"
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             Form {
                 Toggle("Reopen last session on launch", isOn: $reopenLastSession)
                 Toggle("Check for updates daily", isOn: $checkForUpdates)
@@ -54,6 +56,7 @@ struct PreferencesView: View {
                 Text("Per-project choices in the New Session sheet override this.").font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
+            .tag("general")
             .tabItem { Label("General", systemImage: "gear") }
 
             Form {
@@ -61,6 +64,7 @@ struct PreferencesView: View {
                 Text("Notifications are posted when a session finishes or needs you and Clinic is not in front of it.").font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
+            .tag("notifications")
             .tabItem { Label("Notifications", systemImage: "bell") }
 
             Form {
@@ -68,13 +72,18 @@ struct PreferencesView: View {
                 ForEach(MCPToolSpec.all) { spec in ToolToggle(spec: spec) }
             }
             .formStyle(.grouped)
+            .tag("tools")
             .tabItem { Label("Session tools", systemImage: "wrench.and.screwdriver") }
+
+            ShortcutsPreferences()
+            .tag("shortcuts")
+            .tabItem { Label("Shortcuts", systemImage: "keyboard") }
 
             Form {
                 Toggle("Record hook payloads to a trace file", isOn: $hookTrace)
                 LabeledContent("Trace and state files") {
                     Button("Reveal in Finder") {
-                        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Clinic")
+                        let dir = ClinicPaths.appSupport.appendingPathComponent("Clinic")
                         NSWorkspace.shared.activateFileViewerSelecting([dir])
                     }
                 }
@@ -87,9 +96,10 @@ struct PreferencesView: View {
                 Text("Clinic never writes to ~/.claude. Its own state lives in Application Support.").font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
+            .tag("diagnostics")
             .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
         }
-        .frame(width: 520, height: 360)
+        .frame(width: 560, height: 420)
     }
 }
 
