@@ -26,6 +26,7 @@ struct TabChip: View {
         HStack(spacing: 6) {
             if tab.kind == .shell { Image(systemName: "terminal").font(.caption).foregroundStyle(.secondary) }
             else if tab.isReplay { Image(systemName: "play.circle").font(.caption).foregroundStyle(.secondary) }
+            else if tab.isAttached { Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(Color.accentColor) }
             else { StateGlyph(tab: tab) }
             Text(tab.title).lineLimit(1).font(.callout)
             Button { tabs.close(tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }

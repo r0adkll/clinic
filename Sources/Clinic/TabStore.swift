@@ -48,7 +48,7 @@ final class Tab: Identifiable {
 
     var sessionId: SessionID? { if case .session(let id) = kind { return id } else { return nil } }
     var isReplay: Bool { if case .replay = kind { return true } else { return false } }
-    var isRunningClaude: Bool { state != nil && state != .exited && !childExited }
+    var isRunningClaude: Bool { (state != nil && state != .exited && !childExited) || (isAttached && !childExited) }
 }
 
 /// Owns the libghostty runtime and every open tab (ADR-019, ADR-041, ADR-043).
@@ -130,6 +130,7 @@ final class TabStore {
         guard let tab = makeTab(kind: .session(summary.id), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: sessions.displayName(for: summary)) else { return }
         tab.isAttached = running != nil
+        if running != nil { tab.state = nil }   // `claude attach` accepts no --settings, so no hooks: state is unknown
         tab.lastResume = launch
         selectedTabId = tab.id
     }

@@ -151,7 +151,10 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
+            if let tab, tab.isAttached, !tab.childExited {
+                Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(Color.accentColor).frame(width: 10)
+                    .help("Attached to a detached session (state not reported)")
+            } else if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
                 Image(systemName: agent.needsAttention ? "exclamationmark.circle.fill" : "moon.zzz.fill")
                     .font(.caption).foregroundStyle(agent.needsAttention ? .orange : .secondary).frame(width: 10)
                     .help(agent.needsAttention ? "Detached — needs you" : "Running detached (\(agent.state ?? agent.status))")
