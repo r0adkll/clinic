@@ -34,6 +34,12 @@ import Testing
         #expect(MCPToolSpec.all.first { $0.name == "run_in_terminal" }?.defaultEnabled == false)
     }
 
+    @Test func worktreeNameIsPassed() {
+        var l = ClaudeLaunch(mode: .new(id: id), worktree: true, settingsFilePath: "/tmp/h.json")
+        l.worktreeName = "feature-x"
+        #expect(l.arguments.contains("-w") && l.arguments[l.arguments.firstIndex(of: "-w")! + 1] == "feature-x")
+    }
+
     @Test func continueLine() {
         #expect(ClaudeLaunch(mode: .continueLast, settingsFilePath: "/tmp/h.json").arguments == ["--continue", "--settings", "/tmp/h.json"])
     }

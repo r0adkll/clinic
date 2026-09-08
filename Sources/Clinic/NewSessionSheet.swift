@@ -69,7 +69,8 @@ struct NewSessionSheet: View {
 
     private func start() {
         let model: String? = switch modelChoice { case "default": nil; case "custom": customModel.isEmpty ? nil : customModel; default: modelChoice }
-        tabs.newSession(projectPath: projectPath, model: model, worktree: worktree, effort: effort == "default" ? nil : effort)
+        sessions.update { s in s.lastModelByProject[projectPath] = model; s.lastWorktreeByProject[projectPath] = worktree }
         dismiss()
+        tabs.startNewSession(projectPath: projectPath)
     }
 }

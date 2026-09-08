@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
         }
         if UserDefaults.standard.bool(forKey: "ClinicNewChatOnLaunch") { tabs.newChat() }
+        if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionScreenOnLaunch"), !path.isEmpty { tabs.startNewSession(projectPath: path) }
         // `-ClinicSelectTabAfterLaunch <index>`: select a tab once launch tabs exist (attention smoke tests).
         if UserDefaults.standard.object(forKey: "ClinicSelectTabAfterLaunch") != nil {
             let i = UserDefaults.standard.integer(forKey: "ClinicSelectTabAfterLaunch")
@@ -190,11 +191,12 @@ struct ClinicCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: tabs.selectedTab?.projectPath) }.keyboardShortcut("n", modifiers: .command)
+            Button("New Session") { tabs.startNewSession() }.keyboardShortcut("n", modifiers: .command)
+            Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Chat") { tabs.newChat() }.keyboardShortcut("n", modifiers: [.command, .option])
             Button("New Shell") { tabs.newShell() }.keyboardShortcut("t", modifiers: .command)
             Divider()
-            Button("Close Tab") { tabs.closeSelected() }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil)
+            Button("Close Tab") { if tabs.editingDraft != nil { tabs.closeDraftScreen() } else { tabs.closeSelected() } }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
         }
         CommandMenu("Session") {
             Button("Rename…") { if let s = selectedSession { SessionActions.rename(s, sessions: sessions) } }

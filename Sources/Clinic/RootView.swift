@@ -39,12 +39,12 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { n in newSessionProject = n.object as? String; showNewSession = true }
         .toolbar {
             ToolbarItemGroup {
-                Button { newSessionProject = tabs.selectedTab?.projectPath; showNewSession = true } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
+                Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
                 Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab (⌘T)")
                 NotificationBell()
             }
         }
-        .navigationTitle(tabs.selectedTab?.title ?? "Clinic")
+        .navigationTitle(tabs.editingDraft != nil ? "New session" : (tabs.selectedTab?.title ?? "Clinic"))
     }
 }
 
@@ -55,9 +55,9 @@ struct DetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showTabBar && !tabs.tabs.isEmpty { TabBarView(); Divider() }
+            if showTabBar && !tabs.tabs.isEmpty && tabs.editingDraft == nil { TabBarView(); Divider() }
             terminalArea
-            if let tab = tabs.selectedTab, !tab.isReplay { Divider(); TabFooter(tab: tab) }
+            if tabs.editingDraft == nil, let tab = tabs.selectedTab, !tab.isReplay { Divider(); TabFooter(tab: tab) }
         }
     }
 
@@ -65,6 +65,8 @@ struct DetailView: View {
         ZStack {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else if let draft = tabs.editingDraft {
+                NewSessionScreen(draft: draft)
             } else if tabs.tabs.isEmpty {
                 ContentUnavailableView("No session open", systemImage: "rectangle.on.rectangle.slash",
                                        description: Text("Pick a session from the sidebar, or press ⌘N to start a new one."))

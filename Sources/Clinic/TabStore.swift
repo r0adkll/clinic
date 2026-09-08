@@ -71,6 +71,9 @@ final class TabStore {
     var lastSurfaceError: String?
     private(set) var tabs: [Tab] = []
     var selectedTabId: UUID? { didSet { applySelection() } }
+    /// The new-session screen shown in the content area (ADR-071); selecting a tab dismisses it (text kept per project).
+    var editingDraft: NewSessionDraft? { didSet { if editingDraft != nil, selectedTabId != nil { selectedTabId = nil } } }
+    private var drafts: [String: NewSessionDraft] = [:]
 
     let sessions: SessionStore
     let hooks: HookService
@@ -160,10 +163,42 @@ final class TabStore {
         selectedTabId = tab.id
     }
 
-    /// New session with a pre-assigned id (ADR-017, ADR-032). `prompt` becomes the first turn (ADR-054).
-    func newSession(projectPath: String, model: String?, worktree: Bool, effort: String? = nil, prompt: String? = nil) {
+    // MARK: New-session screen (ADR-071)
+
+    /// Opens the screen for a project (reusing unsent text), or the folder picker when no project is known.
+    func startNewSession(projectPath: String? = nil) {
+        guard let path = projectPath ?? selectedTab?.projectPath ?? editingDraft?.projectPath else {
+            NotificationCenter.default.post(name: .clinicNewSession, object: nil); return
+        }
+        if let d = drafts[path] { editingDraft = d; return }
+        let d = NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false)
+        drafts[path] = d
+        editingDraft = d
+    }
+
+    func discardDraft(_ d: NewSessionDraft) {
+        drafts[d.projectPath] = nil
+        if editingDraft?.id == d.id { editingDraft = nil; selectedTabId = tabs.last?.id }
+    }
+
+    func closeDraftScreen() {
+        editingDraft = nil
+        selectedTabId = tabs.last?.id
+    }
+
+    func sendDraft(_ d: NewSessionDraft, empty: Bool = false) {
+        let prompt = empty ? nil : d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        drafts[d.projectPath] = nil
+        editingDraft = nil
+        newSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: d.worktree, worktreeName: d.worktree ? d.worktreeName : nil,
+                   effort: d.resolvedEffort, prompt: (prompt?.isEmpty ?? true) ? nil : prompt)
+    }
+
+    /// New session with a pre-assigned id (ADR-017). `prompt` becomes the first turn (ADR-071).
+    func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, effort: String? = nil, prompt: String? = nil) {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
+        launch.worktreeName = worktreeName
         launch.mcpConfigPath = mcp?.configPath(for: id)
         guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }
         var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
@@ -195,8 +230,7 @@ final class TabStore {
     func newChat() {
         let dir = SessionStore.chatsDirectory
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let model = UserDefaults.standard.string(forKey: Prefs.defaultModel).flatMap { $0 == "default" ? nil : $0 }
-        newSession(projectPath: dir, model: model, worktree: false)
+        startNewSession(projectPath: dir)
     }
 
     /// `claude --continue` in a project directory (ADR-063).
@@ -307,6 +341,7 @@ final class TabStore {
     // MARK: Selection / close (ADR-019, ADR-037)
 
     private func applySelection() {
+        if selectedTabId != nil, editingDraft != nil { editingDraft = nil }
         for t in tabs {
             let hidden = (t.id != selectedTabId)
             t.surface.isOccluded = hidden

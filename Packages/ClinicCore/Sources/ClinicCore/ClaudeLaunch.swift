@@ -15,6 +15,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
     public var model: String?
     public var effort: String?
     public var worktree: Bool
+    /// Optional `-w <name>`: the CLI names the worktree and its branch after it (ADR-071).
+    public var worktreeName: String?
     public var settingsFilePath: String
     public var executable: String = "claude"
     /// First turn, passed as the CLI's positional prompt.
@@ -42,7 +44,10 @@ public struct ClaudeLaunch: Sendable, Hashable {
         }
         if let model, !model.isEmpty { args += ["--model", model] }
         if let effort, !effort.isEmpty { args += ["--effort", effort] }
-        if worktree, case .new = mode { args.append("-w") }
+        if worktree, case .new = mode {
+            args.append("-w")
+            if let n = worktreeName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { args.append(n) }
+        }
         args += ["--settings", settingsFilePath]
         if let mcpConfigPath, !mcpConfigPath.isEmpty { args += ["--mcp-config", mcpConfigPath] }
         if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.append(prompt) }

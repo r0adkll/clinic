@@ -26,7 +26,7 @@ struct ProjectHeader: View {
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: Capsule())
             Spacer(minLength: 4)
             if hovering {
-                Button { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) } label: {
+                Button { tabs.startNewSession(projectPath: project.path) } label: {
                     Image(systemName: "plus.circle.fill").font(.body)
                 }.buttonStyle(.borderless).help("New session in \(project.name)")
             }
@@ -38,7 +38,7 @@ struct ProjectHeader: View {
         .textCase(nil)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
-        .onTapGesture { if SessionStore.isChats(project.path) { tabs.newChat() } else { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) } }
+        .onTapGesture { if SessionStore.isChats(project.path) { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
         .onHover { hovering = $0 }
         .contextMenu { ProjectMenu(project: project) }
         .draggable(project.path)
@@ -60,7 +60,7 @@ struct ProjectMenu: View {
 
     var body: some View {
         if SessionStore.isChats(project.path) { Button("New Chat") { tabs.newChat() } }
-        Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: project.path) }
+        Button("New Session") { tabs.startNewSession(projectPath: project.path) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
         Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }
