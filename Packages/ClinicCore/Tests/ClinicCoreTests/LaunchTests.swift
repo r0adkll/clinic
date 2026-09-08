@@ -15,6 +15,13 @@ import Testing
         #expect(l.arguments == ["--resume", id.rawValue, "--fork-session", "--settings", "/tmp/h.json"])
     }
 
+    @Test func promptAndEffortAreAppended() {
+        let l = ClaudeLaunch(mode: .new(id: id), model: "opus", effort: "xhigh", settingsFilePath: "/tmp/h.json", prompt: "Fix the flaky test\nthen push")
+        #expect(l.arguments == ["--session-id", id.rawValue, "--model", "opus", "--effort", "xhigh", "--settings", "/tmp/h.json", "Fix the flaky test\nthen push"])
+        #expect(l.shellLine.hasSuffix("'Fix the flaky test\nthen push'\n"))
+        #expect(ClaudeLaunch(mode: .new(id: id), settingsFilePath: "/tmp/h.json", prompt: "   ").arguments.last == "/tmp/h.json")
+    }
+
     @Test func shellQuoting() {
         #expect(ClaudeLaunch.shellQuote("it's") == "'it'\\''s'")
         #expect(ClaudeLaunch.shellQuote("plain-1.0") == "plain-1.0")

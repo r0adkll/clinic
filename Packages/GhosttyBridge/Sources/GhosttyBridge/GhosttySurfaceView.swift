@@ -261,6 +261,29 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         _ = ghostty_surface_key(surface, ev)
     }
 
+    /// Delivers `text` to the pty as a bracketed paste (ESC[200~ … ESC[201~) via the `text:` binding action, which
+    /// writes raw bytes with Ghostty's string-escape parsing. Multi-line prompts arrive intact in Claude Code's input box.
+    public func sendPaste(_ text: String) {
+        var escaped = ""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\\": escaped += "\\\\"
+            case "\n": escaped += "\\n"
+            case "\r": escaped += "\\r"
+            case "\t": escaped += "\\t"
+            case "\"": escaped += "\\\""
+            default: escaped.unicodeScalars.append(scalar)
+            }
+        }
+        _ = perform(action: "text:\\x1b[200~" + escaped + "\\x1b[201~")
+    }
+
+    /// Pastes `text` and presses Return.
+    public func sendPastedLine(_ text: String) {
+        sendPaste(text)
+        pressEnter()
+    }
+
     /// Types `line` (any trailing newline stripped) and presses Return.
     public func sendLine(_ line: String) {
         var text = line

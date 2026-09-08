@@ -19,6 +19,7 @@ struct RootView: View {
         }
         .frame(minWidth: 800, minHeight: 480)
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicNewChat)) { n in tabs.startNewChat(projectPath: n.object as? String) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in showSwitcher = true }
         .alert("Could not open a terminal", isPresented: Binding(get: { tabs.lastSurfaceError != nil }, set: { if !$0 { tabs.lastSurfaceError = nil } })) {
@@ -27,12 +28,12 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clinicNewSession)) { n in newSessionProject = n.object as? String; showNewSession = true }
         .toolbar {
             ToolbarItemGroup {
-                Button { showNewSession = true } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
+                Button { tabs.startNewChat() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session (⌘N)")
                 Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab (⌘T)")
                 NotificationBell()
             }
         }
-        .navigationTitle(tabs.selectedTab?.title ?? "Clinic")
+        .navigationTitle(tabs.editingDraft != nil ? "New session" : (tabs.selectedTab?.title ?? "Clinic"))
     }
 }
 
@@ -53,6 +54,8 @@ struct DetailView: View {
         ZStack {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else if let draft = tabs.editingDraft {
+                NewChatView(draft: draft)
             } else if tabs.tabs.isEmpty {
                 ContentUnavailableView("No session open", systemImage: "rectangle.on.rectangle.slash",
                                        description: Text("Pick a session from the sidebar, or press ⌘N to start a new one."))
@@ -89,6 +92,14 @@ struct TabSurfaces: View {
 
     @ViewBuilder
     private var terminals: some View {
+        VStack(spacing: 0) {
+            surfaces
+            if tab.composerVisible, tab.sessionId != nil { Divider(); ComposerView(tab: tab) }
+        }
+    }
+
+    @ViewBuilder
+    private var surfaces: some View {
         if tab.panelVisible, let panel = tab.panelSurface {
             VSplitView {
                 SurfaceContainer(surface: tab.surface, isVisible: false)
@@ -123,6 +134,9 @@ struct TabFooter: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
+                if tab.sessionId != nil {
+                    FooterToggle(title: "Compose", symbol: "text.bubble", active: tab.composerVisible, help: "Prompt composer (⌘.)") { tabs.toggleComposer(tab) }
+                }
                 FooterToggle(title: "Panel", symbol: "rectangle.bottomthird.inset.filled", active: tab.panelVisible, help: "Shell panel below the session (⌘J)") { tabs.togglePanel(tab) }
                 FooterToggle(title: tab.gitBranch ?? "Git", symbol: "arrow.triangle.branch", active: tab.gitPageVisible, help: "Git page (⌘⇧G)") { tabs.toggleGitPage(tab) }
                 ForEach(tabs.pullRequests(for: tab)) { ref in

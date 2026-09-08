@@ -65,6 +65,26 @@ final class GhosttyBridgeTests: XCTestCase {
         rt.setColorScheme(dark: true)
     }
 
+    /// `sendPaste` must deliver multi-line text to the pty as a bracketed paste (ADR-054).
+    func testSendPasteWritesBracketedTextToPty() throws {
+        let rt = try runtime()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("ghostty-paste-\(UUID().uuidString).txt")
+        // `cat` copies everything it reads to the file; the shell keeps the surface alive past the 250 ms launch window.
+        let view = try GhosttySurfaceView(runtime: rt, options: GhosttySurfaceOptions(command: "/bin/sh", initialInput: "stty -echo; cat > '\(out.path)'\n"))
+        window.contentView = view
+        spin(rt, seconds: 0.8)
+        view.sendPaste("first line\nsecond \"quoted\" \\ back")
+        view.pressEnter()
+        // Canonical mode delivers each line to `cat` on newline / Return, so no EOF is needed.
+        spin(rt, seconds: 1.0)
+        let data = (try? Data(contentsOf: out)) ?? Data()
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.contains("\u{1b}[200~first line\nsecond \"quoted\" \\ back\u{1b}[201~"), "pty received: \(text.debugDescription)")
+        view.free()
+    }
+
     func testSurfaceLifecycle() throws {
         let rt = try runtime()
         let window = NSWindow(

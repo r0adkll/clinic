@@ -70,6 +70,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             tabs.newSession(projectPath: path, model: "haiku", worktree: false)
+            if UserDefaults.standard.bool(forKey: "ClinicOpenComposerOnLaunch") { tabs.toggleComposer() }
+        }
+        // `-ClinicNewChatOnLaunch /path/to/project` opens the new-chat screen for that project.
+        if let path = UserDefaults.standard.string(forKey: "ClinicNewChatOnLaunch"), !path.isEmpty {
+            tabs.startNewChat(projectPath: path)
         }
     }
 
@@ -110,10 +115,11 @@ struct ClinicCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut("n", modifiers: .command)
+            Button("New Session") { tabs.startNewChat() }.keyboardShortcut("n", modifiers: .command)
+            Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Shell") { tabs.newShell() }.keyboardShortcut("t", modifiers: .command)
             Divider()
-            Button("Close Tab") { tabs.closeSelected() }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil)
+            Button("Close Tab") { if tabs.editingDraft != nil { tabs.closeDraftScreen() } else { tabs.closeSelected() } }.keyboardShortcut("w", modifiers: .command).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
         }
         CommandMenu("Session") {
             Button("Rename…") { if let s = selectedSession { SessionActions.rename(s, sessions: sessions) } }
@@ -134,6 +140,7 @@ struct ClinicCommands: Commands {
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
         }
         CommandMenu("Tabs") {
+            Button("Toggle Composer") { tabs.toggleComposer() }.keyboardShortcut(".", modifiers: .command).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut("j", modifiers: .command).disabled(tabs.selectedTab == nil)
             Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(tabs.selectedTab == nil)
             Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
@@ -151,4 +158,5 @@ struct ClinicCommands: Commands {
 extension Notification.Name {
     static let clinicNewSession = Notification.Name("com.r0adkll.clinic.newSession")
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
+    static let clinicNewChat = Notification.Name("com.r0adkll.clinic.newChat")
 }

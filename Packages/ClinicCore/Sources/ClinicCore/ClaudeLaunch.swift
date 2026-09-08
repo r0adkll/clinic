@@ -9,12 +9,15 @@ public struct ClaudeLaunch: Sendable, Hashable {
 
     public var mode: Mode
     public var model: String?
+    public var effort: String?
     public var worktree: Bool
     public var settingsFilePath: String
     public var executable: String = "claude"
+    /// First turn, passed as the CLI's positional prompt (ADR-054).
+    public var prompt: String?
 
-    public init(mode: Mode, model: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude") {
-        self.mode = mode; self.model = model; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable
+    public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude", prompt: String? = nil) {
+        self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable; self.prompt = prompt
     }
 
     public var arguments: [String] {
@@ -27,8 +30,10 @@ public struct ClaudeLaunch: Sendable, Hashable {
             if fork { args.append("--fork-session") }
         }
         if let model, !model.isEmpty { args += ["--model", model] }
+        if let effort, !effort.isEmpty { args += ["--effort", effort] }
         if worktree, case .new = mode { args.append("-w") }
         args += ["--settings", settingsFilePath]
+        if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.append(prompt) }
         return args
     }
 
