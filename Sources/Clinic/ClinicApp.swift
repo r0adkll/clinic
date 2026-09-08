@@ -75,7 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
-            if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") { tabs.toggleGitPage() }
+            if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") {
+                tabs.toggleGitPage()
+                let after = UserDefaults.standard.double(forKey: "ClinicToggleGitPageAfter")
+                if after > 0 { Task { try? await Task.sleep(for: .seconds(after)); tabs.toggleGitPage() } }
+            }
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
                 if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.editor?.open(absolute: file) }

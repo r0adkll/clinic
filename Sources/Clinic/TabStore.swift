@@ -17,6 +17,8 @@ final class Tab: Identifiable {
     let surface: GhosttySurfaceView
     /// Replay tabs carry a model instead of a live process (ADR-059).
     var replay: ReplayModel?
+    /// Persistent AppKit host for the tab's surfaces and right page (never re-parented by SwiftUI).
+    @ObservationIgnored let contentView: TabContentView
     var state: SessionState?
     var unread = false
     var errorBadge = false
@@ -49,6 +51,7 @@ final class Tab: Identifiable {
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title
+        self.contentView = TabContentView(surface: surface)
         self.state = { if case .session = kind { return .launching } else { return nil } }()
     }
 

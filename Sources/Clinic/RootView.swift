@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import ClinicCore
 import GhosttyBridge
 
@@ -84,39 +85,11 @@ struct DetailView: View {
     }
 }
 
-/// Main surface plus the optional shell panel below it (ADR-046).
+/// Main surface, optional shell panel, and right-column page, all inside the tab's persistent AppKit view.
 struct TabSurfaces: View {
     let tab: Tab
     let isSelected: Bool
-
-    var body: some View {
-        switch tab.rightPane {
-        case .git:
-            RightSplit { terminals } right: { if let git = tab.gitPage { GitPage(tab: tab, model: git) } }
-        case .pr(let ref):
-            RightSplit { terminals } right: { PRPage(tab: tab, ref: ref) }
-        case .attachments:
-            RightSplit { terminals } right: { AttachmentsPanel(tab: tab) }
-        case .editor:
-            RightSplit(rightMin: 520) { terminals } right: { if let e = tab.editor { EditorPanel(tab: tab, model: e) } }
-        case .none:
-            terminals
-        }
-    }
-
-    @ViewBuilder
-    private var terminals: some View {
-        if tab.panelVisible, let panel = tab.panelSurface {
-            VSplitView {
-                SurfaceContainer(surface: tab.surface, isVisible: false)
-                    .frame(minHeight: 120)
-                SurfaceContainer(surface: panel, isVisible: isSelected)
-                    .frame(minHeight: 80, idealHeight: 220)
-            }
-        } else {
-            SurfaceContainer(surface: tab.surface, isVisible: isSelected)
-        }
-    }
+    var body: some View { TabContentRepresentable(tab: tab, isSelected: isSelected) }
 }
 
 /// Model, branch and cwd for the selected tab (milestone 2, Collins footer).
@@ -272,27 +245,3 @@ struct ExitedOverlay: View {
     }
 }
 
-/// Hosts a long-lived GhosttySurfaceView owned by its Tab, never by this representable (ADR-019).
-struct SurfaceContainer: NSViewRepresentable {
-    let surface: GhosttySurfaceView
-    let isVisible: Bool
-
-    func makeNSView(context: Context) -> NSView {
-        let host = NSView()
-        host.autoresizesSubviews = true
-        install(in: host)
-        return host
-    }
-
-    func updateNSView(_ host: NSView, context: Context) {
-        if surface.superview !== host { install(in: host) }
-        if isVisible { DispatchQueue.main.async { surface.window?.makeFirstResponder(surface) } }
-    }
-
-    private func install(in host: NSView) {
-        surface.removeFromSuperview()
-        surface.frame = host.bounds
-        surface.autoresizingMask = [.width, .height]
-        host.addSubview(surface)
-    }
-}
