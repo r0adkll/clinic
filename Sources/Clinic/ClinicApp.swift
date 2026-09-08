@@ -91,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             tabs.newSession(projectPath: path, model: "haiku", worktree: false)
             // `-ClinicStopAfterLaunch <seconds>`: exercise the graceful Stop path (ADR-063).
+            // `-ClinicSwitchModelAfterLaunch <alias>`: exercise /model via the footer path (ADR-064).
+            if let alias = UserDefaults.standard.string(forKey: "ClinicSwitchModelAfterLaunch"), !alias.isEmpty {
+                Task { try? await Task.sleep(for: .seconds(9)); if let t = tabs.selectedTab { tabs.switchModel(t, to: alias) } }
+            }
             let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopAfterLaunch")
             if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
         }

@@ -113,7 +113,7 @@ public enum SessionNaming {
             let words = p.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).prefix(maxWords)
             if !words.isEmpty { return words.joined(separator: " ") + (p.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count > maxWords ? "…" : "") }
         }
-        return String(session.id.rawValue.prefix(8))
+        return "New session"
     }
 }
 

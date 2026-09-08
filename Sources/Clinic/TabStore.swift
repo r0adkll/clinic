@@ -35,6 +35,7 @@ final class Tab: Identifiable {
     var pendingInput: String?
     var gitBranch: String?
     var model: String?
+    var effort: String?
     /// Secondary plain shell below the main surface (ADR-046). Created lazily by ⌘J, freed with the tab.
     var panelSurface: GhosttySurfaceView?
     var panelVisible = false
@@ -150,6 +151,7 @@ final class TabStore {
         resume.mcpConfigPath = launch.mcpConfigPath
         tab.lastResume = resume
         tab.model = model
+        tab.effort = effort
         sessions.registerPending(id: id, cwd: projectPath)
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
@@ -331,6 +333,22 @@ final class TabStore {
 
     func closeSelected() { if let t = selectedTab { close(t) } }
 
+    /// Types a slash command into an idle session (ADR-064). Returns false when the session is not at its prompt.
+    @discardableResult
+    func sendSlashCommand(_ command: String, to tab: Tab) -> Bool {
+        guard tab.sessionId != nil, tab.state == .idle else { return false }
+        tab.surface.sendLine(command)
+        return true
+    }
+
+    func switchModel(_ tab: Tab, to model: String) {
+        if sendSlashCommand("/model " + model, to: tab) { tab.model = model }
+    }
+
+    func switchEffort(_ tab: Tab, to level: String) {
+        if sendSlashCommand("/effort " + level, to: tab) { tab.effort = level }
+    }
+
     /// Ctrl‑C twice: Claude Code's clean exit (ADR-063). The shell stays in the tab.
     func stop(_ tab: Tab) {
         guard tab.isRunningClaude else { return }
@@ -478,7 +496,7 @@ final class TabStore {
             waiting.kind = .session(event.sessionId)
             waiting.awaitingId = false
             let cwd = event.cwd ?? waiting.pwd ?? waiting.projectPath
-            sessions.registerPending(id: event.sessionId, cwd: cwd)
+            sessions.registerPending(id: event.sessionId, cwd: cwd, title: waiting.title)
             var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
             resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)
             waiting.lastResume = resume

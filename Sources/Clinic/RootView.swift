@@ -125,8 +125,9 @@ struct TabFooter: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if let model = tab.model {
-                Label(Self.shortModel(model), systemImage: "cpu").help("Model: \(model)")
+            if tab.sessionId != nil {
+                ModelMenu(tab: tab)
+                EffortMenu(tab: tab)
             }
             if let pwd = tab.pwd {
                 Button {
@@ -170,6 +171,56 @@ struct TabFooter: View {
         guard let family = parts.first else { return id }
         let version = parts.dropFirst().joined(separator: ".")
         return family.capitalized + (version.isEmpty ? "" : " " + version)
+    }
+}
+
+/// Footer model chip: a menu that types `/model` when the session is idle (ADR-064).
+struct ModelMenu: View {
+    @Environment(TabStore.self) private var tabs
+    let tab: Tab
+    private let aliases = ["default", "sonnet", "opus", "haiku"]
+
+    var body: some View {
+        Menu {
+            ForEach(aliases, id: \.self) { a in
+                Button(a.capitalized) { tabs.switchModel(tab, to: a) }
+            }
+            Button("Custom…") { customModel() }
+            if let m = tab.model {
+                Divider()
+                Button("Copy Model ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(m, forType: .string) }
+            }
+        } label: {
+            Label(tab.model.map(TabFooter.shortModel) ?? "Model", systemImage: "cpu").font(.callout)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .disabled(tab.state != .idle)
+        .help(tab.state == .idle ? "Switch model (/model)" : "Model can be switched when the session is idle at its prompt")
+    }
+
+    private func customModel() {
+        let alert = NSAlert(); alert.messageText = "Model id"; alert.informativeText = "Sent as /model <id>."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24)); field.stringValue = tab.model ?? ""
+        alert.accessoryView = field; alert.addButton(withTitle: "Switch"); alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty { tabs.switchModel(tab, to: field.stringValue) }
+    }
+}
+
+/// Footer effort chip: types `/effort` (ADR-064).
+struct EffortMenu: View {
+    @Environment(TabStore.self) private var tabs
+    let tab: Tab
+    private let levels = ["low", "medium", "high", "xhigh", "max"]
+
+    var body: some View {
+        Menu {
+            ForEach(levels, id: \.self) { l in Button(l == "xhigh" ? "Extra high" : l.capitalized) { tabs.switchEffort(tab, to: l) } }
+        } label: {
+            Label(tab.effort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .disabled(tab.state != .idle)
+        .help(tab.state == .idle ? "Switch effort (/effort)" : "Effort can be switched when the session is idle at its prompt")
     }
 }
 

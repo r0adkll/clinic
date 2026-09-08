@@ -106,9 +106,7 @@ struct PRPage: View {
     }
 
     private func send(_ prompt: String) {
-        guard tab.state == .idle else { return }
-        tab.surface.sendLine(prompt)
-        tabs.select(tab)
+        if tabs.sendSlashCommand(prompt, to: tab) { tabs.select(tab) }
     }
 
     // MARK: Sections

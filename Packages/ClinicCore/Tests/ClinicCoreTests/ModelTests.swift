@@ -10,7 +10,7 @@ import Testing
 
     @Test func namingPrecedence() {
         var s = SessionSummary(id: SessionID("abcdef01-0000-0000-0000-000000000000"), transcriptPath: "p")
-        #expect(SessionNaming.displayName(for: s) == "abcdef01")
+        #expect(SessionNaming.displayName(for: s) == "New session")
         s.firstPrompt = "one two three four five six seven eight nine ten eleven twelve"
         #expect(SessionNaming.displayName(for: s) == "one two three four five six seven eight nine ten…")
         s.aiTitle = "AI title"

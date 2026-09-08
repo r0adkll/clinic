@@ -232,11 +232,11 @@ final class SessionStore {
     }
 
     /// Placeholder rows for sessions launched by Clinic whose transcript does not exist yet (ADR-017).
-    func registerPending(id: SessionID, cwd: String) {
+    func registerPending(id: SessionID, cwd: String, title: String = "New session") {
         guard sessions[id] == nil else { return }
         let paths = ClaudePaths()
         let path = paths.projectsDirectory.appendingPathComponent(ClaudePaths.encodedProjectDirectoryName(for: cwd)).appendingPathComponent("\(id.rawValue).jsonl").path
-        let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, firstPrompt: "New session", createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
+        let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, firstPrompt: title, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
         pending[id] = placeholder
         sessions[id] = placeholder
         update { s in
