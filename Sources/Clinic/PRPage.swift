@@ -197,6 +197,8 @@ struct PRChip: View {
     @Environment(PRStore.self) private var prs
     let ref: PullRequestRef
     let active: Bool
+    /// The PR's panel tab exists but another pane is in front.
+    var open = false
     let onTap: () -> Void
 
     var body: some View {
@@ -210,6 +212,7 @@ struct PRChip: View {
             .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accentColor.opacity(0.35) : .clear))
             .foregroundStyle(mark.map(PRStyle.color) ?? .primary)
         }
         .buttonStyle(.plain)

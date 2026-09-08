@@ -5,13 +5,28 @@ import ClinicCore
 struct TabBarView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(WindowState.self) private var window
+    @Environment(KeyBindings.self) private var bindings
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(tabs.tabs(in: window)) { tab in TabChip(tab: tab, selected: tab.id == window.selectedTabId) }
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(tabs.tabs(in: window)) { tab in TabChip(tab: tab, selected: tab.id == window.selectedTabId) }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
+            // The panel's show/hide lives here, always available whatever the panel holds (ADR-079).
+            if let tab = tabs.selectedTab(in: window), !tab.isReplay {
+                Divider().frame(height: 18)
+                Button { tabs.togglePanelVisibility(tab) } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(tab.panel.isVisible ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 8)
+                .help(tab.panel.isVisible ? "Hide the panel" + bindings.hint(.togglePanelVisibility)
+                                          : "Show the panel" + bindings.hint(.togglePanelVisibility))
+            }
         }
         .background(.bar)
     }
@@ -42,7 +57,7 @@ struct TabChip: View {
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Close Tab") { tabs.close(tab) }
-            if tab.sessionId != nil { Button("Toggle Terminal Panel") { tabs.togglePanel(tab) } }
+            if tab.sessionId != nil { Button("Terminal in Panel") { tabs.togglePanel(tab) } }
             Divider()
             MoveToWindowMenu(tab: tab)
         }

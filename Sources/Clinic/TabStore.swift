@@ -40,16 +40,10 @@ final class Tab: Identifiable {
     var gitBranch: String?
     var model: String?
     var effort: String?
-    /// Secondary plain shell below the main surface (ADR-046). Created lazily by ⌘J, freed with the tab.
-    var panelSurface: GhosttySurfaceView?
-    var panelVisible = false
-    /// Right column: git page (ADR-052) or PR page (ADR-053). One at a time.
-    enum RightPane: Equatable { case none, git, pr(PullRequestRef), attachments, editor }
-    var rightPane: RightPane = .none
-    var gitPage: GitPageModel?
-    var gitPageVisible: Bool { rightPane == .git }
-    /// Editor panel (ADR-057), created on first open.
-    var editor: EditorModel?
+    /// Right-hand panel: a strip of panes — terminal, git, PRs, files, images — with one on screen (ADR-079).
+    let panel = SidePanel()
+    /// The panel's shell pane surface, when one is open (ADR-079 replaces the below-terminal panel of ADR-046).
+    var panelSurface: GhosttySurfaceView? { panel.pane(.terminal)?.terminal }
 
     init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String, windowId: UUID) {
         self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title; self.windowId = windowId
@@ -316,7 +310,6 @@ final class TabStore {
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
             s.lastWorktreeByProject[projectPath] = worktree
-            if !s.addedProjects.contains(projectPath) && !worktree { /* project appears via its session */ }
         }
         selectedTabId = tab.id
     }
@@ -451,7 +444,7 @@ final class TabStore {
         for t in tabs(in: window) {
             let hidden = (t.id != window.selectedTabId)
             t.surface.isOccluded = hidden
-            t.panelSurface?.isOccluded = hidden || !t.panelVisible
+            t.panelSurface?.isOccluded = hidden || !t.panel.isFront(.terminal)
         }
         if let tab = selectedTab(in: window) {
             tab.unread = false
@@ -497,10 +490,7 @@ final class TabStore {
         tabs.removeAll { $0.id == tab.id }
         if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
-        tab.panelSurface?.free()
-        tab.panelSurface = nil
-        tab.gitPage?.stopWatching()
-        tab.editor?.stop()
+        tab.panel.tearDown()
         if let id = tab.sessionId { sessions.removePending(id: id) }
         updateBadge()
         return true
@@ -553,53 +543,120 @@ final class TabStore {
 
     var canBackgroundSelected: Bool { selectedTab.map { $0.sessionId != nil && $0.state == .idle } ?? false }
 
-    /// ⌘J: show/hide the tab's shell panel, creating the surface on first use in the tab's current directory.
-    func togglePanel(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab, let runtime else { return }
-        if tab.panelSurface == nil {
+    // MARK: Right-hand panel (ADR-079)
+
+    /// Quick action / shortcut: show the panel with this pane in front — open it if it is not there,
+    /// front it if it is, show the panel if it is hidden. Never a toggle: hiding is its own action.
+    func showPane(_ kind: PanelPane.Kind, in tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        if let existing = tab.panel.pane(kind) {
+            tab.panel.select(existing)
+        } else if let pane = makePane(kind, in: tab) {
+            tab.panel.append(pane)
+            tab.panel.isVisible = true
+        } else {
+            return
+        }
+        focusPanel(tab)
+    }
+
+    /// The one control that hides the panel: the tab bar button, the strip's chevron, ⌘⌥J.
+    func togglePanelVisibility(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        tab.panel.isVisible.toggle()
+        focusPanel(tab)
+    }
+
+    func selectPane(_ pane: PanelPane, in tab: Tab) {
+        tab.panel.select(pane)
+        focusPanel(tab)
+    }
+
+    func closePane(_ pane: PanelPane, in tab: Tab) {
+        tab.panel.close(pane)
+        focusPanel(tab)
+    }
+
+    /// ⌘⌃] / ⌘⌃[: move through the panel's tabs.
+    func cyclePanelTab(_ delta: Int, in tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab, tab.panel.isVisible else { return }
+        tab.panel.cycle(by: delta)
+        focusPanel(tab)
+    }
+
+    /// ⌘⌃W: close the panel tab on screen.
+    func closeFrontPane(in tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab, let pane = tab.panel.selected else { return }
+        closePane(pane, in: tab)
+    }
+
+    /// Pane kinds the panel's "+" menu can still add for this tab.
+    func availablePanes(for tab: Tab) -> [PanelPane.Kind] {
+        var kinds: [PanelPane.Kind] = [.terminal, .git, .files]
+        if tab.sessionId != nil { kinds.append(.attachments) }
+        kinds += pullRequests(for: tab).map { PanelPane.Kind.pr($0) }
+        return kinds.filter { !tab.panel.isOpen($0) }
+    }
+
+    /// Chip and menu label for a pane: live facts (branch, image count) win over the kind's default.
+    func paneTitle(_ kind: PanelPane.Kind, in tab: Tab) -> String {
+        switch kind {
+        case .git: return tab.gitBranch ?? "Git"
+        case .attachments:
+            let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
+            return count > 0 ? "Images (\(count))" : "Images"
+        default: return kind.defaultTitle
+        }
+    }
+
+    /// Builds a pane's long-lived content; nil when it cannot exist (no runtime, no session).
+    private func makePane(_ kind: PanelPane.Kind, in tab: Tab) -> PanelPane? {
+        let pane = PanelPane(kind: kind)
+        switch kind {
+        case .terminal:
+            guard let runtime else { return nil }
             var options = GhosttySurfaceOptions()
             options.workingDirectory = tab.pwd ?? tab.projectPath
             options.environment = ["CLINIC": "1", "CLINIC_PANEL": "1"]
             do {
                 let surface = try GhosttySurfaceView(runtime: runtime, options: options)
                 surface.delegate = self
-                tab.panelSurface = surface
+                pane.terminal = surface
             } catch {
                 Self.log.error("panel surface creation failed: \(error, privacy: .public)")
                 lastSurfaceError = "\(error)"
-                return
+                return nil
             }
-            tab.panelVisible = true
-        } else {
-            tab.panelVisible.toggle()
+        case .git:
+            pane.git = GitPageModel()
+        case .files:
+            pane.editor = EditorModel(root: tab.pwd ?? tab.projectPath)
+        case .attachments:
+            guard tab.sessionId != nil else { return nil }
+        case .pr:
+            break
         }
-        tab.panelSurface?.isOccluded = !tab.panelVisible
-        let target = tab.panelVisible ? tab.panelSurface : tab.surface
+        return pane
+    }
+
+    /// Keeps the shell pane's occlusion and the first responder in step with what the panel is showing.
+    private func focusPanel(_ tab: Tab) {
+        tab.panelSurface?.isOccluded = window(of: tab).selectedTabId != tab.id || !tab.panel.isFront(.terminal)
+        let target = tab.panel.isFront(.terminal) ? tab.panelSurface : tab.surface
         DispatchQueue.main.async { target?.window?.makeFirstResponder(target) }
     }
 
-    /// ⌘⇧G: show/hide the tab's git page.
-    func toggleGitPage(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab else { return }
-        if tab.gitPage == nil { tab.gitPage = GitPageModel() }
-        tab.rightPane = tab.rightPane == .git ? .none : .git
-        if !tab.gitPageVisible { tab.gitPage?.stopWatching() }
-    }
+    /// ⌘J: the shell pane.
+    func togglePanel(_ tab: Tab? = nil) { showPane(.terminal, in: tab) }
 
-    /// ⌘⇧E: editor panel.
-    func toggleEditor(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab else { return }
-        if tab.rightPane == .editor { tab.rightPane = .none; return }
-        if tab.editor == nil { tab.editor = EditorModel(root: tab.pwd ?? tab.projectPath) }
-        tab.gitPage?.stopWatching()
-        tab.rightPane = .editor
-    }
+    /// ⌘⇧G: the git pane.
+    func toggleGitPage(_ tab: Tab? = nil) { showPane(.git, in: tab) }
 
-    /// ⌘⇧I: attachments panel.
-    func toggleAttachments(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab, tab.sessionId != nil else { return }
-        if tab.rightPane == .attachments { tab.rightPane = .none } else { tab.gitPage?.stopWatching(); tab.rightPane = .attachments }
-    }
+    /// ⌘⇧E: the editor pane.
+    func toggleEditor(_ tab: Tab? = nil) { showPane(.files, in: tab) }
+
+    /// ⌘⇧I: the attachments pane.
+    func toggleAttachments(_ tab: Tab? = nil) { showPane(.attachments, in: tab) }
 
     /// PR refs known for a tab's session (from the transcript).
     func pullRequests(for tab: Tab) -> [PullRequestRef] {
@@ -607,14 +664,10 @@ final class TabStore {
         return s.pullRequests
     }
 
-    /// ⌘⇧P: show the newest PR page, or hide it; `ref` picks a specific PR (footer chip).
+    /// ⌘⇧P: the newest PR's pane; `ref` picks a specific PR (footer chip). Each PR gets its own pane.
     func togglePRPage(_ tab: Tab? = nil, ref: PullRequestRef? = nil) {
-        guard let tab = tab ?? selectedTab else { return }
-        let target = ref ?? pullRequests(for: tab).last
-        guard let target else { return }
-        if case .pr(let current) = tab.rightPane, current == target { tab.rightPane = .none; return }
-        tab.gitPage?.stopWatching()
-        tab.rightPane = .pr(target)
+        guard let tab = tab ?? selectedTab, let target = ref ?? pullRequests(for: tab).last else { return }
+        showPane(.pr(target), in: tab)
     }
 
     func tab(forSurface surface: GhosttySurfaceView) -> Tab? {
@@ -758,9 +811,7 @@ extension TabStore: GhosttySurfaceDelegate {
     }
 
     private func closePanel(_ tab: Tab) {
-        tab.panelSurface?.free()
-        tab.panelSurface = nil
-        tab.panelVisible = false
+        if let pane = tab.panel.pane(.terminal) { tab.panel.close(pane) }
         DispatchQueue.main.async { tab.surface.window?.makeFirstResponder(tab.surface) }
     }
 

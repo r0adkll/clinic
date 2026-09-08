@@ -16,27 +16,30 @@ struct ProjectHeader: View {
         HStack(spacing: 6) {
             Button { sessions.setCollapsed(project, !collapsed) } label: {
                 Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(collapsed ? 0 : 90)).frame(width: 12)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90)).frame(width: 12, height: 12).contentShape(Rectangle())
             }
             .buttonStyle(.plain).help(collapsed ? "Expand" : "Collapse")
-            ProjectIcon(project: project)
-            Text(project.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+            ProjectIcon(project: project, size: 22)
+            Text(project.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                 .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: Capsule())
+                .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
             Spacer(minLength: 4)
-            if hovering {
+            // Both reveal on hover but always occupy their space, so the header never reflows.
+            HStack(spacing: 2) {
                 Button { tabs.startNewSession(projectPath: project.path) } label: {
-                    Image(systemName: "plus.circle.fill").font(.body)
-                }.buttonStyle(.borderless).help("New session in \(project.name)")
+                    Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 18, height: 18).contentShape(Rectangle())
+                }.buttonStyle(.plain).help("New session in \(project.name)")
+                Menu { ProjectMenu(project: project) } label: { Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("Project actions")
             }
-            Menu { ProjectMenu(project: project) } label: { Image(systemName: "ellipsis.circle").font(.body) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .opacity(hovering ? 1 : 0.6)
-                .help("Project actions")
+            .foregroundStyle(.secondary)
+            .opacity(hovering ? 1 : 0)
+            .padding(.trailing, 6)
         }
         .textCase(nil)
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture { if SessionStore.isChats(project.path) { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
         .onHover { hovering = $0 }
@@ -48,6 +51,29 @@ struct ProjectHeader: View {
             return true
         } isTargeted: { dropTargeted = $0 }
         .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accentColor).frame(height: 2) } }
+    }
+}
+
+/// Stand-in row for a project with no sessions, so an empty group is still a place to start one.
+struct NewSessionPlaceholderRow: View {
+    @Environment(TabStore.self) private var tabs
+    let project: Project
+    @State private var hovering = false
+
+    var body: some View {
+        let chats = SessionStore.isChats(project.path)
+        HStack(spacing: 8) {
+            Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).frame(width: 10)
+            Text(chats ? "New Chat" : "New Session")
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .foregroundStyle(hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { if chats { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
+        .help(chats ? "Start a chat" : "Start a session in \(project.name)")
     }
 }
 
@@ -73,6 +99,13 @@ struct ProjectMenu: View {
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.path, forType: .string) }
         Divider()
+        Button("Generate Icon…") { NotificationCenter.default.post(name: .clinicGenerateIcon, object: project.path) }
+        Button("Remove Generated Icon") {
+            try? ProjectIconGenerator.removeGeneratedIcon(projectPath: project.path)
+            ProjectIconCache.shared.invalidate(project.path)
+        }
+        .disabled(!ProjectIconGenerator.hasGeneratedIcon(projectPath: project.path))
+        Divider()
         Button("Git Pull") { Task { if let out = await RepoUpkeep.pull(project: project) { RepoUpkeep.showError("Git pull", out) } } }
         Button("Checkout \(checkoutTarget ?? "default branch")") { Task { await RepoUpkeep.checkoutDefault(project: project) } }
             .disabled(checkoutTarget == nil)
@@ -80,7 +113,10 @@ struct ProjectMenu: View {
         Divider()
         Button("Archive Project") { sessions.archiveProject(project) }
         Button("Reset Project Order") { sessions.resetProjectOrder() }.disabled(sessions.state.projectOrder.isEmpty)
-        Button("Remove Project", role: .destructive) { sessions.removeProject(project) }
+        // Chats is pinned and permanent, so there is nothing to remove it to (ADR-077).
+        if !SessionStore.isChats(project.path) {
+            Button("Remove Project", role: .destructive) { sessions.removeProject(project) }
+        }
     }
 }
 
@@ -96,7 +132,7 @@ struct ProjectIcon: View {
                     RoundedRectangle(cornerRadius: size * 0.22).fill(Color.accentColor)
                     Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.5)).foregroundStyle(.white)
                 }
-            } else if let image = ProjectIconCache.shared.image(for: project.path) {
+            } else if let image = icon {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else {
@@ -110,6 +146,12 @@ struct ProjectIcon: View {
         .frame(width: size, height: size)
     }
 
+    /// Reading `revision` first makes this view depend on `invalidate` (ADR-076).
+    private var icon: NSImage? {
+        _ = ProjectIconCache.shared.revision
+        return ProjectIconCache.shared.image(for: project.path)
+    }
+
     static func color(for path: String) -> Color {
         var h: UInt32 = 2166136261
         for b in path.utf8 { h = (h ^ UInt32(b)) &* 16777619 }
@@ -117,10 +159,13 @@ struct ProjectIcon: View {
     }
 }
 
-@MainActor
+@MainActor @Observable
 final class ProjectIconCache {
     static let shared = ProjectIconCache()
-    private var cache: [String: NSImage?] = [:]
+    /// Bumped by `invalidate`; views read it so a generated icon (ADR-076) redraws everywhere.
+    private(set) var revision = 0
+    /// Lookups fill the cache lazily, so this storage must stay out of observation (it is written during `body`).
+    @ObservationIgnored private var cache: [String: NSImage?] = [:]
     static let candidates = ["project-icon.svg", "project-icon.png", ".clinic/icon.svg", ".clinic/icon.png"]
 
     func image(for path: String) -> NSImage? {
@@ -134,5 +179,9 @@ final class ProjectIconCache {
         return found
     }
 
-    func invalidate() { cache.removeAll() }
+    /// Drops one project's icon (or all of them) and asks every `ProjectIcon` to look again.
+    func invalidate(_ path: String? = nil) {
+        if let path { cache[path] = nil } else { cache.removeAll() }
+        revision &+= 1
+    }
 }

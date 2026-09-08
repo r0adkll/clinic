@@ -7,7 +7,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case mcpServers, selectSessions, notifications, caffeine
-    case togglePanel, toggleGitPage, toggleEditor, toggleAttachments, togglePRPage, nextTab, previousTab
+    case togglePanel, toggleGitPage, toggleEditor, toggleAttachments, togglePRPage
+    case togglePanelVisibility, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
 
     var id: String { rawValue }
 
@@ -34,11 +35,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .selectSessions: "Select Sessions"
         case .notifications: "Notifications"
         case .caffeine: "Caffeine Mode"
-        case .togglePanel: "Toggle Terminal Panel"
-        case .toggleGitPage: "Toggle Git Page"
-        case .toggleEditor: "Toggle Editor"
-        case .toggleAttachments: "Toggle Attachments"
-        case .togglePRPage: "Toggle Pull Request Page"
+        case .togglePanel: "Terminal Panel Tab"
+        case .toggleGitPage: "Git Panel Tab"
+        case .toggleEditor: "Files Panel Tab"
+        case .toggleAttachments: "Images Panel Tab"
+        case .togglePRPage: "Pull Request Panel Tab"
+        case .togglePanelVisibility: "Show / Hide Panel"
+        case .nextPanelTab: "Next Panel Tab"
+        case .previousPanelTab: "Previous Panel Tab"
+        case .closePanelTab: "Close Panel Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
         }
@@ -49,11 +54,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .mcpServers, .selectSessions, .notifications, .caffeine: "View"
-        case .togglePanel, .toggleGitPage, .toggleEditor, .toggleAttachments, .togglePRPage, .nextTab, .previousTab: "Tabs"
+        case .togglePanel, .toggleGitPage, .toggleEditor, .toggleAttachments, .togglePRPage,
+             .togglePanelVisibility, .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
+        case .nextTab, .previousTab: "Tabs"
         }
     }
 
-    static let sections = ["File", "Session", "View", "Tabs"]
+    static let sections = ["File", "Session", "View", "Panel", "Tabs"]
 
     var defaultChord: KeyChord? {
         let s: String? = switch self {
@@ -83,6 +90,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleEditor: "cmd+shift+e"
         case .toggleAttachments: "cmd+shift+i"
         case .togglePRPage: "cmd+shift+p"
+        case .togglePanelVisibility: "cmd+opt+j"
+        case .nextPanelTab: "cmd+ctrl+]"
+        case .previousPanelTab: "cmd+ctrl+["
+        case .closePanelTab: "cmd+ctrl+w"
         case .nextTab: "cmd+shift+]"
         case .previousTab: "cmd+shift+["
         }

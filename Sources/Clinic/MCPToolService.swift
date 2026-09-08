@@ -92,7 +92,7 @@ final class MCPToolService {
             }
             let caption = args["caption"] as? String
             sessions?.update { s in s.attachments[sessionId, default: []].append(ClinicState.Attachment(path: path, caption: caption)) }
-            tab.rightPane = .attachments
+            tabs?.showPane(.attachments, in: tab)
             return MCPToolSpec.textResult("Image shown in Clinic's attachments panel.")
 
         case "read_terminal":
@@ -104,7 +104,7 @@ final class MCPToolService {
         case "run_in_terminal":
             let command = (args["command"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !command.isEmpty else { return MCPToolSpec.textResult("command is required", isError: true) }
-            if tab.panelSurface == nil || !tab.panelVisible { tabs?.togglePanel(tab) }
+            tabs?.showPane(.terminal, in: tab)
             guard let panel = tab.panelSurface else { return MCPToolSpec.textResult("Could not open the shell panel.", isError: true) }
             panel.sendLine(command)
             return MCPToolSpec.textResult("Command typed into the user's shell panel: \(command)")

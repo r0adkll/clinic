@@ -63,7 +63,7 @@ struct NewSessionSheet: View {
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             projectPath = url.path
-            sessions.update { s in if !s.addedProjects.contains(url.path) { s.addedProjects.append(url.path) } }
+            sessions.addProject(url.path)
         }
     }
 

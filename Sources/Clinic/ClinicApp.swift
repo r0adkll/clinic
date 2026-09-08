@@ -85,12 +85,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
             if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") {
                 tabs.toggleGitPage()
-                let after = UserDefaults.standard.double(forKey: "ClinicToggleGitPageAfter")
-                if after > 0 { Task { try? await Task.sleep(for: .seconds(after)); tabs.toggleGitPage() } }
+            }
+            // `-ClinicCyclePanelAfter <seconds>` hides the panel and shows it again a second later, from a
+            // settled window: the path where a newly added panel used to come up blank.
+            let cycle = UserDefaults.standard.double(forKey: "ClinicCyclePanelAfter")
+            if cycle > 0 {
+                Task {
+                    try? await Task.sleep(for: .seconds(cycle))
+                    let drag = UserDefaults.standard.double(forKey: "ClinicDragPanelTo")
+                    if drag > 0 { tabs.selectedTab?.contentView.setPanelWidth(CGFloat(drag)) }
+                    try? await Task.sleep(for: .seconds(1)); tabs.togglePanelVisibility()
+                    try? await Task.sleep(for: .seconds(1)); tabs.togglePanelVisibility()
+                }
             }
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
-                if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.editor?.open(absolute: file) }
+                if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
             }
         }
         // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
@@ -121,6 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopAfterLaunch")
             if stopAfter > 0 { Task { try? await Task.sleep(for: .seconds(stopAfter)); if let t = tabs.selectedTab { tabs.stop(t) } } }
+        }
+        // `-ClinicGenerateIconOnLaunch /path/to/project`: open the icon sheet for a project (ADR-076 smoke test).
+        if let path = UserDefaults.standard.string(forKey: "ClinicGenerateIconOnLaunch"), !path.isEmpty {
+            Task { try? await Task.sleep(for: .seconds(2)); NotificationCenter.default.post(name: .clinicGenerateIcon, object: path) }
         }
         if UserDefaults.standard.bool(forKey: "ClinicNewChatOnLaunch") { tabs.newChat() }
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionScreenOnLaunch"), !path.isEmpty { tabs.startNewSession(projectPath: path) }
@@ -261,13 +275,21 @@ struct ClinicCommands: Commands {
             Button("Collapse All Projects") { sessions.collapseAll() }
             Button("Expand All Projects") { sessions.expandAll() }
         }
-        CommandMenu("Tabs") {
-            Button("Toggle Terminal Panel") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
-            Button("Toggle Git Page") { tabs.toggleGitPage() }.keyboardShortcut(key(.toggleGitPage)).disabled(tabs.selectedTab == nil)
-            Button("Toggle Editor") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
-            Button("Toggle Attachments") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
-            Button("Toggle Pull Request Page") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
+        CommandMenu("Panel") {
+            Button(tabs.selectedTab?.panel.isVisible == true ? "Hide Panel" : "Show Panel") { tabs.togglePanelVisibility() }
+                .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
             Divider()
+            Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
+            Button("Git") { tabs.toggleGitPage() }.keyboardShortcut(key(.toggleGitPage)).disabled(tabs.selectedTab == nil)
+            Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
+            Button("Images") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
+            Button("Pull Request") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
+            Divider()
+            Button("Next Panel Tab") { tabs.cyclePanelTab(1) }.keyboardShortcut(key(.nextPanelTab)).disabled((tabs.selectedTab?.panel.panes.count ?? 0) < 2)
+            Button("Previous Panel Tab") { tabs.cyclePanelTab(-1) }.keyboardShortcut(key(.previousPanelTab)).disabled((tabs.selectedTab?.panel.panes.count ?? 0) < 2)
+            Button("Close Panel Tab") { tabs.closeFrontPane() }.keyboardShortcut(key(.closePanelTab)).disabled(tabs.selectedTab?.panel.selected == nil)
+        }
+        CommandMenu("Tabs") {
             Button("Move Tab to New Window") { if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } }.keyboardShortcut(key(.moveTabToNewWindow)).disabled(tabs.selectedTab == nil)
             Divider()
             Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut(key(.nextTab))
@@ -285,6 +307,7 @@ extension Notification.Name {
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
     static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
+    static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")
 }

@@ -7,7 +7,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var favorites: Set<SessionID> = []
     public var archived: [SessionID: Date] = [:]
     public var projectOrder: [String] = []
-    public var addedProjects: [String] = []
+    /// Every project Clinic has seen, and when it first saw it. Sidebar membership and default
+    /// order both come from this, so a project outlives its sessions (ADR-077).
+    public var projectsAddedAt: [String: Date] = [:]
     public var lastModelByProject: [String: String] = [:]
     public var lastWorktreeByProject: [String: Bool] = [:]
     public var selectedSessionId: SessionID?
@@ -23,6 +25,18 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var collapsedProjects: Set<String> = []
 
     public init() {}
+
+    /// Records a project the user added, started a session in, or imported into. Idempotent: an
+    /// existing registration keeps its original date, so the project keeps its place (ADR-077).
+    public mutating func registerProject(_ path: String, at date: Date = Date()) {
+        guard !path.isEmpty else { return }
+        removedProjects.remove(path)
+        if projectsAddedAt[path] == nil { projectsAddedAt[path] = date }
+    }
+
+    /// Drops the registration without hiding the project's sessions: it disappears from the
+    /// sidebar only while nothing visible lives in it (Archive Project, ADR-065).
+    public mutating func unregisterProject(_ path: String) { projectsAddedAt[path] = nil }
 
     public struct Attachment: Codable, Sendable, Equatable, Identifiable {
         public var id: UUID
@@ -42,7 +56,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, addedProjects, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -53,7 +67,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         favorites = try c.decodeIfPresent(Set<SessionID>.self, forKey: .favorites) ?? []
         archived = try Self.sessionMap(c, .archived, legacy: { ISO8601DateFormatter().date(from: $0) })
         projectOrder = try c.decodeIfPresent([String].self, forKey: .projectOrder) ?? []
-        addedProjects = try c.decodeIfPresent([String].self, forKey: .addedProjects) ?? []
+        projectsAddedAt = try c.decodeIfPresent([String: Date].self, forKey: .projectsAddedAt) ?? [:]
         lastModelByProject = try c.decodeIfPresent([String: String].self, forKey: .lastModelByProject) ?? [:]
         lastWorktreeByProject = try c.decodeIfPresent([String: Bool].self, forKey: .lastWorktreeByProject) ?? [:]
         selectedSessionId = try c.decodeIfPresent(SessionID.self, forKey: .selectedSessionId)
@@ -63,7 +77,25 @@ public struct ClinicState: Codable, Sendable, Equatable {
         removedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .removedProjects) ?? []
         attachments = (try? c.decodeIfPresent([SessionID: [Attachment]].self, forKey: .attachments)) ?? [:]
         collapsedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .collapsedProjects) ?? []
+        if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
+
+    /// Pre-ADR-077 builds derived sidebar membership from the live session list plus an
+    /// `addedProjects` array that only the folder picker wrote, so a project vanished with its
+    /// last session. Seed registrations from both: picked folders first (their real add dates are
+    /// gone, so they keep only their relative order), then the first session Clinic owned in each.
+    private mutating func migrateProjectRegistrations(from decoder: Decoder) {
+        let legacy = (try? decoder.container(keyedBy: LegacyKeys.self))
+            .flatMap { try? $0.decodeIfPresent([String].self, forKey: .addedProjects) } ?? []
+        for (i, path) in legacy.enumerated() where !path.isEmpty {
+            projectsAddedAt[path] = Date(timeIntervalSince1970: Double(i))
+        }
+        for owned in ownedSessions.values where !owned.projectPath.isEmpty {
+            projectsAddedAt[owned.projectPath] = min(projectsAddedAt[owned.projectPath] ?? .distantFuture, owned.addedAt)
+        }
+    }
+
+    private enum LegacyKeys: String, CodingKey { case addedProjects }
 
     /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that
     /// pre-CodingKeyRepresentable builds wrote (values were strings in both legacy cases).

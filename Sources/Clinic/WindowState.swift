@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Observation
 import ClinicCore
+import GhosttyBridge
 
 /// Per-window UI state (ADR-072): which tab is selected, the new-session screen, sidebar select mode.
 /// Tabs and surfaces stay in the single `TabStore`; a `Tab.windowId` says where it is shown.
@@ -103,14 +104,10 @@ struct TerminalStack: NSViewRepresentable {
 
     func updateNSView(_ v: TerminalStackView, context: Context) {
         v.sync(tabs: live, selected: selectedId, visible: visible)
-        for tab in live {
-            tab.contentView.setPanel(tab.panelVisible ? tab.panelSurface : nil)
-            let (page, minWidth) = pageContent(tab)
-            tab.contentView.setPage(page, minWidth: minWidth)
-        }
+        for tab in live { tab.contentView.setPanel(panelContent(tab)) }
         if visible, let tab = live.first(where: { $0.id == selectedId }) {
             DispatchQueue.main.async {
-                guard let w = tab.surface.window, w.firstResponder !== tab.surface, !tab.panelVisible else { return }
+                guard let w = tab.surface.window, w.firstResponder !== tab.surface, !tab.panel.isFront(.terminal) else { return }
                 w.makeFirstResponder(tab.surface)
             }
         }
@@ -120,14 +117,30 @@ struct TerminalStack: NSViewRepresentable {
         AnyView(view.environment(tabs).environment(sessions).environment(prs).environment(history).environment(usage))
     }
 
-    private func pageContent(_ tab: Tab) -> (AnyView?, CGFloat) {
-        switch tab.rightPane {
-        case .none: return (nil, 320)
-        case .git: return (tab.gitPage.map { inject(GitPage(tab: tab, model: $0)) }, 380)
-        case .pr(let ref): return (inject(PRPage(tab: tab, ref: ref)), 380)
-        case .attachments: return (inject(AttachmentsPanel(tab: tab)), 320)
-        case .editor: return (tab.editor.map { inject(EditorPanel(tab: tab, model: $0)) }, 520)
+    /// Panel pages fill their hosting view, so a page whose ideal size is small does not float in it.
+    private func page<V: View>(_ view: V) -> AnyView {
+        inject(view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+    }
+
+    /// The chrome and the front pane's content for one tab's panel (ADR-079); nil when the panel is hidden.
+    private func panelContent(_ tab: Tab) -> TabContentView.PanelContent? {
+        guard tab.panel.isVisible else { return nil }
+        guard let pane = tab.panel.selected else {
+            return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)),
+                                               page: page(SidePanelEmptyState(tab: tab)),
+                                               terminal: nil, minWidth: 320)
         }
+        var page: AnyView?
+        var terminal: GhosttySurfaceView?
+        switch pane.kind {
+        case .terminal: terminal = pane.terminal
+        case .git: page = pane.git.map { self.page(GitPage(tab: tab, model: $0)) }
+        case .files: page = pane.editor.map { self.page(EditorPanel(tab: tab, model: $0)) }
+        case .attachments: page = self.page(AttachmentsPanel(tab: tab))
+        case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))
+        }
+        return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)), page: page,
+                                           terminal: terminal, minWidth: pane.kind.minWidth)
     }
 }
 

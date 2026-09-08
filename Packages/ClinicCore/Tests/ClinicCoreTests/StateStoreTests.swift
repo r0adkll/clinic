@@ -27,6 +27,36 @@ import Testing
         #expect(obj["manualNames"] is [String: Any])
     }
 
+    @Test func migratesLegacyProjectMembership() throws {
+        // Pre-ADR-077: picked folders in `addedProjects`, everything else known only through sessions.
+        let json = """
+        {"addedProjects":["/picked/one","/picked/two"],
+         "ownedSessions":{"11111111-2222-3333-4444-555555555555":{"projectPath":"/repo","addedAt":"2026-01-02T00:00:00Z","imported":false},
+                          "22222222-2222-3333-4444-555555555555":{"projectPath":"/repo","addedAt":"2026-01-01T00:00:00Z","imported":false}}}
+        """
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        let s = try d.decode(ClinicState.self, from: Data(json.utf8))
+        #expect(ProjectRoster.paths(.init(registered: s.projectsAddedAt)) == ["/picked/one", "/picked/two", "/repo"])
+        // The repo is registered at its *first* owned session, not the latest.
+        #expect(s.projectsAddedAt["/repo"] == ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z"))
+    }
+
+    @Test func migrationLeavesNewerStateAlone() throws {
+        let json = #"{"projectsAddedAt":{"/repo":"2026-05-05T00:00:00Z"},"addedProjects":["/picked"]}"#
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        let s = try d.decode(ClinicState.self, from: Data(json.utf8))
+        #expect(Array(s.projectsAddedAt.keys) == ["/repo"])
+    }
+
+    @Test func registerProjectKeepsTheOriginalDateAndUnhides() {
+        var s = ClinicState()
+        s.removedProjects.insert("/repo")
+        s.registerProject("/repo", at: Date(timeIntervalSince1970: 10))
+        s.registerProject("/repo", at: Date(timeIntervalSince1970: 99))
+        #expect(s.projectsAddedAt["/repo"] == Date(timeIntervalSince1970: 10))
+        #expect(s.removedProjects.isEmpty)
+    }
+
     @Test func roundTrips() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("clinic-state-\(UUID().uuidString)/state.json")
         let store = StateStore(url: url, debounce: .milliseconds(10))

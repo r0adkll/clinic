@@ -39,20 +39,20 @@ struct NewSessionScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                ProjectIcon(project: project, size: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(SessionStore.isChats(project.path) ? "New chat" : project.name).font(.title3.weight(.semibold))
+            VStack(spacing: 6) {
+                ProjectIcon(project: project, size: 48)
+                VStack(spacing: 2) {
+                    Text(SessionStore.isChats(project.path) ? "New chat" : project.name).font(.largeTitle.weight(.semibold))
                     Text(TabFooter.abbreviate(draft.projectPath)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                 }
-                Spacer()
-                Button { tabs.discardDraft(draft) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Discard (⌘W)")
             }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 6)
             TextEditor(text: $draft.prompt)
                 .font(.body)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .frame(minHeight: 160, maxHeight: 360)
+                .frame(minHeight: 80, maxHeight: 180)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
                 .overlay(alignment: .topLeading) {
@@ -63,20 +63,17 @@ struct NewSessionScreen: View {
                     if press.modifiers.contains(.command) { tabs.sendDraft(draft); return .handled }
                     return .ignored
                 }
-            HStack(spacing: 14) {
-                Picker("Model", selection: $draft.model) { ForEach(models, id: \.self) { Text($0.capitalized).tag($0) } }.frame(maxWidth: 170)
-                if draft.model == "custom" { TextField("model id", text: $draft.customModel).textFieldStyle(.roundedBorder).frame(maxWidth: 220) }
-                Picker("Effort", selection: $draft.effort) { ForEach(efforts, id: \.self) { Text($0 == "xhigh" ? "Extra high" : $0.capitalized).tag($0) } }.frame(maxWidth: 190)
-                Spacer()
-            }
-            if !SessionStore.isChats(project.path) {
-                HStack(spacing: 12) {
-                    Toggle("New git worktree", isOn: $draft.worktree).toggleStyle(.checkbox)
+            HStack(spacing: 24) {
+                Picker("Model", selection: $draft.model) { ForEach(models, id: \.self) { Text($0.capitalized).tag($0) } }.fixedSize()
+                if draft.model == "custom" { TextField("model id", text: $draft.customModel).textFieldStyle(.roundedBorder).frame(maxWidth: 180) }
+                Picker("Effort", selection: $draft.effort) { ForEach(efforts, id: \.self) { Text($0 == "xhigh" ? "Extra high" : $0.capitalized).tag($0) } }.fixedSize()
+                if !SessionStore.isChats(project.path) {
+                    Toggle("Worktree", isOn: $draft.worktree).toggleStyle(.switch).fixedSize()
                     if draft.worktree {
-                        TextField("branch name (optional)", text: $draft.worktreeName).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                        TextField("branch name (optional)", text: $draft.worktreeName).textFieldStyle(.roundedBorder).frame(maxWidth: 200)
                     }
-                    Spacer()
                 }
+                Spacer(minLength: 0)
             }
             HStack {
                 Text("⌘↩ sends. The prompt becomes the session's first turn.").font(.caption).foregroundStyle(.tertiary)
@@ -87,7 +84,11 @@ struct NewSessionScreen: View {
         }
         .padding(24)
         .frame(maxWidth: 820, alignment: .topLeading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .overlay(alignment: .topTrailing) {
+            Button { tabs.discardDraft(draft) } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).help("Discard (⌘W)").padding(16)
+        }
         .onAppear { focused = true }
     }
 }

@@ -69,18 +69,18 @@ final class SessionStore {
     static let chatsDirectory: String = ClinicPaths.appSupport.appendingPathComponent("Clinic/Chats", isDirectory: true).path
     static func isChats(_ path: String) -> Bool { path == chatsDirectory }
 
+    /// Membership and order come from `ProjectRoster` (ADR-077): registered projects outlive their
+    /// sessions, and the default order is the order they were registered, oldest first.
     private func rebuildProjects() {
-        var byPath: [String: Date] = [:]
+        var earliest: [String: Date] = [:]
         for s in sessions.values {
             guard isVisible(s), let p = ProjectGrouping.project(for: s) else { continue }
-            byPath[p.path] = max(byPath[p.path] ?? .distantPast, s.activityDate)
+            earliest[p.path] = min(earliest[p.path] ?? .distantFuture, s.createdAt ?? s.activityDate)
         }
-        for added in state.addedProjects where byPath[added] == nil && !state.removedProjects.contains(added) { byPath[added] = .distantPast }
-        // ADR-062: manual order first, then the rest by activity.
-        let chats = byPath[Self.chatsDirectory] != nil ? [Self.chatsDirectory] : []
-        let pinned = state.projectOrder.filter { byPath[$0] != nil && !Self.isChats($0) }
-        let rest = byPath.keys.filter { !pinned.contains($0) && !Self.isChats($0) }.sorted { (byPath[$0]!, $0) > (byPath[$1]!, $1) }
-        projects = (chats + pinned + rest).map(Project.init(path:))
+        let paths = ProjectRoster.paths(.init(registered: state.projectsAddedAt, withSessions: earliest,
+                                              removed: state.removedProjects, manualOrder: state.projectOrder,
+                                              pinnedFirst: [Self.chatsDirectory]))
+        projects = paths.map(Project.init(path:))
     }
 
     // MARK: Project groups (ADR-062)
@@ -107,12 +107,7 @@ final class SessionStore {
 
     func resetProjectOrder() { update { s in s.projectOrder = [] } }
 
-    func addProject(_ path: String) {
-        update { s in
-            s.removedProjects.remove(path)
-            if !s.addedProjects.contains(path) { s.addedProjects.append(path) }
-        }
-    }
+    func addProject(_ path: String) { update { s in s.registerProject(path) } }
 
     var sessionSort: String { UserDefaults.standard.string(forKey: "ClinicSessionSort") ?? "activity" }
 
@@ -149,7 +144,7 @@ final class SessionStore {
         let path = ProjectGrouping.project(for: summary)?.path ?? summary.cwd ?? ""
         update { s in
             s.ownedSessions[summary.id] = ClinicState.OwnedSession(projectPath: path, imported: true)
-            s.removedProjects.remove(path)
+            s.registerProject(path)
         }
     }
 
@@ -172,10 +167,11 @@ final class SessionStore {
         pending[id] = pending[id] != nil ? s : nil
     }
 
+    /// Hides the project and its sessions until something re-registers the path (ADR-050).
     func removeProject(_ project: Project) {
         update { s in
             s.removedProjects.insert(project.path)
-            s.addedProjects.removeAll { $0 == project.path }
+            s.unregisterProject(project.path)
         }
     }
     func isArchived(_ id: SessionID) -> Bool { state.archived[id] != nil }
@@ -204,7 +200,9 @@ final class SessionStore {
     func archiveProject(_ project: Project) {
         let ids = sessions(in: project).map(\.id)
         for id in ids { archiveUndoStack.append((id, nil)) }
-        update { s in for id in ids { s.archived[id] = Date() }; s.addedProjects.removeAll { $0 == project.path } }
+        // Unregistering (rather than removing) lets an unarchived session bring the project back
+        // at its old position, since the roster falls back to its earliest session (ADR-065).
+        update { s in for id in ids { s.archived[id] = Date() }; s.unregisterProject(project.path) }
     }
 
     func unarchive(_ id: SessionID) {
@@ -255,9 +253,10 @@ final class SessionStore {
         let placeholder = SessionSummary(id: id, transcriptPath: path, cwd: cwd, firstPrompt: title, createdAt: Date(), lastActivityAt: Date(), fileModifiedAt: Date())
         pending[id] = placeholder
         sessions[id] = placeholder
+        let projectPath = ProjectGrouping.projectPath(forCwd: cwd)
         update { s in
-            s.ownedSessions[id] = ClinicState.OwnedSession(projectPath: ProjectGrouping.projectPath(forCwd: cwd))
-            s.removedProjects.remove(ProjectGrouping.projectPath(forCwd: cwd))
+            s.ownedSessions[id] = ClinicState.OwnedSession(projectPath: projectPath)
+            s.registerProject(projectPath)
         }
     }
 }

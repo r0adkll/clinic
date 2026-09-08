@@ -16,7 +16,10 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             sidebarToolbar
-            Divider()
+            // The gap above the first project sits outside the scroll view on purpose: as
+            // `contentMargins(for: .scrollContent)` it was applied on a later layout pass and popped
+            // in on the first scroll, and as a spacer row it took the sidebar's minimum row height.
+            Divider().padding(.bottom, 8)
             sessionList
             if bulkActive { Divider(); BulkActionBar(ids: bulkIds) }
             if showUsage { Divider(); UsagePanel() }
@@ -32,20 +35,20 @@ struct SidebarView: View {
             .sorted { ($0.rawValue) < ($1.rawValue) }
     }
 
-    /// Collapse-all / expand-all, select mode and add-project (ADR-062, ADR-074).
+    /// Collapse-all / expand-all, select mode and add-project (ADR-062, ADR-074). The row carries no
+    /// caption: what it sits above is a list of projects, not "Sessions" (ADR-077).
     private var sidebarToolbar: some View {
-        HStack(spacing: 6) {
-            Text("Sessions").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer()
-            Button { window.selectMode.toggle() } label: {
-                Image(systemName: window.selectMode ? "checklist.checked" : "checklist").foregroundStyle(window.selectMode ? Color.accentColor : Color.primary)
-            }.help((window.selectMode ? "Done selecting" : "Select sessions") + bindings.hint(.selectSessions))
-            Button { sessions.collapseAll() } label: { Image(systemName: "chevron.up.chevron.down") }.help("Collapse all")
-            Button { sessions.expandAll() } label: { Image(systemName: "chevron.down") }.help("Expand all")
-            Button { addProject() } label: { Image(systemName: "plus") }.help("Add project folder")
+        HStack(spacing: 1) {
+            Spacer(minLength: 0)
+            ToolbarIcon(window.selectMode ? "checklist.checked" : "checklist",
+                        help: (window.selectMode ? "Done selecting" : "Select sessions") + bindings.hint(.selectSessions),
+                        active: window.selectMode) { window.selectMode.toggle() }
+            ToolbarIcon("chevron.up.chevron.down", help: "Collapse all") { sessions.collapseAll() }
+            ToolbarIcon("chevron.down", help: "Expand all") { sessions.expandAll() }
+            Divider().frame(height: 12).padding(.horizontal, 3)
+            ToolbarIcon("folder.badge.plus", help: "Add project folder") { addProject() }
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12).padding(.vertical, 5)
+        .padding(.horizontal, 8).padding(.vertical, 4)
     }
 
     private func addProject() {
@@ -68,7 +71,10 @@ struct SidebarView: View {
                 let collapsed = query.isEmpty && sessions.isCollapsed(project)
                 if !rows.isEmpty || query.isEmpty {
                     Section {
-                        if !collapsed { ForEach(rows) { summary in row(summary) } }
+                        if !collapsed {
+                            ForEach(rows) { summary in row(summary) }
+                            if rows.isEmpty { NewSessionPlaceholderRow(project: project) }
+                        }
                     } header: {
                         ProjectHeader(project: project, count: rows.count, collapsed: collapsed)
                     }
@@ -248,26 +254,19 @@ struct SessionContextMenu: View {
     }
 }
 
-/// "Open In…" submenu: Finder, Ghostty, and installed editors (ADR-063).
+/// "Open In…" submenu: Finder, Ghostty, and installed editors, each with its app icon (ADR-063, ADR-078).
 struct OpenInMenu: View {
     let path: String
-    static let editors: [(String, String)] = [
-        ("Xcode", "com.apple.dt.Xcode"), ("Visual Studio Code", "com.microsoft.VSCode"), ("Cursor", "com.todesktop.230313mzl4w4u92"),
-        ("Zed", "dev.zed.Zed"), ("IntelliJ IDEA", "com.jetbrains.intellij"), ("Android Studio", "com.google.android.studio"),
-    ]
+    private var apps: OpenInApps { OpenInApps.shared }
+
     var body: some View {
         Menu("Open In") {
-            Button("Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-            if TabStore.ghosttyBinary != nil {
-                Button("Ghostty") { let p = Process(); p.executableURL = URL(fileURLWithPath: TabStore.ghosttyBinary!); p.arguments = ["--working-directory=\(path)"]; try? p.run() }
-            }
-            ForEach(Self.editors, id: \.1) { name, bundle in
-                if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
-                    Button(name) { NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) }
-                }
+            ForEach(apps.targets) { target in
+                OpenInRow(target: target) { apps.open(path, in: target) }
             }
         }
         .disabled(path.isEmpty)
+        .onAppear { apps.refreshIfStale() }
     }
 }
 
@@ -337,35 +336,100 @@ struct SessionRow: View {
             } else {
                 StateGlyph(tab: tab)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
-                if hovering {
-                    HStack(spacing: 10) {
-                        if let tab, tab.isRunningClaude { Button("Stop") { tabs.stop(tab) } }
-                        if let tab { Button("Close") { tabs.close(tab) } }
-                        Button(sessions.isArchived(summary.id) ? "Unarchive" : "Archive") {
-                            if sessions.isArchived(summary.id) { sessions.unarchive(summary.id) } else { SessionActions.archive(summary, sessions: sessions, tabs: tabs) }
-                        }
-                        Button(sessions.isFavorite(summary.id) ? "Unstar" : "Star") { sessions.toggleFavorite(summary.id) }
+                HStack(spacing: 5) {
+                    Text(summary.activityDate, format: .relative(presentation: .named))
+                    if showPath, let cwd = summary.lastCwd ?? summary.cwd {
+                        Text("·"); Text(TabFooter.abbreviate(cwd)).lineLimit(1).truncationMode(.head)
                     }
-                    .buttonStyle(.plain).font(.caption).foregroundStyle(Color.accentColor)
-                } else {
-                    HStack(spacing: 6) {
-                        Text(summary.activityDate, format: .relative(presentation: .named))
-                        if showPath, let cwd = summary.lastCwd ?? summary.cwd {
-                            Text("·"); Text(TabFooter.abbreviate(cwd)).lineLimit(1).truncationMode(.head)
-                        }
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
                 }
+                .font(.caption).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            if hovering { hoverActions } else { badges }
+        }
+        .padding(.vertical, 3)
+        .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
+        .onHover { hovering = $0 }
+    }
+
+    /// Trailing hover actions (ADR-077). They replace the badges rather than the timestamp, so the
+    /// row keeps its size, and they carry no colour of their own so a selected row stays readable.
+    @ViewBuilder
+    private var hoverActions: some View {
+        let archived = sessions.isArchived(summary.id), starred = sessions.isFavorite(summary.id)
+        HStack(spacing: 0) {
+            if let tab, tab.isRunningClaude { RowAction("stop.fill", help: "Stop") { tabs.stop(tab) } }
+            if let tab { RowAction("xmark", help: "Close Tab") { tabs.close(tab) } }
+            RowAction(starred ? "star.slash" : "star", help: starred ? "Remove from Favorites" : "Add to Favorites") {
+                sessions.toggleFavorite(summary.id)
+            }
+            RowAction(archived ? "tray.and.arrow.up" : "archivebox", help: archived ? "Unarchive" : "Archive") {
+                if archived { sessions.unarchive(summary.id) } else { SessionActions.archive(summary, sessions: sessions, tabs: tabs) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var badges: some View {
+        HStack(spacing: 4) {
             PRMarkView(refs: summary.pullRequests)
             if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
             if sessions.isFavorite(summary.id) { Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow) }
         }
-        .padding(.vertical, 2)
-        .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
+    }
+}
+
+/// One trailing action on a session row. Deliberately unstyled: on a selected sidebar row the
+/// glyph inherits the selection's own label colour, which accent-coloured text did not (ADR-077).
+struct RowAction: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ systemName: String, help: String, action: @escaping () -> Void) {
+        self.systemName = systemName; self.help = help; self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 20, height: 18)
+                .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// A sidebar toolbar glyph: secondary until hovered, accent while its mode is on.
+struct ToolbarIcon: View {
+    let systemName: String
+    let help: String
+    var active = false
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ systemName: String, help: String, active: Bool = false, action: @escaping () -> Void) {
+        self.systemName = systemName; self.help = help; self.active = active; self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(hovering ? HierarchicalShapeStyle.primary : .secondary))
+                .frame(width: 22, height: 20)
+                .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
         .onHover { hovering = $0 }
     }
 }

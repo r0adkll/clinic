@@ -133,9 +133,11 @@ struct EditorPanel: View {
     @FocusState private var editorFocused: Bool
 
     var body: some View {
+        // Both halves must claim the full height: an `HSplitView` whose children only have an ideal
+        // height collapses to it and sits along the bottom edge (visible with no file open).
         HSplitView {
-            sidebar.frame(minWidth: 180, idealWidth: 220, maxWidth: 360)
-            editor.frame(minWidth: 320)
+            sidebar.frame(minWidth: 180, idealWidth: 220, maxWidth: 360, maxHeight: .infinity)
+            editor.frame(minWidth: 320, maxHeight: .infinity)
         }
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath

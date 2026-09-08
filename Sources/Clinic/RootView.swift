@@ -17,6 +17,7 @@ struct RootView: View {
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
     @State private var showMCPServers = false
+    @State private var iconProject: IconGenerationTarget?
     @State private var newSessionProject: String?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
@@ -41,6 +42,7 @@ struct RootView: View {
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(isPresented: $showMCPServers) { MCPServersSheet() }
+        .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { showMCPServers = true } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             guard isActive else { return }
@@ -48,6 +50,10 @@ struct RootView: View {
             else if let id = tabs.selectedTab(in: window)?.sessionId { detailsFor = sessions.sessions[id] }
         }
         .onReceive(NotificationCenter.default.publisher(for: .clinicQuickSwitch)) { _ in if isActive { showSwitcher = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicGenerateIcon)) { n in
+            guard isActive, let path = n.object as? String else { return }
+            iconProject = IconGenerationTarget(path: path)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { _ in if isActive { openSettings() } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicOpenWindow)) { n in
             guard isActive, let id = n.object as? UUID else { return }
@@ -69,6 +75,9 @@ struct RootView: View {
                         .foregroundStyle(caffeine.isOn ? Color.accentColor : Color.primary)
                 }
                 .help(caffeine.isOn ? "Caffeine mode is on: the Mac will not sleep" + bindings.hint(.caffeine) : "Caffeine mode: keep the Mac awake" + bindings.hint(.caffeine))
+                if let tab = tabs.selectedTab(in: window), tab.replay == nil {
+                    OpenInToolbarMenu(path: tab.pwd ?? tab.projectPath)
+                }
                 NotificationBell()
             }
         }
@@ -97,7 +106,7 @@ struct DetailView: View {
         return ZStack {
             // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
             TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
-                          keys: live.map { "\($0.id)|\($0.panelVisible)|\(String(describing: $0.rightPane))|\($0.panelSurface == nil)|\($0.gitPage == nil)|\($0.editor == nil)" })
+                          keys: live.map { "\($0.id)|\($0.panel.renderKey)" })
             ForEach(mine.filter { $0.replay != nil }) { tab in
                 ReplayView(model: tab.replay!)
                     .opacity(tab.id == window.selectedTabId ? 1 : 0)
@@ -142,15 +151,16 @@ struct TabFooter: View {
                 .help("Working directory (click to copy): \(pwd)")
             }
             Spacer(minLength: 8)
+            // Quick actions (ADR-079): each one shows the panel with its tab in front; the tab bar's chevron hides it.
             HStack(spacing: 6) {
-                FooterToggle(title: "Panel", symbol: "rectangle.bottomthird.inset.filled", active: tab.panelVisible, help: "Shell panel below the session (⌘J)") { tabs.togglePanel(tab) }
-                FooterToggle(title: tab.gitBranch ?? "Git", symbol: "arrow.triangle.branch", active: tab.gitPageVisible, help: "Git page (⌘⇧G)") { tabs.toggleGitPage(tab) }
-                FooterToggle(title: "Files", symbol: "doc.text.magnifyingglass", active: tab.rightPane == .editor, help: "Editor (⌘⇧E)") { tabs.toggleEditor(tab) }
+                PaneToggle(tab: tab, kind: .terminal, help: "Shell in the panel (⌘J)")
+                PaneToggle(tab: tab, kind: .git, help: "Git page (⌘⇧G)")
+                PaneToggle(tab: tab, kind: .files, help: "Editor (⌘⇧E)")
                 if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
-                    FooterToggle(title: "Images (\(n))", symbol: "photo.on.rectangle", active: tab.rightPane == .attachments, help: "Attachments (⌘⇧I)") { tabs.toggleAttachments(tab) }
+                    PaneToggle(tab: tab, kind: .attachments, help: "Attachments (⌘⇧I)")
                 }
                 ForEach(tabs.pullRequests(for: tab)) { ref in
-                    PRChip(ref: ref, active: tab.rightPane == .pr(ref)) { tabs.togglePRPage(tab, ref: ref) }
+                    PRChip(ref: ref, active: tab.panel.isFront(.pr(ref)), open: tab.panel.isOpen(.pr(ref))) { tabs.togglePRPage(tab, ref: ref) }
                 }
             }
         }
@@ -227,11 +237,28 @@ struct EffortMenu: View {
     }
 }
 
-/// Labeled footer toggle (icon + title) so each control reads at a glance.
+/// Footer quick action for one panel pane (ADR-079): shows the panel with this pane in front. Never hides.
+struct PaneToggle: View {
+    @Environment(TabStore.self) private var tabs
+    let tab: Tab
+    let kind: PanelPane.Kind
+    let help: String
+
+    var body: some View {
+        FooterToggle(title: tabs.paneTitle(kind, in: tab), symbol: kind.symbol,
+                     active: tab.panel.isFront(kind), open: tab.panel.isOpen(kind), help: help) {
+            tabs.showPane(kind, in: tab)
+        }
+    }
+}
+
+/// Labeled footer toggle (icon + title) so each control reads at a glance. `active` = this pane is on
+/// screen; `open` = its panel tab exists but something else is in front.
 struct FooterToggle: View {
     let title: String
     let symbol: String
     let active: Bool
+    var open = false
     let help: String
     let action: () -> Void
 
@@ -243,6 +270,7 @@ struct FooterToggle: View {
                 .lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accentColor.opacity(0.35) : .clear))
                 .foregroundStyle(active ? Color.accentColor : Color.primary)
         }
         .buttonStyle(.plain)
