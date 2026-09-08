@@ -5,6 +5,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
     public enum Mode: Sendable, Hashable {
         case new(id: SessionID)
         case resume(id: SessionID, fork: Bool)
+        /// Re-attach to a session running detached (ADR-061).
+        case attach(agentId: String)
     }
 
     public var mode: Mode
@@ -30,6 +32,9 @@ public struct ClaudeLaunch: Sendable, Hashable {
         case .resume(let id, let fork):
             args += ["--resume", id.rawValue]
             if fork { args.append("--fork-session") }
+        case .attach(let agentId):
+            // `claude attach <id>` takes no other options.
+            return ["attach", agentId]
         }
         if let model, !model.isEmpty { args += ["--model", model] }
         if let effort, !effort.isEmpty { args += ["--effort", effort] }

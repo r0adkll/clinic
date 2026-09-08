@@ -23,6 +23,9 @@ final class Tab: Identifiable {
     var pwd: String?
     var childExited = false
     var lastResume: ClaudeLaunch?
+    /// Set when the user chose Background: the tab closes itself once `/bg` detaches the CLI (ADR-061).
+    var detaching = false
+    var isAttached = false
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
     var pendingInput: String?
     var gitBranch: String?
@@ -64,8 +67,9 @@ final class TabStore {
     let hooks: HookService
     let notifications: NotificationService
     let history: NotificationStore
-    /// Set by the app after construction (ADR-056).
+    /// Set by the app after construction (ADR-056, ADR-061).
     var mcp: MCPToolService?
+    var backgroundAgents: BackgroundAgentsService?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -120,10 +124,12 @@ final class TabStore {
         if let existing = tab(for: summary.id) { selectedTabId = existing.id; return }
         sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
-        launch.mcpConfigPath = mcp?.configPath(for: summary.id)
+        let running = backgroundAgents?.runningAgent(for: summary.id)
+        var launch = ClaudeLaunch(mode: running.map { .attach(agentId: $0.id) } ?? .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        launch.mcpConfigPath = running == nil ? mcp?.configPath(for: summary.id) : nil
         guard let tab = makeTab(kind: .session(summary.id), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: sessions.displayName(for: summary)) else { return }
+        tab.isAttached = running != nil
         tab.lastResume = launch
         selectedTabId = tab.id
     }
@@ -164,9 +170,9 @@ final class TabStore {
         selectedTabId = tab.id
     }
 
-    func newShell(in directory: String? = nil) {
+    func newShell(in directory: String? = nil, initialInput: String? = nil) {
         let dir = directory ?? selectedTab?.pwd ?? selectedTab?.projectPath ?? FileManager.default.homeDirectoryForCurrentUser.path
-        guard let tab = makeTab(kind: .shell, cwd: dir, projectPath: ProjectGrouping.projectPath(forCwd: dir), initialInput: nil, title: "Shell") else { return }
+        guard let tab = makeTab(kind: .shell, cwd: dir, projectPath: ProjectGrouping.projectPath(forCwd: dir), initialInput: initialInput, title: "Shell") else { return }
         selectedTabId = tab.id
     }
 
@@ -259,7 +265,13 @@ final class TabStore {
     /// Returns false if the user cancelled.
     @discardableResult
     func close(_ tab: Tab, confirm: Bool = true) -> Bool {
-        if confirm && tab.isRunningClaude && !confirmClose(count: 1) { return false }
+        if confirm && tab.isRunningClaude {
+            switch confirmCloseTab(tab) {
+            case .cancel: return false
+            case .background: background(tab); return false
+            case .close: break
+            }
+        }
         tabs.removeAll { $0.id == tab.id }
         if selectedTabId == tab.id { selectedTabId = tabs.last?.id }
         tab.surface.free()
@@ -273,6 +285,16 @@ final class TabStore {
     }
 
     func closeSelected() { if let t = selectedTab { close(t) } }
+
+    /// Detach the session with `/bg`; the tab closes when the CLI hands the shell back (ADR-061).
+    func background(_ tab: Tab) {
+        guard tab.sessionId != nil, tab.state == .idle else { return }
+        tab.detaching = true
+        tab.surface.sendLine("/bg")
+        Task { try? await Task.sleep(for: .seconds(2)); await backgroundAgents?.refresh() }
+    }
+
+    var canBackgroundSelected: Bool { selectedTab.map { $0.sessionId != nil && $0.state == .idle } ?? false }
 
     /// ⌘J: show/hide the tab's shell panel, creating the surface on first use in the tab's current directory.
     func togglePanel(_ tab: Tab? = nil) {
@@ -343,6 +365,27 @@ final class TabStore {
     }
 
     var runningCount: Int { tabs.filter(\.isRunningClaude).count }
+
+    enum CloseChoice { case close, background, cancel }
+
+    /// Close sheet for one tab; offers Background when the session is idle at its prompt.
+    func confirmCloseTab(_ tab: Tab) -> CloseChoice {
+        let alert = NSAlert()
+        alert.messageText = "Close this session?"
+        let canBackground = tab.sessionId != nil && tab.state == .idle
+        alert.informativeText = canBackground
+            ? "Claude Code is still running. Close ends the process (you can resume later); Background keeps it running detached so you can attach again."
+            : "Claude Code is still running in this tab. Closing it will end the process; you can resume the session later."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Close")
+        if canBackground { alert.addButton(withTitle: "Background") }
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .close
+        case .alertSecondButtonReturn: return canBackground ? .background : .cancel
+        default: return .cancel
+        }
+    }
 
     func confirmClose(count: Int) -> Bool {
         let alert = NSAlert()
@@ -450,6 +493,7 @@ extension TabStore: GhosttySurfaceDelegate {
     func surfaceChildExited(_ surface: GhosttySurfaceView, exitCode: Int32?) {
         guard let tab = tab(forSurface: surface) else { return }
         if tab.panelSurface === surface { closePanel(tab); return }
+        if tab.detaching { close(tab, confirm: false); Task { await backgroundAgents?.refresh() }; return }
         tab.childExited = true
         if tab.state != nil { tab.state = .exited }
         updateBadge()

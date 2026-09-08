@@ -34,6 +34,19 @@ import Testing
         #expect(MCPToolSpec.all.first { $0.name == "run_in_terminal" }?.defaultEnabled == false)
     }
 
+    @Test func attachLine() {
+        let l = ClaudeLaunch(mode: .attach(agentId: "abc-123"), model: "opus", settingsFilePath: "/tmp/h.json")
+        #expect(l.shellLine == "claude attach abc-123\n")
+    }
+
+    @Test func parsesAgentsJSON() {
+        let json = #"[{"pid":18649,"cwd":"/x","kind":"background","startedAt":1788794985237,"sessionId":"48f2e763-c9c5-41d7-a2e1-610331040dd3","id":"agent-1","name":"clinic-77","status":"busy","state":"needs_input","waitingFor":"permission"},{"cwd":"/y","kind":"interactive","startedAt":"2026-09-07T10:00:00Z","status":"idle"},{"nope":true}]"#
+        let agents = BackgroundAgent.parse(Data(json.utf8))
+        #expect(agents.count == 1)
+        #expect(agents[0].id == "agent-1" && agents[0].isBackground && agents[0].needsAttention && agents[0].isRunning)
+        #expect(agents[0].startedAt.map { Calendar.current.component(.year, from: $0) } == 2026)
+    }
+
     @Test func shellQuoting() {
         #expect(ClaudeLaunch.shellQuote("it's") == "'it'\\''s'")
         #expect(ClaudeLaunch.shellQuote("plain-1.0") == "plain-1.0")

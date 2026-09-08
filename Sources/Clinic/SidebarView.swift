@@ -83,11 +83,22 @@ extension SidebarView {
 struct SessionContextMenu: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(BackgroundAgentsService.self) private var background
     let summary: SessionSummary
 
     var body: some View {
-        Button("Open") { tabs.open(session: summary) }
-        if let tab = tabs.tab(for: summary.id) { Button("Close Tab") { tabs.close(tab) } }
+        let agent = background.agent(for: summary.id)
+        Button(agent?.isRunning == true ? "Attach" : "Open") { tabs.open(session: summary) }
+        if let tab = tabs.tab(for: summary.id) {
+            Button("Close Tab") { tabs.close(tab) }
+            if tab.state == .idle { Button("Background") { tabs.background(tab) } }
+        }
+        if let agent {
+            Divider()
+            if agent.isRunning { Button("Stop Detached Session") { Task { await background.stopAgent(agent) } } }
+            Button("Show Logs") { tabs.newShell(in: summary.lastCwd ?? summary.cwd, initialInput: "claude logs \(agent.id)\n") }
+            Button("Remove Detached Session", role: .destructive) { Task { await background.removeAgent(agent) } }
+        }
         Button("Replay…") { tabs.openReplay(summary) }
         Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: summary.id.rawValue) }
         Divider()
@@ -133,13 +144,20 @@ enum SessionActions {
 struct SessionRow: View {
     @Environment(SessionStore.self) private var sessions
     @Environment(TabStore.self) private var tabs
+    @Environment(BackgroundAgentsService.self) private var background
     let summary: SessionSummary
     let tab: Tab?
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
-            StateGlyph(tab: tab)
+            if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
+                Image(systemName: agent.needsAttention ? "exclamationmark.circle.fill" : "moon.zzz.fill")
+                    .font(.caption).foregroundStyle(agent.needsAttention ? .orange : .secondary).frame(width: 10)
+                    .help(agent.needsAttention ? "Detached — needs you" : "Running detached (\(agent.state ?? agent.status))")
+            } else {
+                StateGlyph(tab: tab)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
                 if hovering {

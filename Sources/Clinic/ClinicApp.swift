@@ -14,6 +14,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.history)
                 .environment(appDelegate.usage)
                 .environment(appDelegate.prs)
+                .environment(appDelegate.backgroundAgents)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let usage = UsageService()
     let prs = PRStore()
     let mcp = MCPToolService()
+    let backgroundAgents = BackgroundAgentsService()
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,6 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         prs.start()
         tabs.mcp = mcp
+        tabs.backgroundAgents = backgroundAgents
+        backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
+        backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
         mcp.start(tabs: tabs, sessions: sessions, history: history, notifications: notifications, prs: prs)
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
@@ -141,6 +146,8 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .shift]).disabled(selectedSession == nil)
             Button("Undo Archive") { sessions.undoArchive() }
                 .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!sessions.canUndoArchive)
+            Button("Background This Session") { if let t = tabs.selectedTab { tabs.background(t) } }
+                .keyboardShortcut("b", modifiers: [.command, .option]).disabled(!tabs.canBackgroundSelected)
             Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: nil) }
                 .keyboardShortcut("i", modifiers: .command).disabled(selectedSession == nil)
             Button("Replay…") { if let s = selectedSession { tabs.openReplay(s) } }
