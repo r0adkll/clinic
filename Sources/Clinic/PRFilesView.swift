@@ -64,7 +64,12 @@ struct PRFilesView: View {
     let ref: PullRequestRef
     @Bindable var model: PRFilesModel
     @AppStorage("ClinicPRTreeWidth") private var treeWidth: Double = 210
+    /// Separate from the editor panel's `ClinicEditorShowTree`: these are different surfaces and a
+    /// reader who wants the repo tree open does not necessarily want a PR's file list open too.
+    @AppStorage("ClinicPRShowTree") private var showTree = true
+    @State private var filter = ""
     @State private var viewport: CGSize = .zero
+    @FocusState private var filterFocused: Bool
 
     /// Gutter is two line-number columns plus the +/− marker, matching `DiffScrollView`.
     private static let gutter: CGFloat = 42 + 42 + 16 + 10
@@ -78,12 +83,18 @@ struct PRFilesView: View {
                 if diff.files.isEmpty {
                     ContentUnavailableView("No file changes", systemImage: "doc", description: Text("This pull request changes nothing."))
                 } else {
-                    HStack(spacing: 0) {
-                        tree(diff)
-                            .frame(width: treeWidth)
-                        TreeDivider(width: $treeWidth)
-                        viewer(diff)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 0) {
+                        toolbar(diff)
+                        Divider()
+                        HStack(spacing: 0) {
+                            if showTree {
+                                sidebar(diff)
+                                    .frame(width: treeWidth)
+                                TreeDivider(width: $treeWidth)
+                            }
+                            viewer(diff)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     }
                     .task(id: diff.files.map(\.path)) { model.sync(with: diff) }
                 }
@@ -92,6 +103,84 @@ struct PRFilesView: View {
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     .task { await prs.loadDiff(ref) }
+            }
+        }
+    }
+
+    /// Always on screen in both tree states, so the toggle can never hide itself (the rule the editor
+    /// panel's header follows, ADR-081). The filter field belongs to the list, so it goes away with it.
+    private func toolbar(_ diff: UnifiedDiff) -> some View {
+        HStack(spacing: 6) {
+            Button { showTree.toggle() } label: {
+                Image(systemName: showTree ? "sidebar.left" : "sidebar.leading")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(showTree ? Color.accentColor : Color.secondary)
+            .help(showTree ? "Hide the file list" : "Show the file list")
+
+            if showTree {
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass").font(.caption2).foregroundStyle(.tertiary)
+                    TextField("Filter files", text: $filter)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                        .focused($filterFocused)
+                        .onKeyPress(.escape) {
+                            if filter.isEmpty { return .ignored }
+                            filter = ""; return .handled
+                        }
+                    if !filter.isEmpty {
+                        Button { filter = "" } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
+                            .buttonStyle(.borderless).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                .frame(maxWidth: treeWidth)
+            } else if let path = model.selected {
+                Text(path).font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+            }
+            Spacer(minLength: 0)
+            if showTree, !filter.isEmpty {
+                Text("\(matches(diff).count) of \(diff.files.count)")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+    }
+
+    /// Ranked paths for the current filter. Fuzzy rather than substring, and the same matcher Quick
+    /// Open uses, so "pbt" finds `PlaybackTimer.kt` here exactly as it does there (ADR-092).
+    private func matches(_ diff: UnifiedDiff) -> [String] {
+        FuzzyMatcher.rank(filter, candidates: diff.files.map(\.path), limit: 300).map(\.candidate)
+    }
+
+    /// A tree while browsing, a ranked flat list while filtering. Searching is a different act from
+    /// browsing: the hierarchy is what you want when you do not know the name, and pure noise once
+    /// you are typing one.
+    @ViewBuilder
+    private func sidebar(_ diff: UnifiedDiff) -> some View {
+        if filter.isEmpty {
+            tree(diff)
+        } else {
+            let paths = matches(diff)
+            let stats = Dictionary(uniqueKeysWithValues: diff.files.map { ($0.path, $0) })
+            if paths.isEmpty {
+                VStack {
+                    Text("No matching files").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.top, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(paths, id: \.self) { path in
+                    PRFilterResultRow(path: path, file: stats[path], selected: model.selected == path)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.select(path, in: diff) }
+                }
+                .listStyle(.sidebar)
+                .environment(\.defaultMinListRowHeight, 30)
             }
         }
     }
@@ -182,6 +271,39 @@ private struct PRFileRow: View {
         HStack(spacing: 5) {
             Image(systemName: FileGlyph.symbol(for: node.name)).font(.caption2).foregroundStyle(.secondary).frame(width: 13)
             Text(node.name).font(.caption).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            if let file {
+                if file.isNew {
+                    Text("A").font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                } else if file.isDeleted {
+                    Text("D").font(.caption2.weight(.semibold)).foregroundStyle(.red)
+                } else {
+                    Text("\(file.additions + file.deletions)")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        .background(selected ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// A filter hit: file name, then its directory dimmed behind it — the Quick Open row, narrower.
+private struct PRFilterResultRow: View {
+    let path: String
+    let file: UnifiedDiffFile?
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: FileGlyph.symbol(for: path)).font(.caption2).foregroundStyle(.secondary).frame(width: 13)
+            VStack(alignment: .leading, spacing: 0) {
+                Text((path as NSString).lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
+                let dir = (path as NSString).deletingLastPathComponent
+                if !dir.isEmpty {
+                    Text(dir).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                }
+            }
             Spacer(minLength: 4)
             if let file {
                 if file.isNew {
