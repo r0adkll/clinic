@@ -113,10 +113,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // smoke run cannot be spoiled by whatever else on this machine decides to take focus. Costs
         // nothing in the real app, which never sets it.
         if UserDefaults.standard.bool(forKey: "ClinicFloatOnLaunch") {
+            // Re-asserted on a loop rather than set once: a fullscreen app taking over its Space
+            // pulls the smoke window out of the frame, and window-level capture is unavailable on
+            // this machine, so a full-screen screenshot is the only option and Clinic has to still be
+            // on top of it. Bounded, and smoke-only.
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(600))
-                for window in NSApp.windows { window.level = .floating }
-                NSApp.activate(ignoringOtherApps: true)
+                for _ in 0..<40 {
+                    for window in NSApp.windows {
+                        window.level = .floating
+                        // A deterministic origin as well as a deterministic level: a smoke window
+                        // lands wherever the restored frame puts it, so two runs photographed for
+                        // comparison do not line up and pixel measurements across them are
+                        // meaningless. Sheets centre on their parent, so pinning the parent pins them.
+                        if window.styleMask.contains(.titled), window.frame.size.width > 600 {
+                            window.setFrameOrigin(NSPoint(x: 80, y: 80))
+                        }
+                    }
+                    NSApp.activate(ignoringOtherApps: true)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
             }
         }
 
@@ -130,9 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await sessions.initialScan?.value
                 let target: Automation.Target = sessions.projects.first { !SessionStore.isChats($0.path) }
                     .map { .project(path: $0.path) } ?? .chat
-                automations.draft = AutomationTemplate.bundled.first { $0.id == which }
+                var draft = AutomationTemplate.bundled.first { $0.id == which }
                     .map { AutomationDraft(template: $0, target: target) }
                     ?? AutomationDraft(target: target)
+                // `-ClinicAutomationPromptOnLaunch <text>`: lets a smoke run put an exact string in the
+                // editor, so the placeholder and the same text typed can be compared pixel for pixel.
+                if let text = UserDefaults.standard.string(forKey: "ClinicAutomationPromptOnLaunch") {
+                    draft.prompt = text
+                }
+                automations.draft = draft
             }
         }
 

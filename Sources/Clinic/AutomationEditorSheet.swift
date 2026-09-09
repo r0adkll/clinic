@@ -169,26 +169,27 @@ struct AutomationEditorSheet: View {
 
     private var composerCard: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                if draft.prompt.isEmpty {
-                    // ADR-082's placeholder fix, kept: offset only by the NSTextContainer's own
-                    // 5 pt line-fragment padding, which SwiftUI does not expose.
-                    Text("What should this run?")
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 5).padding(.top, 8)
-                        .allowsHitTesting(false)
+            TextEditor(text: $draft.prompt)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                // ADR-082's placeholder fix, copied exactly rather than re-derived: the placeholder
+                // rides *inside* the editor, before any padding, offset only by the 5 pt
+                // `NSTextContainer` line-fragment inset that SwiftUI does not expose. Overlaying the
+                // padded container instead — and guessing a top offset to compensate — is what put the
+                // placeholder and the typed text on different baselines.
+                .overlay(alignment: .topLeading) {
+                    if draft.prompt.isEmpty {
+                        Text("What should this run?")
+                            .font(.body).foregroundStyle(.tertiary)
+                            .padding(.leading, 5).allowsHitTesting(false)
+                    }
                 }
-                TextEditor(text: $draft.prompt)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    // A fixed height, not a `maxHeight` range: with a range the box grew to fit a long
-                    // template prompt and then clipped its last line halfway, so the text appeared to
-                    // bleed into the chips below it.
-                    .frame(height: Metrics.promptHeight)
-                    .focused($promptFocused)
-            }
-            .padding(Metrics.inset)
+                .padding(Metrics.inset)
+                // A fixed height, not a `maxHeight` range: with a range the box grew to fit a long
+                // template prompt and then clipped its last line halfway, so the text appeared to
+                // bleed into the chips below it.
+                .frame(height: Metrics.promptHeight)
+                .focused($promptFocused)
 
             Divider()
             chipBar
