@@ -12,10 +12,25 @@ import ClinicCore
 final class EditorPrefs {
     static let shared = EditorPrefs()
     static let showTreeKey = "ClinicEditorShowTree"
+    static let treeWidthKey = "ClinicEditorTreeWidth"
 
     var showTree: Bool { didSet { UserDefaults.standard.set(showTree, forKey: Self.showTreeKey) } }
+    /// The tree column's width, as the user last dragged it.
+    var treeWidth: CGFloat { didSet { UserDefaults.standard.set(Double(treeWidth), forKey: Self.treeWidthKey) } }
 
-    private init() { showTree = UserDefaults.standard.object(forKey: Self.showTreeKey) as? Bool ?? true }
+    private init() {
+        showTree = UserDefaults.standard.object(forKey: Self.showTreeKey) as? Bool ?? true
+        let stored = UserDefaults.standard.double(forKey: Self.treeWidthKey)
+        treeWidth = stored > 0 ? CGFloat(stored) : 220
+    }
+
+    /// The width the tree may actually take right now: never below 160, and never so wide that the code
+    /// view is left with less than it can use. Clamping on the way *out* rather than on the way in means
+    /// a narrow panel borrows width from the tree and gives it back when it widens.
+    static func treeWidth(in available: CGFloat) -> CGFloat {
+        let upper = max(160, available - 300)
+        return min(max(shared.treeWidth, 160), upper)
+    }
 }
 
 /// Per-tab editor state (ADR-057): root, index, open file, dirty flag, external-change watch.
@@ -159,14 +174,18 @@ struct EditorPanel: View {
     private var prefs: EditorPrefs { EditorPrefs.shared }
 
     var body: some View {
-        // Both halves must claim the full height: an `HSplitView` whose children only have an ideal
-        // height collapses to it and sits along the bottom edge (visible with no file open).
-        HSplitView {
-            if prefs.showTree {
-                sidebar.frame(minWidth: 180, idealWidth: 220, maxWidth: 360, maxHeight: .infinity)
+        // Hand-rolled split rather than `HSplitView`: the tree's width is remembered (ADR-081), and
+        // SwiftUI's split view neither reports the width the user dragged to nor accepts one back.
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                if prefs.showTree {
+                    sidebar.frame(width: EditorPrefs.treeWidth(in: geo.size.width))
+                    TreeResizeHandle(available: geo.size.width)
+                }
+                FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
-                .frame(minWidth: 320, maxHeight: .infinity)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath
@@ -214,6 +233,33 @@ struct EditorPanel: View {
     }
 }
 
+/// The draggable seam between the tree and the code view. It is a real 9 pt column rather than an
+/// overlay on a hairline, so the whole grab area is inside the view that handles the drag (ADR-081).
+private struct TreeResizeHandle: View {
+    let available: CGFloat
+    @State private var startWidth: CGFloat?
+
+    var body: some View {
+        ZStack {
+            Color.clear
+            Divider()
+        }
+        .frame(width: 9)
+        .contentShape(Rectangle())
+        .pointerStyle(.columnResize)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let base = startWidth ?? EditorPrefs.treeWidth(in: available)
+                    if startWidth == nil { startWidth = base }
+                    let upper = max(160, available - 300)
+                    EditorPrefs.shared.treeWidth = min(max(base + value.translation.width, 160), upper)
+                }
+                .onEnded { _ in startWidth = nil }
+        )
+    }
+}
+
 /// Context menu shared by the tree rows and the agent-files list (ADR-081).
 struct FileRowMenu: View {
     let path: String
@@ -243,7 +289,10 @@ struct FileEditorView: View {
             if model.openPath != nil {
                 CodeView(model: model).id(model.loadGeneration)
             } else {
+                // Without a filling frame the VStack shrinks to its ideal height and the whole pane —
+                // toolbar included — floats in the middle of the panel (ADR-081).
                 ContentUnavailableView("Pick a file", systemImage: "doc.text", description: Text("From the tree, the agent's files, or ⌘⇧O."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .sheet(isPresented: $quickOpen) { QuickOpenSheet(model: model) }
