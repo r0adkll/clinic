@@ -123,21 +123,23 @@ struct MarketplaceNavRow: View {
                 // Reserves the disclosure column a project header uses, so the icon lands in the same
                 // glyph column as a project's icon and the label under the same left edge (ADR-077).
                 Color.clear.frame(width: 12, height: 12)
+                // Keeps the header's 22 pt glyph *column* for alignment, but only the glyph's own
+                // height: a project header is 22 pt tall because its icon is, and this row is not.
                 Image(systemName: "puzzlepiece.extension.fill")
                     .font(.system(size: 13))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 22, height: 16)
                 Text("Marketplace").font(.body.weight(.semibold)).lineLimit(1)
                 Spacer(minLength: 4)
             }
             .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.primary))
-            .padding(.vertical, 3).padding(.horizontal, 6)
+            .padding(.vertical, 2).padding(.horizontal, 6)
             .background(background, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Find and install Claude Code plugins" + bindings.hint(.marketplace))
-        .padding(.horizontal, 10).padding(.top, 6)
+        .padding(.horizontal, 10).padding(.top, 4)
     }
 
     private var background: AnyShapeStyle {
