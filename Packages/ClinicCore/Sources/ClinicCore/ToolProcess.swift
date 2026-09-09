@@ -1,18 +1,77 @@
 import Foundation
 
-/// Environment for tool subprocesses. GUI apps inherit a minimal PATH, so Homebrew, `/usr/local` and
-/// `~/.local/bin` — where Claude Code's own installer puts `claude` — are prepended.
-enum ProcessEnvironment {
+/// Environment for tool subprocesses.
+///
+/// A GUI app launched from Finder or the Dock inherits launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`,
+/// so none of the CLIs Clinic shells out to — `gh`, `claude`, `git` — are on `PATH` by default. Two
+/// layers fix that (ADR-086): a hardcoded prepend of the prefixes we know, and, behind it, `PATH` as
+/// the user's own login shell builds it.
+public enum ProcessEnvironment {
+    /// Prefixes prepended unconditionally: both Homebrew roots and `~/.local/bin`, where Claude Code's
+    /// installer puts `claude` (ADR-084). Cheap, and right whenever they exist.
     static var toolPaths: [String] {
         ["/opt/homebrew/bin", "/usr/local/bin", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path]
     }
 
-    static func withToolPaths(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    /// `PATH` as the user's login shell builds it, resolved once per launch. This is the layer that
+    /// finds tools under a package manager Clinic has never heard of — nix, mise, asdf, pkgx.
+    /// Empty when there is no usable `SHELL`, when the shell fails, or when it takes too long.
+    static let loginShellPath: [String] = readLoginShellPath()
+
+    /// Resolve the login shell's `PATH` up front, off the main thread, so the first `git` call of the
+    /// session does not pay for it.
+    public static func prewarm() {
+        DispatchQueue.global(qos: .utility).async { _ = loginShellPath }
+    }
+
+    static func withToolPaths(base: [String: String] = ProcessInfo.processInfo.environment,
+                              login: [String] = loginShellPath) -> [String: String] {
         var env = base
-        let tools = toolPaths
-        let existing = (env["PATH"] ?? "/usr/bin:/bin").split(separator: ":").map(String.init)
-        env["PATH"] = (tools + existing.filter { !tools.contains($0) }).joined(separator: ":")
+        let inherited = (env["PATH"] ?? "/usr/bin:/bin").split(separator: ":").map(String.init)
+        var seen = Set<String>()
+        // Ordering: the prefixes we vouch for, then what we inherited, then whatever else the login
+        // shell knows about. Inherited wins over the login shell so a deliberately narrowed `PATH`
+        // (tests, a wrapper script) still shadows the user's everyday one.
+        env["PATH"] = (toolPaths + inherited + login).filter { seen.insert($0).inserted }.joined(separator: ":")
         return env
+    }
+
+    /// `$SHELL -l -c 'printenv PATH'`. `printenv` rather than `echo $PATH` because fish stores `PATH`
+    /// as a list and would print it space-separated. Login (not interactive) keeps this to profile
+    /// files: an interactive shell can block on a prompt, and the hardcoded prefixes cover the rc-file
+    /// case that misses.
+    static func readLoginShellPath(shell: String? = ProcessInfo.processInfo.environment["SHELL"],
+                                   timeout: TimeInterval = 3) -> [String] {
+        guard let shell, !shell.isEmpty, FileManager.default.isExecutableFile(atPath: shell) else { return [] }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-l", "-c", "/usr/bin/printenv PATH"]
+        p.environment = ProcessInfo.processInfo.environment
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return [] }
+
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var data = Data()
+        DispatchQueue.global(qos: .utility).async {
+            data = out.fileHandleForReading.readDataToEndOfFile()
+            done.signal()
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            p.terminate()
+            return []
+        }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return [] }
+        return parsePath(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Last line of the shell's output, split on `:`. Profiles that print banners are tolerated.
+    static func parsePath(_ raw: String) -> [String] {
+        let line = raw.split(separator: "\n").last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return line.split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
     }
 }
 

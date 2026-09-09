@@ -266,9 +266,8 @@ public struct PullRequestMark: Hashable, Sendable {
     }
 
     /// Merged/closed → none. Otherwise: failing checks > conflicts (`mergeable == CONFLICTING` or `mergeStateStatus == DIRTY`)
-    /// > `CHANGES_REQUESTED` > unanswered comments > pending checks > approved. A comment is "unanswered" when a non-bot
-    /// author other than `viewerLogin` posted it after the viewer's last comment/review (and after the PR was opened, when
-    /// the viewer is the author). With no `viewerLogin` the PR author stands in for the viewer.
+    /// > `CHANGES_REQUESTED` > unanswered comments > pending checks > approved. "Unanswered" is
+    /// `PullRequestStatus.unansweredComments`, shared with the panel's status block (ADR-087).
     public init(pr: PullRequest, viewerLogin: String?) {
         state = pr.state
         isDraft = pr.isDraft
@@ -281,12 +280,7 @@ public struct PullRequestMark: Hashable, Sendable {
         }
         let failing = pr.checks.filter { $0.status == .failure }.count
         let pending = pr.checks.filter { $0.status == .pending }.count
-        let viewer = viewerLogin ?? pr.author.login
-        var lastViewerActivity = pr.comments.filter { $0.author.login == viewer }.map(\.createdAt).max()
-        if viewer == pr.author.login { lastViewerActivity = max(lastViewerActivity ?? .distantPast, pr.createdAt) }
-        let unanswered = pr.comments.filter { c in
-            c.author.login != viewer && !c.author.isBot && c.createdAt > (lastViewerActivity ?? .distantPast)
-        }.count
+        let unanswered = PullRequestStatus.unansweredComments(pr: pr, viewerLogin: viewerLogin)
 
         if failing > 0 {
             attention = .checksFailing; symbolName = "xmark.octagon"

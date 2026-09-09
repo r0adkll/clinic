@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
+        // Resolve the login shell's PATH now, off the main thread, so the first `gh`/`git`/`claude`
+        // call does not pay for it (ADR-086).
+        ProcessEnvironment.prewarm()
         notifications.requestAuthorization()
         hooks.start()
         sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }

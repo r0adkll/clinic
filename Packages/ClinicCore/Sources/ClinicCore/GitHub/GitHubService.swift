@@ -38,19 +38,47 @@ public actor GitHubService {
         }
     }
 
+    /// Why the PR features are or are not usable. "`gh` is missing" and "`gh` is not logged in" are
+    /// different problems with different fixes, so they stay apart all the way to the screen (ADR-086).
+    public enum Availability: Equatable, Sendable {
+        case ready
+        /// `env` could not find `gh`; the `PATH` we searched, for the message.
+        case notInstalled(searchedPath: String)
+        /// `gh` ran and said no. Carries its own stderr, which already names the fix.
+        case notAuthenticated(String)
+
+        public var isReady: Bool { self == .ready }
+    }
+
     private let executable: String
-    private var availability: (value: Bool, checkedAt: Date)?
+    private var availability: (value: Availability, checkedAt: Date)?
     private var cachedViewer: String?
     private static let availabilityTTL: TimeInterval = 60
 
     public init(executable: String = "gh") { self.executable = executable }
 
     /// `gh` on PATH and `gh auth status` exits 0. Cached for 60 s.
-    public func isAvailable() async -> Bool {
+    public func isAvailable() async -> Bool { await availability().isReady }
+
+    /// `gh auth status`, classified. Cached for 60 s.
+    public func availability() async -> Availability {
         if let availability, Date().timeIntervalSince(availability.checkedAt) < Self.availabilityTTL { return availability.value }
-        let ok = await run(.authStatus).status == 0
-        availability = (ok, Date())
-        return ok
+        let r = await run(.authStatus)
+        let value = Self.classify(r, executable: executable)
+        availability = (value, Date())
+        if value != .ready { cachedViewer = nil }
+        return value
+    }
+
+    /// `/usr/bin/env` exits 127 when the tool is not on `PATH`, and `Process.run` throwing gives -1;
+    /// everything else is `gh` itself objecting, which means it exists and the login is the problem.
+    static func classify(_ r: GitHubProcess.Result, executable: String, path: String? = nil) -> Availability {
+        if r.status == 0 { return .ready }
+        let searched = path ?? ProcessEnvironment.withToolPaths()["PATH"] ?? ""
+        if r.status == 127 || r.status == -1 || r.stderr.contains("\(executable): No such file or directory") {
+            return .notInstalled(searchedPath: searched)
+        }
+        return .notAuthenticated(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// `gh api user --jq .login`, cached for the lifetime of the service.

@@ -338,9 +338,38 @@ private let laterHumanComment = """
         // `~/.local/bin` is where Claude Code's installer puts `claude`, so it joins the tool paths (ADR-084).
         let local = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
         #expect(ProcessEnvironment.toolPaths == ["/opt/homebrew/bin", "/usr/local/bin", local])
-        let env = ProcessEnvironment.withToolPaths(base: ["PATH": "/usr/bin:/opt/homebrew/bin:/bin"])
+        let env = ProcessEnvironment.withToolPaths(base: ["PATH": "/usr/bin:/opt/homebrew/bin:/bin"], login: [])
         #expect(env["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin")
-        #expect(ProcessEnvironment.withToolPaths(base: [:])["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin")
+        #expect(ProcessEnvironment.withToolPaths(base: [:], login: [])["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin")
+    }
+
+    /// The login shell's `PATH` goes behind what we inherited, and nothing is repeated (ADR-086).
+    @Test func loginShellPathIsAppendedWithoutDuplicates() {
+        let local = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
+        let env = ProcessEnvironment.withToolPaths(base: ["PATH": "/usr/bin:/bin"],
+                                                   login: ["/opt/homebrew/bin", "/nix/profile/bin", "/usr/bin"])
+        #expect(env["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin:/nix/profile/bin")
+    }
+
+    @Test func loginShellPathParsesLastLineOnly() {
+        // A profile that prints a banner must not turn into a PATH entry.
+        #expect(ProcessEnvironment.parsePath("welcome home!\n/opt/homebrew/bin:/usr/bin\n") == ["/opt/homebrew/bin", "/usr/bin"])
+        #expect(ProcessEnvironment.parsePath("") == [])
+        #expect(ProcessEnvironment.parsePath("not-a-path\n") == [])
+    }
+
+    /// A missing `gh` and a logged-out `gh` need different messages, so they must not collapse (ADR-086).
+    @Test func availabilityDistinguishesMissingFromLoggedOut() {
+        func result(_ status: Int32, _ stderr: String) -> ToolProcess.Result {
+            ToolProcess.Result(status: status, stdout: Data(), stderr: stderr)
+        }
+        #expect(GitHubService.classify(result(0, ""), executable: "gh", path: "/usr/bin") == .ready)
+        #expect(GitHubService.classify(result(127, "env: gh: No such file or directory"), executable: "gh", path: "/usr/bin")
+                == .notInstalled(searchedPath: "/usr/bin"))
+        #expect(GitHubService.classify(result(-1, "could not launch gh"), executable: "gh", path: "/usr/bin")
+                == .notInstalled(searchedPath: "/usr/bin"))
+        #expect(GitHubService.classify(result(1, "  You are not logged into any GitHub hosts.\n"), executable: "gh", path: "/usr/bin")
+                == .notAuthenticated("You are not logged into any GitHub hosts."))
     }
 }
 

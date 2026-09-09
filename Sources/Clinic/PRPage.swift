@@ -1,39 +1,41 @@
 import SwiftUI
 import ClinicCore
 
-/// Right-column pull request page (ADR-053).
+/// Right-column pull request page (ADR-053, redesigned by ADR-087).
+///
+/// One scrolling column rather than four tabs. It opens with `PullRequestStatus` — the plain-language
+/// answer to "what is blocking this" — then the action that fixes it, then the reference material in
+/// collapsible sections. The old layout made you click a tab to learn anything and spelled the verdict
+/// out as raw GraphQL enums at the bottom of the first one.
 struct PRPage: View {
     @Environment(PRStore.self) private var prs
     @Environment(TabStore.self) private var tabs
     let tab: Tab
     let ref: PullRequestRef
-    @State private var section: Section = .overview
+    @State private var expanded: Set<Section> = []
+    @State private var didSeedExpansion = false
     @State private var confirm: PendingAction?
 
-    enum Section: String, CaseIterable, Identifiable { case overview = "Overview", checks = "Checks", timeline = "Timeline", files = "Files"; var id: String { rawValue } }
+    enum Section: String, CaseIterable, Identifiable {
+        case description, checks, conversation, files
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .description: "Description"
+            case .checks: "Checks"
+            case .conversation: "Conversation"
+            case .files: "Files"
+            }
+        }
+    }
+
     struct PendingAction: Identifiable { let id = UUID(); let title: String; let message: String; let run: () async -> Void }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if prs.available == false {
-                ContentUnavailableView("GitHub CLI not available", systemImage: "terminal", description: Text("Install `gh` (brew install gh) and run `gh auth login`."))
-            } else if let pr = prs.pullRequest(for: ref) {
-                Picker("", selection: $section) { ForEach(Section.allCases) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented).labelsHidden().padding(8)
-                switch section {
-                case .overview: overview(pr)
-                case .checks: checks(pr)
-                case .timeline: timeline(pr)
-                case .files: files
-                }
-            } else if let error = prs.errors[ref.id] {
-                ContentUnavailableView("Could not load PR #" + String(ref.number), systemImage: "exclamationmark.triangle", description: Text(error))
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            if let error = prs.errors[ref.id], prs.pullRequest(for: ref) != nil { Divider(); Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).padding(6) }
+            content
         }
         .task(id: ref.id) { if prs.pullRequest(for: ref) == nil { await prs.refresh(ref) } }
         .alert(confirm?.title ?? "", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
@@ -42,67 +44,168 @@ struct PRPage: View {
         } message: { Text(confirm?.message ?? "") }
     }
 
-    // MARK: Header + actions
+    @ViewBuilder
+    private var content: some View {
+        if let availability = prs.availability, !availability.isReady {
+            GitHubUnavailableView(availability: availability) { await prs.refreshAvailability() }
+        } else if let pr = prs.pullRequest(for: ref) {
+            let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    statusBlock(pr, status)
+                    Divider()
+                    sections(pr, status)
+                }
+            }
+            .onAppear { seedExpansion(status) }
+            .onChange(of: status.lines.map(\.id)) { seedExpansion(status) }
+            if let error = prs.errors[ref.id] {
+                Divider()
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).padding(6)
+            }
+        } else if let error = prs.errors[ref.id] {
+            ContentUnavailableView("Could not load PR #" + String(ref.number), systemImage: "exclamationmark.triangle", description: Text(error))
+        } else {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Description is always open; a section the status block calls out as blocking opens with it, so a
+    /// failing build is one scroll away rather than one click.
+    private func seedExpansion(_ status: PullRequestStatus) {
+        guard !didSeedExpansion else { return }
+        didSeedExpansion = true
+        var open: Set<Section> = [.description]
+        for line in status.lines where line.tone == .blocking {
+            switch line.id {
+            case "checks": open.insert(.checks)
+            case "review", "comments": open.insert(.conversation)
+            default: break
+            }
+        }
+        expanded = open
+    }
+
+    // MARK: Header
 
     private var header: some View {
         let pr = prs.pullRequest(for: ref)
         let mark = prs.mark(for: ref)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let mark { Image(systemName: mark.symbolName).foregroundStyle(PRStyle.color(mark)) }
                 Text(pr?.title ?? "Pull request #" + String(ref.number)).font(.headline).lineLimit(2)
-                Spacer()
-                Button { Task { await prs.refresh(ref) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless)
-                Button { NSWorkspace.shared.open(ref.url) } label: { Image(systemName: "safari") }.buttonStyle(.borderless).help("Open on GitHub")
+                Spacer(minLength: 8)
+                Button { Task { await prs.refresh(ref) } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).help("Refresh")
+                Button { NSWorkspace.shared.open(ref.url) } label: { Image(systemName: "safari") }
+                    .buttonStyle(.borderless).help("Open on GitHub")
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                if let pr { PRStateBadge(pr: pr) }
                 Text("#" + String(ref.number)).monospacedDigit()
                 if let pr {
-                    PRStateBadge(pr: pr)
-                    Text("\(pr.author.login)").foregroundStyle(.secondary)
-                    Text("\(pr.headRefName) → \(pr.baseRefName)").font(.system(.caption, design: .monospaced)).lineLimit(1)
-                    Text("+\(pr.additions)").foregroundStyle(.green)
-                    Text("−\(pr.deletions)").foregroundStyle(.red)
+                    Text("·")
+                    Text(pr.author.login)
+                    Text("·")
+                    Text("\(pr.headRefName) → \(pr.baseRefName)").font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.head)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
             .font(.caption)
-            if let pr { actions(pr) }
+            .foregroundStyle(.secondary)
         }
         .padding(10)
         .background(.bar)
     }
 
-    private func actions(_ pr: PullRequest) -> some View {
-        HStack(spacing: 8) {
-            if pr.state == .open {
-                if pr.isDraft {
-                    Button("Ready for review") { confirm = PendingAction(title: "Mark ready", message: "Mark #\(ref.number) ready for review?") { await prs.perform(ref) { try await $0.markReady(ref) } } }
-                } else {
-                    Button("Merge (\(prs.mergeMethod.rawValue))") { confirm = PendingAction(title: "Merge", message: "Merge #\(ref.number) into \(pr.baseRefName) with \(prs.mergeMethod.rawValue)?") { await prs.perform(ref) { try await $0.merge(ref, method: prs.mergeMethod, auto: false) } } }
-                        .disabled(pr.mergeable == "CONFLICTING")
-                    if pr.autoMergeEnabled {
-                        Button("Disable auto-merge") { Task { await prs.perform(ref) { try await $0.disableAutoMerge(ref) } } }
-                    } else {
-                        Button("Auto-merge") { confirm = PendingAction(title: "Auto-merge", message: "Merge #\(ref.number) automatically when checks pass?") { await prs.perform(ref) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) } } }
+    // MARK: Status + actions
+
+    private func statusBlock(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(status.lines) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: line.symbol)
+                            .foregroundStyle(PRStyle.tint(line.tone))
+                            .font(.caption)
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(line.text).font(.subheadline.weight(line.tone == .blocking ? .semibold : .regular))
+                            if let detail = line.detail {
+                                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
-                Menu("Send to session") {
-                    let mark = prs.mark(for: ref)
-                    Button("Address the CI failures") { send("The CI checks on PR #\(ref.number) (\(ref.url)) are failing. Investigate the failures and fix them.") }
-                        .disabled(mark?.attention != .checksFailing)
-                    Button("Resolve the conflicts") { send("PR #\(ref.number) (\(ref.url)) has merge conflicts with \(pr.baseRefName). Rebase or merge \(pr.baseRefName) and resolve them.") }
-                        .disabled(mark?.attention != .conflicts)
-                    Button("Address the review comments") { send("Address the unresolved review comments on PR #\(ref.number) (\(ref.url)).") }
-                        .disabled(mark?.attention != .unansweredComments && mark?.attention != .changesRequested)
-                    Button("Review this PR") { send("Review PR #\(ref.number) (\(ref.url)) and summarize any problems.") }
-                }
-                .disabled(tab.state != .idle)
-                .help(tab.state == .idle ? "Types a prompt into the session" : "The session must be idle at its prompt")
             }
-            Spacer()
+            actions(pr, status)
         }
-        .controlSize(.small)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actions(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if pr.state == .open {
+                if let action = status.action {
+                    Button {
+                        send(action.prompt)
+                    } label: {
+                        Label(action.title, systemImage: action.symbol).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(tab.state != .idle)
+                    .help(tab.state == .idle ? "Types the prompt into this session" : "The session must be idle at its prompt")
+                }
+                HStack(spacing: 8) {
+                    if pr.isDraft {
+                        Button("Ready for review") {
+                            confirm = PendingAction(title: "Mark ready", message: "Mark #\(ref.number) ready for review?") {
+                                await prs.perform(ref) { try await $0.markReady(ref) }
+                            }
+                        }
+                    } else {
+                        Button("Merge (\(prs.mergeMethod.rawValue))") {
+                            confirm = PendingAction(title: "Merge", message: "Merge #\(ref.number) into \(pr.baseRefName) with \(prs.mergeMethod.rawValue)?") {
+                                await prs.perform(ref) { try await $0.merge(ref, method: prs.mergeMethod, auto: false) }
+                            }
+                        }
+                        .disabled(!status.canMerge)
+                        .help(status.mergeBlockedReason ?? "Merge into \(pr.baseRefName)")
+                        if pr.autoMergeEnabled {
+                            Button("Disable auto-merge") { Task { await prs.perform(ref) { try await $0.disableAutoMerge(ref) } } }
+                        } else {
+                            Button("Auto-merge") {
+                                confirm = PendingAction(title: "Auto-merge", message: "Merge #\(ref.number) automatically when checks pass?") {
+                                    await prs.perform(ref) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) }
+                                }
+                            }
+                            .disabled(!status.canMerge)
+                            .help(status.mergeBlockedReason ?? "Merge once the checks pass")
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Menu {
+                        // Every prompt stays available here, suggestion or not — the headline button is a
+                        // shortcut for the likely one, not a restriction on what you may ask.
+                        Button("Address the CI failures") { send("The CI checks on PR #\(ref.number) (\(ref.url)) are failing. Investigate the failures and fix them.") }
+                        Button("Resolve the conflicts") { send("PR #\(ref.number) (\(ref.url)) has merge conflicts with \(pr.baseRefName). Rebase or merge \(pr.baseRefName) and resolve them.") }
+                        Button("Address the review comments") { send("Address the unresolved review comments on PR #\(ref.number) (\(ref.url)).") }
+                        Button("Review this PR") { send("Review PR #\(ref.number) (\(ref.url)) and summarize any problems.") }
+                    } label: {
+                        Label("Send to session", systemImage: "text.append")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .disabled(tab.state != .idle)
+                    .help(tab.state == .idle ? "Types a prompt into the session" : "The session must be idle at its prompt")
+                }
+                .controlSize(.small)
+            }
+        }
     }
 
     private func send(_ prompt: String) {
@@ -111,76 +214,169 @@ struct PRPage: View {
 
     // MARK: Sections
 
-    private func overview(_ pr: PullRequest) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if pr.body.isEmpty { Text("No description.").foregroundStyle(.secondary) } else { MarkdownText(pr.body) }
-                Divider()
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                    GridRow { Text("Mergeable").foregroundStyle(.secondary); Text(pr.mergeable.lowercased()) }
-                    GridRow { Text("Merge state").foregroundStyle(.secondary); Text(pr.mergeStateStatus.lowercased()) }
-                    GridRow { Text("Review").foregroundStyle(.secondary); Text(pr.reviewDecision.isEmpty ? "—" : pr.reviewDecision.lowercased().replacingOccurrences(of: "_", with: " ")) }
-                    GridRow { Text("Updated").foregroundStyle(.secondary); Text(pr.updatedAt, format: .relative(presentation: .named)) }
-                }
-                .font(.caption)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func checks(_ pr: PullRequest) -> some View {
-        List(pr.checks) { c in
-            HStack(spacing: 8) {
-                Image(systemName: PRStyle.checkSymbol(c.status)).foregroundStyle(PRStyle.checkColor(c.status))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(c.name).lineLimit(1)
-                    if let w = c.workflow { Text(w).font(.caption2).foregroundStyle(.tertiary) }
-                }
-                Spacer()
-                if let url = c.detailsURL { Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.borderless) }
-            }
-        }
-        .listStyle(.inset)
-        .overlay { if pr.checks.isEmpty { Text("No checks").foregroundStyle(.tertiary) } }
-    }
-
-    private func timeline(_ pr: PullRequest) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(pr.comments) { c in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: c.kind == .comment ? "bubble.left" : "eye").foregroundStyle(.secondary)
-                            Text(c.author.login).font(.caption.weight(.semibold))
-                            if let s = c.reviewState, !s.isEmpty { Text(s.lowercased().replacingOccurrences(of: "_", with: " ")).font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule()) }
-                            if let p = c.path { Text(p + (c.line.map { ":\($0)" } ?? "")).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1) }
-                            Spacer()
-                            Text(c.createdAt, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary)
-                        }
-                        if !c.body.isEmpty { MarkdownText(c.body) }
-                    }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-                }
-                if pr.comments.isEmpty { Text("No comments or reviews yet.").foregroundStyle(.secondary).padding(12) }
-            }
-            .padding(10)
-        }
-    }
-
     @ViewBuilder
-    private var files: some View {
-        if let diff = prs.diffs[ref.id] {
-            ScrollView {
+    private func sections(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
+        section(.description, count: nil) {
+            if pr.body.isEmpty {
+                Text("No description.").foregroundStyle(.secondary)
+            } else {
+                MarkdownText(pr.body)
+            }
+        }
+        section(.checks, count: pr.checks.count) {
+            if pr.checks.isEmpty {
+                Text("No checks reported.").foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(pr.checks) { c in checkRow(c) }
+                }
+            }
+        }
+        section(.conversation, count: pr.comments.count) {
+            if pr.comments.isEmpty {
+                Text("No comments or reviews yet.").foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(pr.comments) { c in commentCard(c) }
+                }
+            }
+        }
+        section(.files, count: pr.changedFiles, trailing: "+\(pr.additions) −\(pr.deletions)") {
+            if let diff = prs.diffs[ref.id] {
                 LazyVStack(spacing: 12) {
                     ForEach(diff.files) { f in DiffView(file: f).frame(minHeight: 60, maxHeight: 600) }
                 }
-                .padding(8)
+            } else {
+                // `gh pr diff` is the one section that costs a second round trip, so it is fetched when
+                // the section is first opened rather than with the rest of the page.
+                ProgressView().frame(maxWidth: .infinity).task { await prs.loadDiff(ref) }
             }
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).task { await prs.loadDiff(ref) }
         }
+    }
+
+    private func section<Content: View>(_ id: Section, count: Int?, trailing: String? = nil,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded.contains(id) ? 90 : 0))
+                    Text(id.title).font(.subheadline.weight(.medium))
+                    if let count { Text("\(count)").font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    if let trailing { Text(trailing).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded.contains(id) {
+                content()
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Divider()
+        }
+    }
+
+    private func checkRow(_ c: PullRequest.Check) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: PRStyle.checkSymbol(c.status)).foregroundStyle(PRStyle.checkColor(c.status)).font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(c.name).font(.subheadline).lineLimit(1)
+                if let w = c.workflow { Text(w).font(.caption2).foregroundStyle(.tertiary) }
+            }
+            Spacer(minLength: 0)
+            if let url = c.detailsURL {
+                Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.right.square") }
+                    .buttonStyle(.borderless).help("Open the run on GitHub")
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func commentCard(_ c: PullRequest.Comment) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: c.kind == .comment ? "bubble.left" : "eye").foregroundStyle(.secondary)
+                Text(c.author.login).font(.caption.weight(.semibold))
+                if let s = c.reviewState, !s.isEmpty {
+                    Text(s.lowercased().replacingOccurrences(of: "_", with: " "))
+                        .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
+                }
+                if let p = c.path {
+                    Text(p + (c.line.map { ":\($0)" } ?? ""))
+                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text(c.createdAt, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary)
+            }
+            if !c.body.isEmpty { MarkdownText(c.body) }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// What to say when `gh` cannot answer. Splitting "not installed" from "not logged in" matters:
+/// a GUI-launched Clinic searches a `PATH` the user's terminal does not have, so a perfectly
+/// authenticated `gh` can still be invisible — and telling that user to log in is a dead end (ADR-086).
+struct GitHubUnavailableView: View {
+    let availability: GitHubService.Availability
+    let retry: () async -> Void
+    @State private var busy = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            switch availability {
+            case .ready:
+                EmptyView()
+            case .notInstalled(let path):
+                ContentUnavailableView {
+                    Label("Can't find the gh CLI", systemImage: "terminal")
+                } description: {
+                    VStack(spacing: 8) {
+                        Text("Clinic runs `gh` to read pull requests, but it isn't on the PATH this app was launched with. Install it with `brew install gh`, or make sure your login shell exports its location.")
+                        DisclosureGroup("Searched PATH") {
+                            Text(path.replacingOccurrences(of: ":", with: "\n"))
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .font(.caption)
+                    }
+                    .frame(maxWidth: 420)
+                }
+            case .notAuthenticated(let message):
+                ContentUnavailableView {
+                    Label("gh isn't logged in", systemImage: "person.crop.circle.badge.exclamationmark")
+                } description: {
+                    VStack(spacing: 8) {
+                        Text("Run `gh auth login` in a terminal, then retry.")
+                        if !message.isEmpty {
+                            Text(message)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: 420)
+                }
+            }
+            Button(busy ? "Checking…" : "Retry") {
+                busy = true
+                Task { await retry(); busy = false }
+            }
+            .disabled(busy)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -259,6 +455,11 @@ enum PRStyle {
     }
     static func checkColor(_ s: PullRequest.Check.Status) -> Color {
         switch s { case .success: .green; case .failure: .red; case .pending: .yellow; default: .secondary }
+    }
+    /// Ink for a status line's tone (ADR-087). `waiting` is orange rather than yellow: yellow on the
+    /// panel's `.bar` background is close to unreadable at caption size.
+    static func tint(_ tone: PullRequestStatus.Tone) -> Color {
+        switch tone { case .blocking: .red; case .waiting: .orange; case .good: .green; case .neutral: .secondary }
     }
 }
 
