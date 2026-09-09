@@ -24,7 +24,9 @@ final class Tab: Identifiable {
     var state: SessionState?
     var unread = false
     var errorBadge = false
-    var title: String
+    /// The name a tab opened with: the whole story for shells, and the stand-in for a session
+    /// with nothing on disk yet (a new session, a fork awaiting its id). See `title`.
+    var openedTitle: String
     var pwd: String?
     var childExited = false
     var lastResume: ClaudeLaunch?
@@ -45,10 +47,29 @@ final class Tab: Identifiable {
     /// The panel's shell pane surface, when one is open (ADR-079 replaces the below-terminal panel of ADR-046).
     var panelSurface: GhosttySurfaceView? { panel.pane(.terminal)?.terminal }
 
-    init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String, windowId: UUID) {
-        self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.title = title; self.windowId = windowId
+    /// The store the tab's title comes from (ADR-031). Held strongly: `SessionStore` never refers back.
+    @ObservationIgnored private let sessions: SessionStore
+
+    init(kind: Kind, projectPath: String, surface: GhosttySurfaceView, title: String, windowId: UUID, sessions: SessionStore) {
+        self.kind = kind; self.projectPath = projectPath; self.surface = surface; self.openedTitle = title; self.windowId = windowId
+        self.sessions = sessions
         self.contentView = TabContentView(surface: surface)
         self.state = { if case .session = kind { return .launching } else { return nil } }()
+    }
+
+    /// ADR-031: names update live. Session tabs read the store on every access, so a rename, an
+    /// `ai-title` record the tail scan picks up, or `set_session_title` reaches the tab bar at the
+    /// same moment as the sidebar. Setting one (an OSC title from a shell) writes `openedTitle`.
+    var title: String {
+        get {
+            switch kind {
+            case .session(let id): if let s = sessions.sessions[id] { return sessions.displayName(for: s) }
+            case .replay(let id): if let s = sessions.sessions[id] { return "Replay: " + sessions.displayName(for: s) }
+            case .shell: break
+            }
+            return openedTitle
+        }
+        set { openedTitle = newValue }
     }
 
     var sessionId: SessionID? { if case .session(let id) = kind { return id } else { return nil } }
@@ -376,7 +397,7 @@ final class TabStore {
         options.workingDirectory = summary.lastCwd ?? summary.cwd
         guard let surface = try? GhosttySurfaceView(runtime: runtime, options: options) else { return }
         surface.isOccluded = true
-        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary), windowId: activeWindow.id)
+        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary), windowId: activeWindow.id, sessions: sessions)
         tab.replay = ReplayModel(sessionId: summary.id, transcriptPath: summary.transcriptPath)
         tab.state = nil
         tabs.append(tab)
@@ -405,7 +426,7 @@ final class TabStore {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.15))
                 surface = try GhosttySurfaceView(runtime: runtime, options: options)
             }
-            let tab = Tab(kind: kind, projectPath: projectPath, surface: surface, title: title, windowId: activeWindow.id)
+            let tab = Tab(kind: kind, projectPath: projectPath, surface: surface, title: title, windowId: activeWindow.id, sessions: sessions)
             tab.pwd = cwd
             tab.pendingInput = initialInput
             surface.delegate = self
@@ -773,7 +794,7 @@ final class TabStore {
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" { snapshots.forget(session: event.sessionId) }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
-            Task { await sessions.refresh(transcriptPath: path); self.refreshTitle(tab); self.refreshFooter(tab) }
+            Task { await sessions.refresh(transcriptPath: path); self.refreshFooter(tab) }
         } else if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" {
             refreshFooter(tab)
         }
@@ -792,10 +813,6 @@ final class TabStore {
             }
         }
         updateBadge()
-    }
-
-    private func refreshTitle(_ tab: Tab) {
-        if let id = tab.sessionId, let s = sessions.sessions[id] { tab.title = sessions.displayName(for: s) }
     }
 
     func updateBadge() {

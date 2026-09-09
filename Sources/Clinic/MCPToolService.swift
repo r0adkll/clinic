@@ -74,8 +74,7 @@ final class MCPToolService {
         case "set_session_title":
             let title = (args["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return MCPToolSpec.textResult("title is required", isError: true) }
-            sessions?.rename(sessionId, to: title)
-            tab.title = title
+            sessions?.rename(sessionId, to: title)   // the tab bar reads the store, so this reaches both (ADR-031)
             return MCPToolSpec.textResult("Title set to “\(title)”.")
 
         case "notify_user":
