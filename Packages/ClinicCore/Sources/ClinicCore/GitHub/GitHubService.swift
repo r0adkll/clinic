@@ -27,15 +27,16 @@ public actor GitHubService {
     }
 
     /// One GraphQL query for GitHub's own rendering of the PR body and every comment and review on
-    /// it (ADR-090). Node ids come back alongside so `PullRequest.applying` can match them to what
+    /// it, plus each author's avatar (ADR-090, ADR-091). Node ids come back alongside so `PullRequest.applying` can match them to what
     /// `gh pr view --json` already parsed.
     static let bodyHTMLQuery = """
     query($owner:String!,$repo:String!,$number:Int!){
       repository(owner:$owner,name:$repo){
         pullRequest(number:$number){
           bodyHTML
-          comments(first:100){nodes{id bodyHTML}}
-          reviews(first:100){nodes{id bodyHTML}}
+          author{login avatarUrl}
+          comments(first:100){nodes{id bodyHTML author{login avatarUrl}}}
+          reviews(first:100){nodes{id bodyHTML author{login avatarUrl}}}
         }
       }
     }

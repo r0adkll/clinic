@@ -1,29 +1,29 @@
 import SwiftUI
 import ClinicCore
 
-/// Right-column pull request page (ADR-053, redesigned by ADR-087).
+/// Right-column pull request page (ADR-053, ADR-087, restructured by ADR-091).
 ///
-/// One scrolling column rather than four tabs. It opens with `PullRequestStatus` — the plain-language
-/// answer to "what is blocking this" — then the action that fixes it, then the reference material in
-/// collapsible sections. The old layout made you click a tab to learn anything and spelled the verdict
-/// out as raw GraphQL enums at the bottom of the first one.
+/// Three fixed regions: an identity header, the `PullRequestStatus` block with the actions, and a
+/// tab strip over Conversation / Checks / Files. The status block stays pinned rather than living in
+/// a tab — ADR-087 exists because "is this mergeable" used to need a click, and putting it back
+/// behind one would undo that. Checks and Files each get a whole pane instead of a collapsible strip,
+/// because both are browsing surfaces: a CI matrix and a file tree want room, not a disclosure arrow.
 struct PRPage: View {
     @Environment(PRStore.self) private var prs
     @Environment(TabStore.self) private var tabs
     let tab: Tab
     let ref: PullRequestRef
-    @State private var expanded: Set<Section> = []
-    @State private var didSeedExpansion = false
+    @State private var pane: Pane = .conversation
+    @State private var files = PRFilesModel()
     @State private var confirm: PendingAction?
 
-    enum Section: String, CaseIterable, Identifiable {
-        case description, checks, conversation, files
+    enum Pane: String, CaseIterable, Identifiable {
+        case conversation, checks, files
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .description: "Description"
-            case .checks: "Checks"
             case .conversation: "Conversation"
+            case .checks: "Checks"
             case .files: "Files"
             }
         }
@@ -50,15 +50,15 @@ struct PRPage: View {
             GitHubUnavailableView(availability: availability) { await prs.refreshAvailability() }
         } else if let pr = prs.pullRequest(for: ref) {
             let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    statusBlock(pr, status)
-                    Divider()
-                    sections(pr, status)
-                }
+            statusBlock(pr, status)
+            Divider()
+            panePicker(pr)
+            Divider()
+            switch pane {
+            case .conversation: conversation(pr)
+            case .checks: checks(pr)
+            case .files: PRFilesView(ref: ref, model: files)
             }
-            .onAppear { seedExpansion(status) }
-            .onChange(of: status.lines.map(\.id)) { seedExpansion(status) }
             if let error = prs.errors[ref.id] {
                 Divider()
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).padding(6)
@@ -70,29 +70,13 @@ struct PRPage: View {
         }
     }
 
-    /// Description is always open; a section the status block calls out as blocking opens with it, so a
-    /// failing build is one scroll away rather than one click.
-    private func seedExpansion(_ status: PullRequestStatus) {
-        guard !didSeedExpansion else { return }
-        didSeedExpansion = true
-        var open: Set<Section> = [.description]
-        for line in status.lines where line.tone == .blocking {
-            switch line.id {
-            case "checks": open.insert(.checks)
-            case "review", "comments": open.insert(.conversation)
-            default: break
-            }
-        }
-        expanded = open
-    }
-
     // MARK: Header
 
     private var header: some View {
         let pr = prs.pullRequest(for: ref)
         let mark = prs.mark(for: ref)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
                 if let mark {
                     Image(systemName: mark.symbolName)
                         .font(.system(size: PRStyle.glyphSize.header))
@@ -112,22 +96,23 @@ struct PRPage: View {
                     Text("·")
                     Text(pr.author.login)
                     Text("·")
-                    Text("\(pr.headRefName) → \(pr.baseRefName)").font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.head)
+                    Text("\(pr.headRefName) → \(pr.baseRefName)")
+                        .font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.head)
                 }
                 Spacer(minLength: 0)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(10)
+        .padding(.horizontal, 12).padding(.vertical, 9)
         .background(.bar)
     }
 
     // MARK: Status + actions
 
     private func statusBlock(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(status.lines) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Image(systemName: line.symbol)
@@ -146,17 +131,15 @@ struct PRPage: View {
             }
             actions(pr, status)
         }
-        .padding(12)
+        .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func actions(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             if pr.state == .open {
                 if let action = status.action {
-                    Button {
-                        send(action.prompt)
-                    } label: {
+                    Button { send(action.prompt) } label: {
                         Label(action.title, systemImage: action.symbol).frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -164,7 +147,7 @@ struct PRPage: View {
                     .disabled(tab.state != .idle)
                     .help(tab.state == .idle ? "Types the prompt into this session" : "The session must be idle at its prompt")
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     if pr.isDraft {
                         Button("Ready for review") {
                             confirm = PendingAction(title: "Mark ready", message: "Mark #\(ref.number) ready for review?") {
@@ -193,8 +176,6 @@ struct PRPage: View {
                     }
                     Spacer(minLength: 0)
                     Menu {
-                        // Every prompt stays available here, suggestion or not — the headline button is a
-                        // shortcut for the likely one, not a restriction on what you may ask.
                         Button("Address the CI failures") { send("The CI checks on PR #\(ref.number) (\(ref.url)) are failing. Investigate the failures and fix them.") }
                         Button("Resolve the conflicts") { send("PR #\(ref.number) (\(ref.url)) has merge conflicts with \(pr.baseRefName). Rebase or merge \(pr.baseRefName) and resolve them.") }
                         Button("Address the review comments") { send("Address the unresolved review comments on PR #\(ref.number) (\(ref.url)).") }
@@ -216,113 +197,84 @@ struct PRPage: View {
         if tabs.sendSlashCommand(prompt, to: tab) { tabs.select(tab) }
     }
 
-    // MARK: Sections
+    // MARK: Panes
 
-    @ViewBuilder
-    private func sections(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
-        section(.description, count: nil) {
+    /// Counts live on the tabs so the reader can see where the activity is without switching.
+    private func panePicker(_ pr: PullRequest) -> some View {
+        HStack(spacing: 2) {
+            ForEach(Pane.allCases) { p in
+                Button { pane = p } label: {
+                    HStack(spacing: 5) {
+                        Text(p.title).font(.callout.weight(pane == p ? .semibold : .regular))
+                        switch p {
+                        case .conversation where !pr.comments.isEmpty:
+                            CountBadge(count: pr.comments.count, tone: .neutral)
+                        case .checks where !pr.checks.isEmpty:
+                            CountBadge(count: pr.checks.count,
+                                       tone: pr.checks.contains { $0.status == .failure } ? .blocking
+                                           : pr.checks.contains { $0.status == .pending } ? .waiting : .good)
+                        case .files where pr.changedFiles > 0:
+                            CountBadge(count: pr.changedFiles, tone: .neutral)
+                        default:
+                            EmptyView()
+                        }
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(pane == p ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+            if pane == .files, let d = prs.diffs[ref.id], !d.files.isEmpty {
+                let adds = d.files.reduce(0) { $0 + $1.additions }
+                let dels = d.files.reduce(0) { $0 + $1.deletions }
+                Text("+\(adds)").font(.caption.monospacedDigit()).foregroundStyle(.green)
+                Text("−\(dels)").font(.caption.monospacedDigit()).foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+    }
+
+    // MARK: Conversation
+
+    private func conversation(_ pr: PullRequest) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                descriptionCard(pr)
+                ForEach(pr.comments) { c in commentRow(c) }
+                if pr.comments.isEmpty {
+                    Text("No comments or reviews yet.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.vertical, 16)
+                }
+            }
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func descriptionCard(_ pr: PullRequest) -> some View {
+        TimelineRow(avatar: pr.author.avatarURL, login: pr.author.login, symbol: nil,
+                    date: pr.createdAt, badge: nil, isFirst: true, isLast: pr.comments.isEmpty) {
             if let html = pr.bodyHTML, !html.isEmpty {
                 GitHubHTMLView(html: html)
             } else if pr.body.isEmpty {
-                Text("No description.").foregroundStyle(.secondary)
+                Text("No description.").font(.callout).foregroundStyle(.secondary)
             } else {
-                // GitHub's rendering has not landed yet (or the call failed): show the source.
                 MarkdownText(pr.body)
             }
         }
-        section(.checks, count: pr.checks.count) {
-            if pr.checks.isEmpty {
-                Text("No checks reported.").foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(pr.checks) { c in checkRow(c) }
-                }
-            }
-        }
-        section(.conversation, count: pr.comments.count) {
-            if pr.comments.isEmpty {
-                Text("No comments or reviews yet.").foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(pr.comments) { c in commentCard(c) }
-                }
-            }
-        }
-        section(.files, count: pr.changedFiles, trailing: "+\(pr.additions) −\(pr.deletions)") {
-            if let diff = prs.diffs[ref.id] {
-                LazyVStack(spacing: 12) {
-                    ForEach(diff.files) { f in DiffView(file: f).frame(minHeight: 60, maxHeight: 600) }
-                }
-            } else {
-                // `gh pr diff` is the one section that costs a second round trip, so it is fetched when
-                // the section is first opened rather than with the rest of the page.
-                ProgressView().frame(maxWidth: .infinity).task { await prs.loadDiff(ref) }
-            }
-        }
     }
 
-    private func section<Content: View>(_ id: Section, count: Int?, trailing: String? = nil,
-                                        @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            Button {
-                if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(expanded.contains(id) ? 90 : 0))
-                    Text(id.title).font(.subheadline.weight(.medium))
-                    if let count { Text("\(count)").font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-                    Spacer(minLength: 0)
-                    if let trailing { Text(trailing).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if expanded.contains(id) {
-                content()
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider()
-        }
-    }
-
-    private func checkRow(_ c: PullRequest.Check) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: PRStyle.checkSymbol(c.status)).foregroundStyle(PRStyle.checkColor(c.status)).font(.caption)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(c.name).font(.subheadline).lineLimit(1)
-                if let w = c.workflow { Text(w).font(.caption2).foregroundStyle(.tertiary) }
-            }
-            Spacer(minLength: 0)
-            if let url = c.detailsURL {
-                Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.right.square") }
-                    .buttonStyle(.borderless).help("Open the run on GitHub")
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
-    private func commentCard(_ c: PullRequest.Comment) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: c.kind == .comment ? "bubble.left" : "eye").foregroundStyle(.secondary)
-                Text(c.author.login).font(.caption.weight(.semibold))
-                if let s = c.reviewState, !s.isEmpty {
-                    Text(s.lowercased().replacingOccurrences(of: "_", with: " "))
-                        .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
-                }
-                if let p = c.path {
-                    Text(p + (c.line.map { ":\($0)" } ?? ""))
-                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Text(c.createdAt, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary)
+    private func commentRow(_ c: PullRequest.Comment) -> some View {
+        TimelineRow(avatar: c.author.avatarURL, login: c.author.login,
+                    symbol: c.kind == .comment ? nil : "eye",
+                    date: c.createdAt,
+                    badge: c.reviewState.flatMap { $0.isEmpty ? nil : $0.lowercased().replacingOccurrences(of: "_", with: " ") },
+                    isFirst: false, isLast: c.id == lastCommentID) {
+            if let path = c.path {
+                Text(path + (c.line.map { ":\($0)" } ?? ""))
+                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
             }
             if let html = c.bodyHTML, !html.isEmpty {
                 GitHubHTMLView(html: html)
@@ -330,9 +282,212 @@ struct PRPage: View {
                 MarkdownText(c.body)
             }
         }
-        .padding(10)
+    }
+
+    private var lastCommentID: String? { prs.pullRequest(for: ref)?.comments.last?.id }
+
+    // MARK: Checks
+
+    private func checks(_ pr: PullRequest) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(PRChecksGroup.group(pr.checks)) { group in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 6) {
+                            Text(group.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                            Text(group.summary).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, 4)
+                        ForEach(group.checks) { CheckRow(check: $0) }
+                    }
+                }
+                if pr.checks.isEmpty {
+                    ContentUnavailableView("No checks reported", systemImage: "checkmark.circle",
+                                           description: Text("Nothing ran on this pull request."))
+                        .padding(.top, 24)
+                }
+            }
+            .padding(.vertical, 10)
+        }
+    }
+}
+
+/// A small count pill on a tab.
+private struct CountBadge: View {
+    let count: Int
+    let tone: PullRequestStatus.Tone
+
+    var body: some View {
+        Text("\(count)")
+            .font(.caption2.monospacedDigit().weight(.medium))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(tone == .neutral ? Color.primary.opacity(0.09) : PRStyle.tint(tone).opacity(0.18), in: Capsule())
+            .foregroundStyle(tone == .neutral ? Color.secondary : PRStyle.tint(tone))
+    }
+}
+
+/// One entry in the conversation: avatar on a continuous rail, header line, then the body.
+///
+/// The rail is what makes a thread read as a thread. Detached rounded cards gave every comment the
+/// same weight and no sense of order, which is exactly what a PR conversation is *about* (ADR-091).
+private struct TimelineRow<Content: View>: View {
+    let avatar: URL?
+    let login: String
+    let symbol: String?
+    let date: Date
+    let badge: String?
+    let isFirst: Bool
+    let isLast: Bool
+    @ViewBuilder var content: Content
+
+    private static var railX: CGFloat { 12 + 11 }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ZStack(alignment: .top) {
+                // The rail runs the full height of the row and is clipped at the ends of the thread,
+                // so consecutive rows join into one line without drawing it twice.
+                Rectangle()
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(width: 1)
+                    .padding(.top, isFirst ? 22 : 0)
+                    .frame(maxHeight: isLast ? 22 : .infinity, alignment: .top)
+                Avatar(url: avatar, login: login, symbol: symbol)
+            }
+            .frame(width: 22)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(login).font(.caption.weight(.semibold))
+                    if let badge {
+                        Text(badge)
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                    Text(date, format: .relative(presentation: .named))
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                content
+            }
+            .padding(.bottom, isLast ? 0 : 16)
+        }
+        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// GitHub avatar, falling back to the initial while it loads or when there is no URL.
+private struct Avatar: View {
+    let url: URL?
+    let login: String
+    let symbol: String?
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    placeholder
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: 22, height: 22)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Color.primary.opacity(0.12)))
+        .overlay(alignment: .bottomTrailing) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 7, weight: .bold))
+                    .padding(2)
+                    .background(.background, in: Circle())
+                    .offset(x: 3, y: 3)
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color.primary.opacity(0.09)
+            Text(login.prefix(1).uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Checks grouped by the workflow that produced them, which is how CI is actually read: a failure
+/// belongs to a workflow, and "3 of 5 in Build" is more use than five unrelated rows (ADR-091).
+struct PRChecksGroup: Identifiable {
+    let name: String
+    let checks: [PullRequest.Check]
+    var id: String { name }
+
+    var summary: String {
+        let failed = checks.filter { $0.status == .failure }.count
+        let pending = checks.filter { $0.status == .pending }.count
+        if failed > 0 { return "\(failed) failed" }
+        if pending > 0 { return "\(pending) running" }
+        return "\(checks.count) passed"
+    }
+
+    static func group(_ checks: [PullRequest.Check]) -> [PRChecksGroup] {
+        var order: [String] = []
+        var byName: [String: [PullRequest.Check]] = [:]
+        for c in checks {
+            let key = c.workflow ?? "Other"
+            if byName[key] == nil { order.append(key) }
+            byName[key, default: []].append(c)
+        }
+        // Workflows with a failure first: the reason you opened this tab is at the top.
+        return order.map { PRChecksGroup(name: $0, checks: byName[$0] ?? []) }
+            .sorted { a, b in
+                let af = a.checks.contains { $0.status == .failure }, bf = b.checks.contains { $0.status == .failure }
+                return af == bf ? false : af
+            }
+    }
+}
+
+private struct CheckRow: View {
+    let check: PullRequest.Check
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(PRStyle.checkColor(check.status))
+                .frame(width: 2)
+                .opacity(check.status == .success ? 0.5 : 1)
+            Image(systemName: PRStyle.checkSymbol(check.status))
+                .foregroundStyle(PRStyle.checkColor(check.status))
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(check.name).font(.subheadline).lineLimit(1)
+                if let duration { Text(duration).font(.caption2).foregroundStyle(.tertiary) }
+            }
+            Spacer(minLength: 0)
+            if let url = check.detailsURL {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .buttonStyle(.borderless)
+                .opacity(hovering ? 1 : 0.45)
+                .help("Open the run on GitHub")
+            }
+        }
+        .padding(.trailing, 12).padding(.vertical, 4)
+        .background(hovering ? Color.primary.opacity(0.05) : .clear)
+        .onHover { hovering = $0 }
+    }
+
+    /// Elapsed time, only once a run has actually finished.
+    private var duration: String? {
+        guard let start = check.startedAt, let end = check.completedAt else { return nil }
+        let seconds = Int(end.timeIntervalSince(start))
+        guard seconds > 0 else { return nil }
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 }
 

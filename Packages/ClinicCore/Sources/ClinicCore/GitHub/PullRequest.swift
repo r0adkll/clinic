@@ -7,7 +7,12 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public struct Author: Hashable, Codable, Sendable {
         public var login: String
         public var name: String?
-        public init(login: String, name: String? = nil) { self.login = login; self.name = name }
+        /// Filled by the same GraphQL call that fetches rendered HTML (ADR-091); `gh pr view --json`
+        /// does not report it. Nil for an author that call did not cover.
+        public var avatarURL: URL?
+        public init(login: String, name: String? = nil, avatarURL: URL? = nil) {
+            self.login = login; self.name = name; self.avatarURL = avatarURL
+        }
         /// GitHub Apps (`dependabot[bot]`) and the Actions bot. Used to keep bot chatter out of "unanswered comments".
         public var isBot: Bool { login.hasSuffix("[bot]") || login == "github-actions" || login == "dependabot" }
     }
@@ -172,7 +177,12 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public struct RenderedHTML: Equatable, Sendable {
         public var body: String?
         public var byID: [String: String]
-        public init(body: String?, byID: [String: String]) { self.body = body; self.byID = byID }
+        /// Avatar per login. Keyed by author rather than by node because one person's avatar is the
+        /// same in every comment they wrote, and the PR author needs it too (ADR-091).
+        public var avatars: [String: URL]
+        public init(body: String?, byID: [String: String], avatars: [String: URL] = [:]) {
+            self.body = body; self.byID = byID; self.avatars = avatars
+        }
     }
 
     /// Parses the `bodyHTML` GraphQL response.
@@ -182,13 +192,21 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
             throw GitHubError(command: "api graphql", exitCode: 0, stderr: "unexpected GraphQL shape (no pullRequest)")
         }
         var byID: [String: String] = [:]
+        var avatars: [String: URL] = [:]
+        func noteAvatar(_ raw: Any?) {
+            guard let a = raw as? [String: Any], let login = a["login"] as? String,
+                  let s = a["avatarUrl"] as? String, let url = URL(string: s) else { return }
+            avatars[login] = url
+        }
+        noteAvatar(pr["author"])
         for key in ["comments", "reviews"] {
             for n in (pr[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [] {
+                noteAvatar(n["author"])
                 guard let id = n["id"] as? String, let html = n["bodyHTML"] as? String else { continue }
                 byID[id] = html
             }
         }
-        return RenderedHTML(body: pr["bodyHTML"] as? String, byID: byID)
+        return RenderedHTML(body: pr["bodyHTML"] as? String, byID: byID, avatars: avatars)
     }
 
     /// Folds rendered HTML into an already-parsed PR. Anything the payload does not cover keeps
@@ -196,10 +214,11 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public func applying(_ html: RenderedHTML) -> PullRequest {
         var copy = self
         if let body = html.body { copy.bodyHTML = body }
+        if let avatar = html.avatars[author.login] { copy.author.avatarURL = avatar }
         copy.comments = comments.map { c in
-            guard let rendered = html.byID[c.id] else { return c }
             var c = c
-            c.bodyHTML = rendered
+            if let rendered = html.byID[c.id] { c.bodyHTML = rendered }
+            if let avatar = html.avatars[c.author.login] { c.author.avatarURL = avatar }
             return c
         }
         return copy

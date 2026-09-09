@@ -26,6 +26,31 @@ struct GitHubHTMLView: View {
     }
 }
 
+/// A web view that does not steal the panel's scrolling (ADR-091).
+///
+/// Each of these is sized to its own content, so it never needs to scroll vertically — but WKWebView
+/// consumes the wheel event anyway, which made the whole PR panel refuse to scroll whenever the
+/// pointer happened to be over a body. Vertical gestures are handed to the enclosing scroll view;
+/// horizontal ones are kept, because a wide `<table>` genuinely does scroll sideways in place.
+///
+/// The direction is decided once when the gesture begins and held for its duration, including
+/// momentum: deciding per event let a flick that drifted a few degrees off-axis switch owners
+/// halfway through and stall.
+final class PassThroughScrollWebView: WKWebView {
+    private var forwardsToPanel = true
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase.contains(.began) || (event.phase.isEmpty && event.momentumPhase.isEmpty) {
+            forwardsToPanel = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+        }
+        if forwardsToPanel {
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+}
+
 private struct HTMLWebView: NSViewRepresentable {
     let html: String
     let colorScheme: ColorScheme
@@ -33,12 +58,12 @@ private struct HTMLWebView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(height: $height) }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> PassThroughScrollWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.userContentController.add(context.coordinator, name: Coordinator.heightMessage)
 
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = PassThroughScrollWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         // The page paints its own background token; without this the web view draws opaque white
         // over the panel in dark mode before the first frame.
@@ -48,11 +73,11 @@ private struct HTMLWebView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {
+    func updateNSView(_ view: PassThroughScrollWebView, context: Context) {
         context.coordinator.load(html, colorScheme: colorScheme, into: view)
     }
 
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+    static func dismantleNSView(_ view: PassThroughScrollWebView, coordinator: Coordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.heightMessage)
     }
 
