@@ -67,10 +67,26 @@ struct AutomationDraft: Identifiable {
         catch { return "\(error)" }
     }
 
+    /// True when this came from a template that needs a repository. Such a prompt talks about "this
+    /// repository", so letting it fall back to the Chats scratch directory would produce an
+    /// automation that is silently about nothing — which is what happens on a machine with no
+    /// projects registered yet.
+    var requiresProject: Bool {
+        guard let templateId else { return false }
+        return AutomationTemplate.bundled.first { $0.id == templateId }?.scope == .project
+    }
+
+    var missingProject: Bool {
+        guard requiresProject else { return false }
+        if case .project = target { return false }
+        return true
+    }
+
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && schedule != nil
+            && !missingProject
     }
 
     /// Blank, for "New automation".

@@ -22,7 +22,9 @@ struct AutomationEditorSheet: View {
             footer
         }
         .padding(20)
-        .frame(width: 620)
+        // A sheet sizes to its content, so anything inside that refuses to compress is clipped rather
+        // than resized. Every row below must be able to shrink to this.
+        .frame(width: 640)
         .onAppear { promptFocused = draft.prompt.isEmpty }
     }
 
@@ -86,11 +88,15 @@ struct AutomationEditorSheet: View {
                 TextEditor(text: $draft.prompt)
                     .font(.body)
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 120, maxHeight: 200)
+                    // A fixed height, not a range: with `maxHeight` the box grew to fit a long
+                    // template prompt and then clipped the last line halfway through, so the text
+                    // appeared to bleed into the chips below it.
+                    .frame(height: 170)
                     .focused($promptFocused)
             }
             .padding(10)
 
+            Divider()
             chipBar
         }
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
@@ -170,7 +176,7 @@ struct AutomationEditorSheet: View {
                             Text(DateFormatter().weekdaySymbols[i]).tag(i)
                         }
                     }
-                    .labelsHidden().fixedSize()
+                    .labelsHidden().frame(maxWidth: 140)
                     timePicker
                 case .custom:
                     TextField("minute hour day month weekday", text: $draft.customExpression)
@@ -204,23 +210,40 @@ struct AutomationEditorSheet: View {
 
     // MARK: Behaviour
 
+    /// Two lines, not one.
+    ///
+    /// These were a single `HStack` of three `.fixedSize()` controls, whose labels alone need about
+    /// 650 pt — wider than the sheet, so SwiftUI centred the row and clipped it at both edges, taking
+    /// every other row's leading text with it. Nothing here may claim its intrinsic width: the labels
+    /// are captions outside the controls, and the menus shrink.
+    /// One label-and-control pair per row.
+    ///
+    /// These began as a single `HStack` of three `.fixedSize()` controls needing ~650 pt of labels —
+    /// wider than the sheet, so SwiftUI centred the row and clipped it at both edges, taking every
+    /// other row's leading text with it. Two pairs per row then made the `Grid` share width between
+    /// the two menus and truncate the longer one. Nothing here may claim its intrinsic width, and
+    /// nothing shares a column with a control that has a different natural size.
     private var behaviourRow: some View {
-        HStack(spacing: 10) {
-            Picker("Notify", selection: $draft.notifyOn) {
-                ForEach(Automation.NotifyPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+            GridRow {
+                Text("Notify").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                Picker("", selection: $draft.notifyOn) {
+                    ForEach(Automation.NotifyPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
             }
-            .fixedSize()
-
-            Picker("Missed runs", selection: $draft.catchUp) {
-                ForEach(Automation.CatchUpPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+            GridRow {
+                Text("Missed runs").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                Picker("", selection: $draft.catchUp) {
+                    ForEach(Automation.CatchUpPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
             }
-            .fixedSize()
-
-            Spacer(minLength: 4)
-
-            Stepper("Stop after \(draft.stallMinutes) min waiting", value: $draft.stallMinutes, in: 1...240, step: 5)
-                .fixedSize()
-                .help("A run that sits waiting on you past this is stopped and recorded, rather than holding a worktree until morning.")
+            GridRow {
+                Text("Give up after").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                Stepper("\(draft.stallMinutes) min waiting", value: $draft.stallMinutes, in: 1...240, step: 5)
+                    .help("A run that sits waiting on you past this is stopped and recorded, rather than holding a worktree until morning.")
+            }
         }
     }
 
@@ -228,13 +251,20 @@ struct AutomationEditorSheet: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if draft.permissionMode == .bypassPermissions {
+            if draft.missingProject {
+                Label("This template works on a repository — pick a project above.",
+                      systemImage: "folder.badge.questionmark")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if draft.permissionMode == .bypassPermissions {
                 Label("This automation asks for nothing at all before running commands.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Runs detached, like `claude --bg`. You can open and continue any run afterwards.")
                     .font(.caption).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             Button("Cancel") { model.draft = nil; dismiss() }.keyboardShortcut(.cancelAction)

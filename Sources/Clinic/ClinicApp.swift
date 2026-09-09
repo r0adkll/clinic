@@ -109,6 +109,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let mapped { tabs.activeWindow.screen = mapped }
         }
 
+        // `-ClinicFloatOnLaunch YES` (ADR-038): keep the window above everything, so a screenshot of a
+        // smoke run cannot be spoiled by whatever else on this machine decides to take focus. Costs
+        // nothing in the real app, which never sets it.
+        if UserDefaults.standard.bool(forKey: "ClinicFloatOnLaunch") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(600))
+                for window in NSApp.windows { window.level = .floating }
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+
+        // `-ClinicAutomationDraftOnLaunch <template-id|blank>`: open the editor straight away, so its
+        // layout can be screenshotted without synthesising clicks into the gallery.
+        if let which = UserDefaults.standard.string(forKey: "ClinicAutomationDraftOnLaunch"), !which.isEmpty {
+            let target: Automation.Target = sessions.projects.first { !SessionStore.isChats($0.path) }
+                .map { .project(path: $0.path) } ?? .chat
+            automations.draft = AutomationTemplate.bundled.first { $0.id == which }
+                .map { AutomationDraft(template: $0, target: target) }
+                ?? AutomationDraft(target: target)
+            tabs.activeWindow.screen = .automations
+        }
+
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
