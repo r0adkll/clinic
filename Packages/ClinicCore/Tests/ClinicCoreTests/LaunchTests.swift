@@ -59,6 +59,32 @@ import Testing
         #expect(agents[0].startedAt.map { Calendar.current.component(.year, from: $0) } == 2026)
     }
 
+    /// Verbatim `claude agents --json --all` output for a background session that has *finished*
+    /// (captured 2026-09-09, CLI 2.1.266, while probing for ADR-095). The CLI documents `completed`,
+    /// but reports `done` with `status: idle` and the process still resident — which is why this
+    /// payload, not a hand-written one, is the regression test.
+    @Test func finishedAgentIsNotRunning() {
+        let json = #"[{"pid":55976,"id":"f20fb727","cwd":"/Users/me/clinic","kind":"background","startedAt":1788981700870,"sessionId":"f20fb727-ae40-4a55-87ac-ce6c1fe5706f","name":"clinic-automation-probe","status":"idle","state":"done"}]"#
+        let agents = BackgroundAgent.parse(Data(json.utf8))
+        #expect(agents.count == 1)
+        let a = try! #require(agents.first)
+        #expect(a.isBackground)
+        #expect(!a.isRunning)        // the defect: `done` was not in the terminal set
+        #expect(!a.needsAttention)
+    }
+
+    @Test func agentStateSets() {
+        // A finish must announce, whatever the CLI calls it; a stop the user asked for must not.
+        #expect(BackgroundAgent.announcedStates.isSuperset(of: ["done", "completed", "failed", "needs_input", "blocked"]))
+        #expect(!BackgroundAgent.announcedStates.contains("stopped"))
+        #expect(BackgroundAgent.terminalStates.contains("stopped"))
+        // `working` is neither, so a busy agent keeps polling at the fast interval.
+        #expect(!BackgroundAgent.terminalStates.contains("working"))
+        #expect(BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "busy", state: "working").isRunning)
+        // `status: stopped` still wins even when `state` is unknown to us.
+        #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "stopped", state: "mystery").isRunning)
+    }
+
     @Test func shellQuoting() {
         #expect(ClaudeLaunch.shellQuote("it's") == "'it'\\''s'")
         #expect(ClaudeLaunch.shellQuote("plain-1.0") == "plain-1.0")

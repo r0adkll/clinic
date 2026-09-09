@@ -47,7 +47,10 @@ final class BackgroundAgentsService {
         for a in list where a.isBackground {
             if let sid = a.sessionId, let s = sessions?.sessions[sid], sessions?.isOwned(sid) == false { sessions?.adopt(s) }
             let key = a.state ?? a.status
-            if let old = lastStates[a.id], old != key, ["needs_input", "blocked", "completed", "failed"].contains(key) { announce(a, transition: key) }
+            // The trigger set lives on BackgroundAgent so it cannot drift from `isRunning`: the CLI
+            // reports `done` rather than the documented `completed`, so this list silently never
+            // fired on a normal finish (ADR-095).
+            if let old = lastStates[a.id], old != key, BackgroundAgent.announcedStates.contains(key) { announce(a, transition: key) }
             lastStates[a.id] = key
         }
         for id in lastStates.keys where !list.contains(where: { $0.id == id }) { lastStates[id] = nil }

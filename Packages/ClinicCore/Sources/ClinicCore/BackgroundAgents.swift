@@ -13,10 +13,24 @@ public struct BackgroundAgent: Sendable, Hashable, Identifiable {
     public var pid: Int?
     public var startedAt: Date?
 
+    /// States meaning the agent has finished. The CLI documents `completed` and `failed`; what it
+    /// actually reports on success is **`done`**, with `status` still `idle` and the process still
+    /// resident and attachable (observed 2.1.266 while probing for ADR-095). Omitting it made every
+    /// finished agent read as running forever: the sidebar kept its "running detached" badge, the row
+    /// action stayed *Attach* instead of *Open*, *Stop Detached Session* stayed on the menu, upkeep
+    /// thought the worktree was in use, and the 15 s poll never backed off to its idle interval.
+    public static let terminalStates: Set<String> = ["completed", "failed", "stopped", "done"]
+    /// States meaning it is waiting on the user. `needs_input` is documented; `blocked` is not
+    /// (observed 2.1.263).
+    public static let attentionStates: Set<String> = ["needs_input", "blocked"]
+    /// Transitions worth a notification (ADR-061): it wants you, or it is over. A user-initiated
+    /// `stopped` is deliberately absent — the user just did it and does not need telling.
+    public static let announcedStates: Set<String> =
+        attentionStates.union(terminalStates).subtracting(["stopped"])
+
     public var isBackground: Bool { kind == "background" || kind == "background_agent" }
-    public var isRunning: Bool { !["completed", "failed", "stopped"].contains(state ?? "") && status != "stopped" }
-    /// The CLI reports `needs_input` (documented) or `blocked` (observed 2.1.263) when a detached session waits on the user.
-    public var needsAttention: Bool { state == "needs_input" || state == "blocked" || waitingFor != nil }
+    public var isRunning: Bool { !Self.terminalStates.contains(state ?? "") && status != "stopped" }
+    public var needsAttention: Bool { Self.attentionStates.contains(state ?? "") || waitingFor != nil }
 
     public init(id: String, sessionId: SessionID?, kind: String, status: String, state: String? = nil, waitingFor: String? = nil, cwd: String? = nil, name: String? = nil, pid: Int? = nil, startedAt: Date? = nil) {
         self.id = id; self.sessionId = sessionId; self.kind = kind; self.status = status; self.state = state; self.waitingFor = waitingFor; self.cwd = cwd; self.name = name; self.pid = pid; self.startedAt = startedAt
