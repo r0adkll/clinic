@@ -19,6 +19,8 @@ struct SidebarView: View {
                          help: "Find and install Claude Code plugins")
             ScreenNavRow(screen: .mcpServers, icon: "server.rack", shortcut: .mcpServers,
                          help: "Configure the MCP servers your sessions get")
+            ScreenNavRow(screen: .automations, icon: "alarm.fill", shortcut: .automations,
+                         help: "Prompts that run on a schedule")
             sidebarToolbar
             // The gap above the first project sits outside the scroll view on purpose: as
             // `contentMargins(for: .scrollContent)` it was applied on a later layout pass and popped

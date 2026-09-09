@@ -20,6 +20,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.caffeine)
                 .environment(appDelegate.marketplace)
                 .environment(appDelegate.mcpServers)
+                .environment(appDelegate.automations)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -43,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let caffeine = CaffeineController()
     let marketplace = MarketplaceModel()
     let mcpServers = MCPServersModel()
+    let automations = AutomationsModel()
     var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
@@ -74,7 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabs.backgroundAgents = backgroundAgents
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
+        backgroundAgents.onRefresh = { [weak self] agents in self?.automations.reconcile(agents: agents) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
+        automations.router = { [weak self] sid, title, body, kind in
+            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind)
+        }
+        tabs.automations = automations
+        automations.start(sessions: sessions, settingsFilePath: hooks.settingsFileURL.path,
+                          chatsDirectory: SessionStore.chatsDirectory)
+        // Starting by hand re-arms the wake agent that an explicit quit switched off.
+        AutomationWake.clearQuitSuppression()
         statusItem = StatusItemController(tabs: tabs, history: history, caffeine: caffeine)
         updates.start { [weak self] version, url in
             self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
@@ -86,6 +97,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let id = sessions.state.selectedSessionId, let s = sessions.sessions[id] { tabs.open(session: s) }
             }
         }
+        // `-ClinicScreenOnLaunch automations|marketplace|mcpServers` (ADR-038): land straight on a
+        // screen, so a smoke run does not have to synthesise a click into the sidebar.
+        if let screen = UserDefaults.standard.string(forKey: "ClinicScreenOnLaunch"), !screen.isEmpty {
+            let mapped: WindowState.Screen? = switch screen {
+            case "automations": .automations
+            case "marketplace": .marketplace
+            case "mcpServers": .mcpServers
+            default: nil
+            }
+            if let mapped { tabs.activeWindow.screen = mapped }
+        }
+
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
@@ -265,6 +288,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // An explicit quit switches the wake agent off until the next login (ADR-095).
+        AutomationWake.suppressUntilNextLogin()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let running = tabs.runningCount
         if running > 0 {
@@ -347,6 +375,7 @@ struct ClinicCommands: Commands {
         CommandGroup(after: .sidebar) {
             Button("MCP Servers") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
             Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
+            Button("Automations") { NotificationCenter.default.post(name: .clinicAutomations, object: nil) }.keyboardShortcut(key(.automations))
             Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
             Toggle("Caffeine Mode", isOn: Binding(get: { caffeine.isOn }, set: { caffeine.isOn = $0 })).keyboardShortcut(key(.caffeine))
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
@@ -396,6 +425,7 @@ extension Notification.Name {
     static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
     static let clinicMarketplace = Notification.Name("com.r0adkll.clinic.marketplace")
+    static let clinicAutomations = Notification.Name("com.r0adkll.clinic.automations")
     static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")

@@ -36,6 +36,21 @@ public enum ProcessEnvironment {
         return env
     }
 
+    /// Whether a CLI exists on the `PATH` Clinic would hand a subprocess.
+    ///
+    /// Filesystem only — no subprocess, so the Automations gallery can grey out every template that
+    /// needs a missing tool without spawning one process per tile (ADR-095, reusing ADR-086's PATH).
+    public static func hasTool(_ name: String) -> Bool {
+        guard !name.isEmpty, !name.contains("/") else {
+            return FileManager.default.isExecutableFile(atPath: name)
+        }
+        let path = withToolPaths()["PATH"] ?? ""
+        for dir in path.split(separator: ":") where !dir.isEmpty {
+            if FileManager.default.isExecutableFile(atPath: dir + "/" + name) { return true }
+        }
+        return false
+    }
+
     /// `$SHELL -l -c 'printenv PATH'`. `printenv` rather than `echo $PATH` because fish stores `PATH`
     /// as a list and would print it space-separated. Login (not interactive) keeps this to profile
     /// files: an interactive shell can block on a prompt, and the hardcoded prefixes cover the rc-file

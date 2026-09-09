@@ -24,11 +24,13 @@ final class WindowState: Identifiable {
     enum Screen: Hashable {
         case marketplace   // ADR-084
         case mcpServers    // ADR-093
+        case automations   // ADR-095
 
         var title: String {
             switch self {
             case .marketplace: "Marketplace"
             case .mcpServers: "MCP Servers"
+            case .automations: "Automations"
             }
         }
     }

@@ -196,6 +196,8 @@ final class TabStore {
     /// Set by the app after construction (ADR-056, ADR-061).
     var mcp: MCPToolService?
     var backgroundAgents: BackgroundAgentsService?
+    /// Set by the app so hook events can reach scheduled runs (ADR-095).
+    weak var automations: AutomationsModel?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -240,7 +242,12 @@ final class TabStore {
             startupError = "\(error)"
             Self.log.error("libghostty failed to start: \(error, privacy: .public)")
         }
-        hooks.onEvent = { [weak self] event in self?.handle(hookEvent: event) }
+        hooks.onEvent = { [weak self] event in
+            self?.handle(hookEvent: event)
+            // `--bg` refuses a pre-assigned id, so an automation run learns its session id here
+            // (ADR-095). Kept out of `handle` because it is not part of tab state.
+            self?.automations?.handle(hookEvent: event)
+        }
         notifications.onActivate = { [weak self] id in self?.reveal(sessionId: id) }
         // ADR-080 retention: once the launch has settled, so restored sessions count as live.
         Task { [weak self] in

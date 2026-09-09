@@ -32,11 +32,26 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Clinic
+        excludes:
+          - LaunchAgents
+      # SMAppService.agent() reads its plist from Contents/Library/LaunchAgents, and only a *bundled*
+      # plist can be registered — which is why the wake interval is a fixed 300 s rather than a
+      # computed StartCalendarInterval (ADR-095).
+      - path: Sources/Clinic/LaunchAgents/com.r0adkll.clinic.wake.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     dependencies:
       - package: ClinicCore
       - package: GhosttyBridge
       - package: CodeEditSourceEditor
       - target: clinic-hook
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: clinic-wake
         embed: true
         codeSign: true
         copy:
@@ -66,6 +81,15 @@ targets:
         NSHumanReadableCopyright: "© 2026 Drew Heavner. MIT."
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleIconName: AppIcon
+  clinic-wake:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/clinic-wake
+    settings:
+      base:
+        PRODUCT_NAME: clinic-wake
+        SKIP_INSTALL: YES
   clinic-hook:
     type: tool
     platform: macOS

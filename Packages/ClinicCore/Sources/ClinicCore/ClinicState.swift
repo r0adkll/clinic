@@ -23,6 +23,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var attachments: [SessionID: [Attachment]] = [:]
     /// Folded project groups (ADR-062).
     public var collapsedProjects: Set<String> = []
+    /// Scheduled prompts (ADR-095). Definitions only — a handful of small records; their run history
+    /// grows without bound and lives in its own file (`AutomationRunStore`) so state stays small.
+    public var automations: [Automation] = []
 
     public init() {}
 
@@ -56,7 +59,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -77,6 +80,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
         removedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .removedProjects) ?? []
         attachments = (try? c.decodeIfPresent([SessionID: [Attachment]].self, forKey: .attachments)) ?? [:]
         collapsedProjects = try c.decodeIfPresent(Set<String>.self, forKey: .collapsedProjects) ?? []
+        // Tolerant like the rest: an automation whose cron no longer parses is dropped rather than
+        // failing the whole state file and taking the sidebar with it.
+        automations = ((try? c.decodeIfPresent([FailableAutomation].self, forKey: .automations)) ?? [])?.compactMap(\.value) ?? []
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 
@@ -96,6 +102,13 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     private enum LegacyKeys: String, CodingKey { case addedProjects }
+
+    /// Decodes one automation, or nothing. Wrapping the element rather than the array is what keeps a
+    /// single bad record from emptying the list.
+    private struct FailableAutomation: Decodable {
+        let value: Automation?
+        init(from decoder: Decoder) throws { value = try? Automation(from: decoder) }
+    }
 
     /// Decodes a `[SessionID: T]` written as a JSON object, or the flat `[key, value, key, value]` array that
     /// pre-CodingKeyRepresentable builds wrote (values were strings in both legacy cases).

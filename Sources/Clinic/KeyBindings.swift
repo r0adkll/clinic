@@ -6,7 +6,7 @@ import ClinicCore
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
-    case mcpServers, marketplace, selectSessions, notifications, caffeine
+    case mcpServers, marketplace, automations, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
 
@@ -33,6 +33,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .moveTabToNewWindow: "Move Tab to New Window"
         case .mcpServers: "MCP Servers"
         case .marketplace: "Marketplace"
+        case .automations: "Automations"
         case .selectSessions: "Select Sessions"
         case .notifications: "Notifications"
         case .caffeine: "Caffeine Mode"
@@ -56,7 +57,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
-        case .mcpServers, .marketplace, .selectSessions, .notifications, .caffeine: "View"
+        case .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree,
              .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
@@ -87,6 +88,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .moveTabToNewWindow: nil
         case .mcpServers: "cmd+shift+m"
         case .marketplace: "cmd+opt+m"
+        case .automations: "cmd+opt+a"
         case .selectSessions: "cmd+shift+s"
         case .notifications: "cmd+shift+b"
         case .caffeine: nil

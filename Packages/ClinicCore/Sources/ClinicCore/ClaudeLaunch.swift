@@ -9,6 +9,22 @@ public struct ClaudeLaunch: Sendable, Hashable {
         case attach(agentId: String)
         /// `claude --continue`: most recent conversation in the directory (ADR-063).
         case continueLast
+        /// `claude --bg`: starts detached and returns at once, printing the short id (ADR-095).
+        ///
+        /// No `--session-id` — the CLI refuses one here (`--bg manages the session id`), which is why
+        /// this is a mode of its own rather than a flag on `.new`: identity is *learned* from the
+        /// printed short id and the `SessionStart` hook, not assigned. The name is what the sidebar
+        /// row and `claude agents` show.
+        case background(name: String?)
+
+        /// `-w` only makes sense when a session is starting fresh; `--resume`, `attach` and
+        /// `--continue` are all joining a directory that already exists.
+        var acceptsWorktree: Bool {
+            switch self {
+            case .new, .background: true
+            case .resume, .attach, .continueLast: false
+            }
+        }
     }
 
     public var mode: Mode
@@ -23,6 +39,9 @@ public struct ClaudeLaunch: Sendable, Hashable {
     public var prompt: String?
     /// Per-session MCP config file (ADR-056).
     public var mcpConfigPath: String?
+    /// `--permission-mode`. An unattended run declares its own posture (ADR-095); an interactive one
+    /// leaves this nil and uses the user's default.
+    public var permissionMode: String?
 
     public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude", prompt: String? = nil) {
         self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable; self.prompt = prompt
@@ -41,10 +60,14 @@ public struct ClaudeLaunch: Sendable, Hashable {
             return ["attach", agentId]
         case .continueLast:
             args.append("--continue")
+        case .background(let name):
+            args.append("--bg")
+            if let name, !name.isEmpty { args += ["-n", name] }
         }
         if let model, !model.isEmpty { args += ["--model", model] }
         if let effort, !effort.isEmpty { args += ["--effort", effort] }
-        if worktree, case .new = mode {
+        if let permissionMode, !permissionMode.isEmpty { args += ["--permission-mode", permissionMode] }
+        if worktree, mode.acceptsWorktree {
             args.append("-w")
             if let n = worktreeName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { args.append(n) }
         }

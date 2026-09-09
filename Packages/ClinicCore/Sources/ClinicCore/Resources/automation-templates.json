@@ -1,0 +1,86 @@
+[
+  {
+    "id": "morning-triage",
+    "name": "Morning triage",
+    "icon": "sun.horizon",
+    "blurb": "Overnight commits, PRs waiting on you, and red CI, as one digest.",
+    "schedule": "30 8 * * 1-5",
+    "scope": "project",
+    "permissionMode": "plan",
+    "requiredTool": "gh",
+    "prompt": "Give me a short triage digest for this repository. Cover, in this order and skipping any section that is empty:\n\n1. Commits landed on the default branch since yesterday morning — one line each, grouped by author.\n2. Open pull requests waiting on my review, newest first, with how long they have been waiting.\n3. My own open pull requests whose CI is failing or whose branch is behind, and what is blocking each one.\n4. Anything that looks like it needs a decision today.\n\nUse `gh` for pull request and CI state and `git log` for commits. Be terse — this is a morning briefing, not a report. If nothing needs me, say so in one line rather than padding it out."
+  },
+  {
+    "id": "pr-review-pass",
+    "name": "PR review pass",
+    "icon": "arrow.trianglehead.pull",
+    "blurb": "Reviews any pull request opened since the last run.",
+    "schedule": "0 */6 * * *",
+    "scope": "project",
+    "permissionMode": "plan",
+    "requiredTool": "gh",
+    "prompt": "Review the open pull requests in this repository that I have not already reviewed, most recent first, at most three of them.\n\nFor each: read the diff with `gh pr diff`, then write a review covering correctness bugs first, then anything that duplicates code that already exists here, then anything that will be hard to change later. Match this repository's own conventions rather than generic style advice — read the surrounding code before commenting on it.\n\nDo not post anything to GitHub. Write the review as text for me to read, with file and line references, and say plainly when a PR looks fine as it stands."
+  },
+  {
+    "id": "session-digest",
+    "name": "Session digest",
+    "icon": "list.bullet.rectangle",
+    "blurb": "What you and Claude actually did in this project today.",
+    "schedule": "0 18 * * 1-5",
+    "scope": "project",
+    "permissionMode": "plan",
+    "prompt": "Summarise today's work in this repository.\n\nUse `git log` and `git diff` for what changed, including uncommitted work. Write:\n\n1. What shipped — the things that are done, one line each.\n2. What is half-finished, and what the next step is for each.\n3. Anything I appear to have started and abandoned.\n4. Loose ends worth remembering tomorrow: TODOs added, tests skipped, questions left open in comments.\n\nWrite it as if reminding me on Monday what I was doing on Friday. Be specific about file names. Do not change anything."
+  },
+  {
+    "id": "docs-drift",
+    "name": "Docs drift",
+    "icon": "book",
+    "blurb": "Finds where the README and docs no longer match the code.",
+    "schedule": "0 10 * * 5",
+    "scope": "project",
+    "permissionMode": "plan",
+    "prompt": "Check this repository's documentation against what the code actually does.\n\nRead README.md, CLAUDE.md or AGENTS.md if present, and any docs directory. For each, list statements that are now wrong or stale: commands that no longer exist, flags that were renamed, install steps that would fail, described behaviour the code no longer has, and structure that has moved.\n\nQuote the stale line and say what it should say instead. Only report drift you have actually verified against the code — do not guess, and do not list documentation that is merely thin. Change nothing; this is a report."
+  },
+  {
+    "id": "flaky-test-hunt",
+    "name": "Flaky test hunt",
+    "icon": "dice",
+    "blurb": "Runs the suite repeatedly and reports tests that fail intermittently.",
+    "schedule": "0 2 * * *",
+    "scope": "project",
+    "permissionMode": "acceptEdits",
+    "prompt": "Hunt for flaky tests in this repository.\n\nWork out how the test suite runs here (check the Makefile, package scripts, or CI config rather than assuming), then run it five times. Record which tests fail on some runs but not others, and how often each one failed.\n\nFor every intermittent failure, investigate the cause: shared mutable state, a real clock or timezone, ordering dependence, an unawaited async operation, a port or temp path collision. Report the cause and the fix you would make, with file and line.\n\nDo not commit anything. If every run is green, say so and report the total time the suite took."
+  },
+  {
+    "id": "dependency-bumps",
+    "name": "Dependency bumps",
+    "icon": "shippingbox",
+    "blurb": "Safe upgrades on a branch, with a pull request opened.",
+    "schedule": "0 9 * * 1",
+    "scope": "project",
+    "permissionMode": "acceptEdits",
+    "requiredTool": "gh",
+    "prompt": "Update this repository's dependencies conservatively.\n\nFirst work out the dependency system in use and how to query it for outdated packages. Take only patch and minor upgrades; leave every major version alone and list them separately for me to decide on.\n\nApply the upgrades, then build and run the full test suite. If anything breaks, revert the specific dependency that broke it and note why rather than trying to fix the library.\n\nCommit the result with a message listing each upgrade and its version change, then open a pull request with `gh pr create` describing what moved and what you deliberately skipped. If nothing is outdated, say so and make no commit."
+  },
+  {
+    "id": "upstream-release-watch",
+    "name": "Upstream release watch",
+    "icon": "tag",
+    "blurb": "Watches repositories you name for new releases.",
+    "schedule": "0 9 * * *",
+    "scope": "chat",
+    "permissionMode": "plan",
+    "requiredTool": "gh",
+    "prompt": "Check for new releases in the repositories I follow.\n\nReplace this list with your own before saving:\n\n- ghostty-org/ghostty\n- anthropics/claude-code\n\nFor each, use `gh release list` and `gh release view` to find releases published in the last day. Report the version, the date, and the two or three changes that would actually matter to someone depending on it — not the whole changelog. Call out breaking changes explicitly.\n\nIf there is nothing new, reply with one line saying so."
+  },
+  {
+    "id": "weekly-review",
+    "name": "Weekly review",
+    "icon": "calendar.badge.checkmark",
+    "blurb": "Shipped, stuck, next — written on Friday afternoon.",
+    "schedule": "0 16 * * 5",
+    "scope": "chat",
+    "permissionMode": "plan",
+    "prompt": "Write my weekly review.\n\nReplace this list with the repositories you want covered before saving:\n\n- ~/SoftwareProjects/main/clinic\n\nFor each, read the last seven days of `git log` and any open pull requests. Then write three short sections across all of them together, not per repository:\n\n**Shipped** — what is actually done and merged.\n**Stuck** — what has been open or half-finished for more than a few days, and what is blocking it.\n**Next** — the two or three things that most deserve next week, and why those rather than the others.\n\nBe honest about what did not move. A short review that names one real blocker is worth more than a long list of commits."
+  }
+]

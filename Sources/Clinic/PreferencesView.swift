@@ -25,6 +25,8 @@ struct PreferencesView: View {
     @AppStorage("ClinicQuitBehaviour") private var quitBehaviour = "ask"
     /// Smoke tests pick a tab with `-ClinicPreferencesTab <name>`.
     @State private var tab = UserDefaults.standard.string(forKey: "ClinicPreferencesTab") ?? "general"
+    /// Registering a login item or the wake agent can be refused in System Settings; show why.
+    @State private var wakeError: String?
 
     var body: some View {
         TabView(selection: $tab) {
@@ -55,6 +57,18 @@ struct PreferencesView: View {
                     ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 Text("Per-project choices in the New Session sheet override this.").font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Launch Clinic at login", isOn: Binding(
+                    get: { LaunchAtLogin.isEnabled },
+                    set: { wakeError = LaunchAtLogin.setEnabled($0) }))
+                Toggle("Run automations when Clinic isn't open", isOn: Binding(
+                    get: { AutomationWake.isEnabled },
+                    set: { wakeError = AutomationWake.setEnabled($0) }))
+                Text("Automations normally run only while Clinic is running. With this on, a small background helper reopens Clinic hidden every five minutes so anything due can run — which means a job set for 09:00 may start as late as 09:04. Quitting Clinic on purpose switches it off until your next login.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let wakeError {
+                    Label(wakeError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
             }
             .formStyle(.grouped)
             .tag("general")

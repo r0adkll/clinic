@@ -16,6 +16,10 @@ final class BackgroundAgentsService {
     private weak var history: NotificationStore?
     private weak var notifications: NotificationService?
     var isAttachedProvider: (() -> Bool)?
+    /// Called after every poll. Automations reconcile their runs from this rather than polling
+    /// again: a finished `--bg` session sends no `SessionEnd`, so `claude agents` is the only
+    /// completion signal, and one poll should serve both readers (ADR-095).
+    var onRefresh: (([BackgroundAgent]) -> Void)?
     /// Set by the app to route through TabStore.notify (ADR-066).
     var router: ((SessionID, String, String, NotificationStore.Entry.Kind) -> Void)?
     static let interval: Duration = .seconds(15)
@@ -54,6 +58,7 @@ final class BackgroundAgentsService {
             lastStates[a.id] = key
         }
         for id in lastStates.keys where !list.contains(where: { $0.id == id }) { lastStates[id] = nil }
+        onRefresh?(list)
     }
 
     private func announce(_ a: BackgroundAgent, transition: String) {

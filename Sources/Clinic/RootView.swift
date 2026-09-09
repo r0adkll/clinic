@@ -43,6 +43,7 @@ struct RootView: View {
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicAutomations)) { _ in if isActive { window.screen = .automations } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             guard isActive else { return }
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
@@ -124,6 +125,8 @@ struct DetailView: View {
             } else if window.screen == .marketplace {
                 MarketplaceScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if window.screen == .automations {
+                AutomationsScreen()
             } else if window.screen == .mcpServers {
                 MCPServersScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
