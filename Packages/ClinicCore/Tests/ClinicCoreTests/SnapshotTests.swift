@@ -36,7 +36,14 @@ import Testing
         let tree = try await repo.writeSnapshotTree(scratch)
 
         #expect(tree.count == 40)
-        #expect(Self.objectCount(dir) == before, "snapshotting must not add objects to the user's repo")
+        // `<=`, not `==`: `objectCount` counts *files* under .git/objects, and git may pack loose
+        // objects or write a commit-graph between the two readings, which lowers the count without
+        // anything having been added. Requiring equality made this flaky on CI (4 before, 3 after).
+        #expect(Self.objectCount(dir) <= before, "snapshotting must not add objects to the user's repo")
+        // The direct form of the same claim, immune to how git chooses to store things: the tree we
+        // wrote must not be reachable in the user's repository at all.
+        let probe = await GitProcess.run(["cat-file", "-e", tree], in: dir.path)
+        #expect(probe.status != 0, "the snapshot tree must not exist in the user's repo")
 
         // The user's own index is untouched: a.txt is still unstaged and untracked.txt untracked.
         let status = try await repo.status()

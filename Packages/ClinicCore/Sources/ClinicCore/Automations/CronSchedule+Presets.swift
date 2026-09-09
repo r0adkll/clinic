@@ -57,10 +57,16 @@ public extension CronSchedule {
     /// which is honest: a schedule Clinic cannot phrase in English is better shown as cron than
     /// approximated.
     func summary(calendar: Calendar = .current, locale: Locale = .current) -> String {
+        // A *complete* date, not bare hour-and-minute components. Under-specified components leave
+        // `Calendar.date(from:)` free to return nil, and the fallback below renders 24-hour where the
+        // formatter renders 12-hour — so a failure here would not look like a failure, it would look
+        // like a different time format appearing on some machines and not others.
         func time(_ hour: Int, _ minute: Int) -> String {
-            var c = DateComponents(); c.hour = hour; c.minute = minute
+            let c = DateComponents(year: 2001, month: 1, day: 1, hour: hour, minute: minute)
             guard let date = calendar.date(from: c) else { return String(format: "%02d:%02d", hour, minute) }
             let f = DateFormatter(); f.locale = locale; f.timeStyle = .short; f.dateStyle = .none
+            f.calendar = calendar
+            f.timeZone = calendar.timeZone
             return f.string(from: date)
         }
         switch preset {

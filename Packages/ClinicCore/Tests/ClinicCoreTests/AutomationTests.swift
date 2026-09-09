@@ -184,16 +184,27 @@ struct CronPresetTests {
 
     /// Three of the eight shipped templates use a weekday range, so a gallery that falls back to raw
     /// cron for it shows tiles that speak cron. Caught on the first smoke run.
-    @Test func weekdayShapesArePhrasedNotPrinted() throws {
-        let cal = calendar()
-        let loc = cal.locale!
-        // Times are compared loosely on purpose: Foundation puts a NARROW NO-BREAK SPACE (U+202F)
-        // before AM/PM on macOS 15, so pinning the literal would be testing Foundation's typography
-        // rather than the phrasing.
+    /// Run under a 12-hour locale *and* a 24-hour one. CI renders `en_US_POSIX` differently from this
+    /// machine, and a test that only ever sees one rendering cannot catch that.
+    @Test(arguments: ["en_US_POSIX", "en_GB"])
+    func weekdayShapesArePhrasedNotPrinted(localeId: String) throws {
+        var cal = calendar()
+        let loc = Locale(identifier: localeId)
+        cal.locale = loc
+        // The rendered time is built with the *same* formatter rather than written out, because it is
+        // not this test's subject. Foundation puts a NARROW NO-BREAK SPACE before AM/PM on macOS 15,
+        // and `en_US_POSIX` renders `.short` as 12-hour on some OS versions and 24-hour on others —
+        // a literal "8:30" passed here and failed on CI. What is asserted is the *phrasing*.
         func summary(_ e: String) throws -> String { try CronSchedule(e).summary(calendar: cal, locale: loc) }
-        #expect(try summary("30 8 * * 1-5").hasPrefix("Every weekday at 8:30"))
-        #expect(try summary("0 18 * * 1-5").hasPrefix("Every weekday at 6:00"))
-        #expect(try summary("0 9 * * 0,6").hasPrefix("Every weekend day at 9:00"))
+        func at(_ hour: Int, _ minute: Int) -> String {
+            let f = DateFormatter()
+            f.locale = loc; f.calendar = cal; f.timeZone = cal.timeZone
+            f.timeStyle = .short; f.dateStyle = .none
+            return f.string(from: cal.date(from: DateComponents(year: 2001, month: 1, day: 1, hour: hour, minute: minute))!)
+        }
+        #expect(try summary("30 8 * * 1-5") == "Every weekday at \(at(8, 30))")
+        #expect(try summary("0 18 * * 1-5") == "Every weekday at \(at(18, 0))")
+        #expect(try summary("0 9 * * 0,6") == "Every weekend day at \(at(9, 0))")
         #expect(try CronSchedule("0 9 * * mon,wed").summary(calendar: cal, locale: loc).hasPrefix("Every Mon, Wed at"))
         // Still cron when it genuinely is not phraseable.
         #expect(try CronSchedule("*/15 9-17 * * *").summary(calendar: cal, locale: loc) == "*/15 9-17 * * *")
