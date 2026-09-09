@@ -7,11 +7,10 @@ import ClinicCore
 /// The earlier shape — a non-lazy stack per file, each inside its own horizontal `ScrollView` —
 /// stopped virtualisation at the file boundary and made a large diff unscrollable.
 struct DiffScrollView: View {
-    let page: DiffPage
-    let highlights: [String: AttributedString]
-    var isCollapsed: (String) -> Bool
-    var toggleCollapsed: (String) -> Void
-    var showMore: () -> Void
+    /// The model is passed by reference on purpose. `DiffPage` and the highlight dictionary are
+    /// `Equatable` and enormous — handing them to a view by value makes SwiftUI deep-compare tens
+    /// of thousands of rows and strings on every single update.
+    let model: DiffPanelModel
     /// Reported as the reader scrolls, so the rail above can follow along.
     var onVisibleFileChanged: ((String?) -> Void)? = nil
     /// Set to a path to jump there; cleared by the view once it has scrolled.
@@ -26,17 +25,17 @@ struct DiffScrollView: View {
         ScrollViewReader { proxy in
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    ForEach(page.files) { file in
+                    ForEach(model.page.files) { file in
                         Section {
-                            ForEach(file.rows) { row in DiffRowView(row: row, attributed: highlights[row.id]) }
+                            ForEach(file.rows) { row in DiffRowView(row: row, attributed: model.highlights[row.id]) }
                         } header: {
-                            DiffFileHeader(file: file.file, collapsed: isCollapsed(file.path)) {
-                                toggleCollapsed(file.path)
+                            DiffFileHeader(file: file.file, collapsed: model.isCollapsed(file.path)) {
+                                model.toggleCollapsed(file.path)
                             }
                             .id(file.path)
                         }
                     }
-                    if page.hasMore { showMoreRow }
+                    if model.page.hasMore { showMoreRow }
                 }
                 // A two-axis ScrollView centres content smaller than its viewport, which left a
                 // one-file diff floating in the middle of the panel. Filling the viewport and
@@ -48,7 +47,7 @@ struct DiffScrollView: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
             .onScrollTargetVisibilityChange(idType: String.self) { visible in
                 guard let first = visible.compactMap({ DiffPage.fileIndex(ofRowId: $0) }).min(),
-                      let file = page.files.first(where: { $0.index == first }) else { return }
+                      let file = model.page.files.first(where: { $0.index == first }) else { return }
                 onVisibleFileChanged?(file.path)
             }
             .onChange(of: scrollTarget) {
@@ -63,15 +62,15 @@ struct DiffScrollView: View {
     /// The font is monospaced, so the widest line is arithmetic rather than a measurement pass over
     /// every row — which is also what keeps the content width from jumping as rows come and go.
     private var contentWidth: CGFloat {
-        max(viewport.width, CGFloat(page.columns) * DiffMetrics.advance + Self.gutter)
+        max(viewport.width, CGFloat(model.page.columns) * DiffMetrics.advance + Self.gutter)
     }
 
     private var showMoreRow: some View {
-        Button(action: showMore) {
+        Button { model.showMoreFiles() } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.down.circle")
-                Text("Show \(page.remainingFiles) more file\(page.remainingFiles == 1 ? "" : "s")")
-                Text("of \(page.totalFiles)").foregroundStyle(.secondary)
+                Text("Show \(model.page.remainingFiles) more file\(model.page.remainingFiles == 1 ? "" : "s")")
+                Text("of \(model.page.totalFiles)").foregroundStyle(.secondary)
             }
             .font(.callout)
             .padding(.vertical, 10).padding(.horizontal, 12)

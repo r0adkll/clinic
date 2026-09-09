@@ -21,7 +21,7 @@ struct DiffPanel: View {
                                        description: Text(tab.pwd ?? tab.projectPath))
             } else {
                 if !model.page.files.isEmpty {
-                    DiffFileRail(files: model.files, current: visibleFile) { path in
+                    DiffFileRail(files: model.fileSummaries, current: visibleFile) { path in
                         if model.reveal(path: path) { scrollTarget = path }
                     }
                     Divider()
@@ -41,13 +41,7 @@ struct DiffPanel: View {
         } else if let error = model.error, model.files.isEmpty {
             ContentUnavailableView("Could not read the diff", systemImage: "exclamationmark.triangle", description: Text(error))
         } else {
-            DiffScrollView(page: model.page,
-                           highlights: model.highlights,
-                           isCollapsed: { model.isCollapsed($0) },
-                           toggleCollapsed: { model.toggleCollapsed($0) },
-                           showMore: { model.showMoreFiles() },
-                           onVisibleFileChanged: { visibleFile = $0 },
-                           scrollTarget: $scrollTarget)
+            DiffScrollView(model: model, onVisibleFileChanged: { visibleFile = $0 }, scrollTarget: $scrollTarget)
         }
     }
 
@@ -157,7 +151,7 @@ struct DiffPanel: View {
 /// The file index, one row tall: chips that scroll sideways and follow the reader, plus a popover
 /// listing full paths for jumping (ADR-080).
 struct DiffFileRail: View {
-    let files: [UnifiedDiffFile]
+    let files: [DiffFileSummary]
     let current: String?
     let jump: (String) -> Void
 
@@ -190,11 +184,11 @@ struct DiffFileRail: View {
         .background(.bar)
     }
 
-    private func chip(_ file: UnifiedDiffFile) -> some View {
+    private func chip(_ file: DiffFileSummary) -> some View {
         let isCurrent = file.path == current
         return HStack(spacing: 4) {
-            Text((file.path as NSString).lastPathComponent).font(.caption).lineLimit(1)
-            Text("\(file.additions + file.deletions)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Text(file.name).font(.caption).lineLimit(1)
+            Text("\(file.changedLines)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 7).padding(.vertical, 2)
         .background(isCurrent ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.05), in: Capsule())

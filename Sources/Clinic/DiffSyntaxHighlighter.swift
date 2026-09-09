@@ -76,11 +76,16 @@ actor DiffSyntaxHighlighter {
     private var queries: [String: Query] = [:]
     private var unsupported: Set<String> = []
 
-    /// Attributed text for every line row in a page, keyed by row id. Rows with no language, or no
+    /// Attributed text for the line rows of `files`, keyed by row id. Rows with no language, or no
     /// captures, are simply absent and render as plain text.
-    func highlights(for page: DiffPage, theme: DiffSyntaxTheme) async -> [String: AttributedString] {
+    ///
+    /// Cancellation is checked per file, not just on return: a superseded pass that runs to
+    /// completion still holds this actor, and a dozen of them queued behind each other turned a
+    /// 1.5 s highlight into 15 s of pegged CPU.
+    func highlights(for files: [DiffFileRows], theme: DiffSyntaxTheme) async -> [String: AttributedString] {
         var out: [String: AttributedString] = [:]
-        for file in page.files {
+        for file in files {
+            if Task.isCancelled { return out }
             guard let grammar = grammar(for: file.file.path) else { continue }
             for (_, rows) in Self.sides(of: file) where !rows.isEmpty {
                 merge(&out, snippet: rows, query: grammar.query, language: grammar.language, theme: theme)

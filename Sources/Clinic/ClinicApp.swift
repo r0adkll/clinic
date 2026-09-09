@@ -111,6 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                    let scope = DiffPanelModel.Scope(rawValue: raw) {
                     tabs.selectedTab?.panel.pane(.diff)?.diff?.scope = scope
                 }
+                if UserDefaults.standard.bool(forKey: "ClinicCollapseAllAfterLaunch") {
+                    try? await Task.sleep(for: .seconds(6))
+                    tabs.selectedTab?.panel.pane(.diff)?.diff?.smokeCollapseAll()
+                }
             }
         }
         // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
