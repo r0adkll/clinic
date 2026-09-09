@@ -125,7 +125,7 @@ struct MarketplaceNavRow: View {
                 Color.clear.frame(width: 12, height: 12)
                 // Keeps the header's 22 pt glyph *column* for alignment, but only the glyph's own
                 // height: a project header is 22 pt tall because its icon is, and this row is not.
-                Image(systemName: "puzzlepiece.extension.fill")
+                Image(systemName: "storefront.fill")
                     .font(.system(size: 13))
                     .frame(width: 22, height: 16)
                 Text("Marketplace").font(.body.weight(.semibold)).lineLimit(1)

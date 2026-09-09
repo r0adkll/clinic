@@ -26,7 +26,7 @@ struct MarketplaceScreen: View {
         @Bindable var model = model
         return VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "puzzlepiece.extension.fill").font(.title3).foregroundStyle(Color.accentColor)
+                Image(systemName: "storefront.fill").font(.title3).foregroundStyle(Color.accentColor)
                 Text("Marketplace").font(.title3.weight(.semibold))
                 Text("Plugins for Claude Code").font(.callout).foregroundStyle(.secondary)
                 Spacer(minLength: 12)
