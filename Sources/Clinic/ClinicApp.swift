@@ -100,6 +100,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
                 // `-ClinicHideFileTree YES` (ADR-081): the Files pane with its tree collapsed.
                 if UserDefaults.standard.bool(forKey: "ClinicHideFileTree") { EditorPrefs.shared.showTree = false }
+                // `-ClinicOpenSecondFileAfterLaunch <path>`: opens another file into a Files pane that is
+                // already on screen — the path a tree click takes, and the one that used to leave the
+                // code view showing the first file (ADR-081).
+                if let second = UserDefaults.standard.string(forKey: "ClinicOpenSecondFileAfterLaunch"), !second.isEmpty {
+                    Task {
+                        try? await Task.sleep(for: .seconds(5))
+                        tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: second)
+                    }
+                }
             }
         }
         // `-ClinicZoomPanelAfterLaunch <seconds>` (ADR-081): let the panel settle, then zoom it over the tab.

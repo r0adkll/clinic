@@ -42,6 +42,10 @@ final class EditorModel {
     private let buildsTree: Bool
     /// Told when a different file is opened, so a file window can re-title itself (ADR-081).
     @ObservationIgnored var onOpen: ((String) -> Void)?
+    /// Bumped every time the buffer is replaced from disk (open, reload, revert). `SourceEditor` only
+    /// reads its text binding when its controller is made — `updateNSViewController` never pushes text
+    /// back — so the code view's identity is this counter, and a load rebuilds it (ADR-081).
+    private(set) var loadGeneration = 0
 
     init(root: String, tree buildsTree: Bool = true) {
         self.root = root
@@ -100,6 +104,7 @@ final class EditorModel {
             recentlyOpened.removeAll { $0 == path }
             recentlyOpened.insert(path, at: 0)
             if recentlyOpened.count > 20 { recentlyOpened.removeLast() }
+            loadGeneration += 1
             onOpen?(path)
         } catch { self.error = "\(error)" }
     }
@@ -115,7 +120,7 @@ final class EditorModel {
         } catch { self.error = "\(error)" }
     }
 
-    func revert() { text = savedText }
+    func revert() { text = savedText; loadGeneration += 1 }
 
     private func externalChanged() {
         guard let path = openPath else { return }
@@ -129,6 +134,7 @@ final class EditorModel {
         text = s; savedText = s
         fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
         externalChangePending = false
+        loadGeneration += 1
     }
 
     private func confirmDiscard() -> Bool {
@@ -227,7 +233,6 @@ struct FileEditorView: View {
     /// The panel shows the tree toggle and the pop-out; a file window is already popped out and has no tree.
     var showsTreeToggle = false
     var showsPopOut = false
-    @State private var editorState = SourceEditorState()
     @State private var quickOpen = false
 
     var body: some View {
@@ -236,16 +241,7 @@ struct FileEditorView: View {
             Divider()
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).padding(6) }
             if model.openPath != nil {
-                SourceEditor(
-                    $model.text,
-                    language: model.language,
-                    configuration: SourceEditorConfiguration(
-                        appearance: .init(theme: EditorThemes.current, font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), wrapLines: false, tabWidth: 4),
-                        behavior: .init(isEditable: true, indentOption: .spaces(count: 4)),
-                        peripherals: .init(showGutter: true, showMinimap: false, showReformattingGuide: false, showFoldingRibbon: false)
-                    ),
-                    state: $editorState
-                )
+                CodeView(model: model).id(model.loadGeneration)
             } else {
                 ContentUnavailableView("Pick a file", systemImage: "doc.text", description: Text("From the tree, the agent's files, or ⌘⇧O."))
             }
@@ -292,6 +288,28 @@ struct FileEditorView: View {
         .controlSize(.small)
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(.bar)
+    }
+}
+
+/// The text view. Its identity is the model's `loadGeneration`, so opening, reloading or reverting a
+/// file rebuilds it — `SourceEditor` reads its text binding only when its controller is made, and
+/// would otherwise go on showing the buffer it was born with (ADR-081). Rebuilding also resets the
+/// cursor, scroll and undo stack, which belonged to the file that just went away.
+private struct CodeView: View {
+    @Bindable var model: EditorModel
+    @State private var editorState = SourceEditorState()
+
+    var body: some View {
+        SourceEditor(
+            $model.text,
+            language: model.language,
+            configuration: SourceEditorConfiguration(
+                appearance: .init(theme: EditorThemes.current, font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), wrapLines: false, tabWidth: 4),
+                behavior: .init(isEditable: true, indentOption: .spaces(count: 4)),
+                peripherals: .init(showGutter: true, showMinimap: false, showReformattingGuide: false, showFoldingRibbon: false)
+            ),
+            state: $editorState
+        )
     }
 }
 
