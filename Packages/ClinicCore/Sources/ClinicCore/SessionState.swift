@@ -16,6 +16,8 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var source: String?            // SessionStart: startup | resume | clear | compact | fork
     public var notificationType: String?  // Notification
     public var message: String?
+    /// UserPromptSubmit: the text the user submitted. Labels a turn snapshot (ADR-080).
+    public var prompt: String?
     public var toolName: String?
     public var permissionMode: String?
     public var model: String?             // PostModelSwitch (field name best-effort)
@@ -24,15 +26,15 @@ public struct HookEvent: Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name", sessionId = "session_id", transcriptPath = "transcript_path", cwd, source
-        case notificationType = "notification_type", message, toolName = "tool_name", permissionMode = "permission_mode"
+        case notificationType = "notification_type", message, prompt, toolName = "tool_name", permissionMode = "permission_mode"
         case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
     }
 
     public init(hookEventName: String, sessionId: SessionID, transcriptPath: String? = nil, cwd: String? = nil, source: String? = nil,
-                notificationType: String? = nil, message: String? = nil, toolName: String? = nil, permissionMode: String? = nil,
+                notificationType: String? = nil, message: String? = nil, prompt: String? = nil, toolName: String? = nil, permissionMode: String? = nil,
                 model: String? = nil, stopHookActive: Bool? = nil, receivedAt: Date = Date()) {
         self.hookEventName = hookEventName; self.sessionId = sessionId; self.transcriptPath = transcriptPath; self.cwd = cwd
-        self.source = source; self.notificationType = notificationType; self.message = message; self.toolName = toolName
+        self.source = source; self.notificationType = notificationType; self.message = message; self.prompt = prompt; self.toolName = toolName
         self.permissionMode = permissionMode; self.model = model; self.stopHookActive = stopHookActive; self.receivedAt = receivedAt
     }
 
@@ -45,6 +47,7 @@ public struct HookEvent: Codable, Sendable, Hashable {
         source = try c.decodeIfPresent(String.self, forKey: .source)
         notificationType = try c.decodeIfPresent(String.self, forKey: .notificationType)
         message = try c.decodeIfPresent(String.self, forKey: .message)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
         toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
         permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode)
         model = try c.decodeIfPresent(String.self, forKey: .model)

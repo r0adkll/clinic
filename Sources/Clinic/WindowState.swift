@@ -134,7 +134,7 @@ struct TerminalStack: NSViewRepresentable {
         var terminal: GhosttySurfaceView?
         switch pane.kind {
         case .terminal: terminal = pane.terminal
-        case .git: page = pane.git.map { self.page(GitPage(tab: tab, model: $0)) }
+        case .diff: page = pane.diff.map { self.page(DiffPanel(tab: tab, model: $0)) }
         case .files: page = pane.editor.map { self.page(EditorPanel(tab: tab, model: $0)) }
         case .attachments: page = self.page(AttachmentsPanel(tab: tab))
         case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))

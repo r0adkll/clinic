@@ -22,7 +22,7 @@ struct ClinicApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
         .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine) }
-        Settings { PreferencesView().environment(appDelegate.usage).environment(appDelegate.bindings) }
+        Settings { PreferencesView().environment(appDelegate.usage).environment(appDelegate.bindings).environment(appDelegate.tabs.snapshots) }
     }
 }
 
@@ -83,9 +83,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
-            if UserDefaults.standard.bool(forKey: "ClinicOpenGitPageOnLaunch") {
-                tabs.toggleGitPage()
-            }
             // `-ClinicCyclePanelAfter <seconds>` hides the panel and shows it again a second later, from a
             // settled window: the path where a newly added panel used to come up blank.
             let cycle = UserDefaults.standard.double(forKey: "ClinicCyclePanelAfter")
@@ -101,6 +98,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
                 if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
+            }
+        }
+        // `-ClinicOpenDiffPanelOnLaunch YES [-ClinicDiffScope turn|session|workingTree|branch]`
+        // (ADR-080). Deferred so it lands on whichever tab the other launch keys opened, and because
+        // the scope picker is a menu no smoke test can open.
+        if UserDefaults.standard.bool(forKey: "ClinicOpenDiffPanelOnLaunch") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                tabs.toggleDiffPanel()
+                if let raw = UserDefaults.standard.string(forKey: "ClinicDiffScope"),
+                   let scope = DiffPanelModel.Scope(rawValue: raw) {
+                    tabs.selectedTab?.panel.pane(.diff)?.diff?.scope = scope
+                }
             }
         }
         // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
@@ -123,7 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // `-ClinicNewSessionOnLaunch /path/to/project` starts a Claude session there (smoke test for the hook binding).
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
-            tabs.newSession(projectPath: path, model: "haiku", worktree: false)
+            // `-ClinicPromptOnLaunch <text>`: send a first prompt, so a smoke run produces a real
+            // turn to look at in the diff panel (ADR-080).
+            tabs.newSession(projectPath: path, model: "haiku", worktree: false,
+                            prompt: UserDefaults.standard.string(forKey: "ClinicPromptOnLaunch"))
             // `-ClinicStopAfterLaunch <seconds>`: exercise the graceful Stop path (ADR-063).
             // `-ClinicSwitchModelAfterLaunch <alias>`: exercise /model via the footer path (ADR-064).
             if let alias = UserDefaults.standard.string(forKey: "ClinicSwitchModelAfterLaunch"), !alias.isEmpty {
@@ -280,7 +293,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
             Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
-            Button("Git") { tabs.toggleGitPage() }.keyboardShortcut(key(.toggleGitPage)).disabled(tabs.selectedTab == nil)
+            Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)
             Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
             Button("Images") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Pull Request") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)

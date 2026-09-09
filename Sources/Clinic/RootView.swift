@@ -154,7 +154,7 @@ struct TabFooter: View {
             // Quick actions (ADR-079): each one shows the panel with its tab in front; the tab bar's chevron hides it.
             HStack(spacing: 6) {
                 PaneToggle(tab: tab, kind: .terminal, help: "Shell in the panel (⌘J)")
-                PaneToggle(tab: tab, kind: .git, help: "Git page (⌘⇧G)")
+                PaneToggle(tab: tab, kind: .diff, help: "Diff panel (⌘⇧G)")
                 PaneToggle(tab: tab, kind: .files, help: "Editor (⌘⇧E)")
                 if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
                     PaneToggle(tab: tab, kind: .attachments, help: "Attachments (⌘⇧I)")

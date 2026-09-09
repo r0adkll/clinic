@@ -100,3 +100,30 @@ public struct GitError: Error, CustomStringConvertible, Sendable {
         self.description = description ?? "git \(command) exited with \(exitCode)" + (trimmed.isEmpty ? "" : ": \(trimmed)")
     }
 }
+
+/// `git diff --numstat` totals. Binary files count as changed but contribute no lines (git writes `-`).
+public struct DiffStat: Sendable, Hashable {
+    public var files: Int
+    public var additions: Int
+    public var deletions: Int
+
+    public init(files: Int = 0, additions: Int = 0, deletions: Int = 0) {
+        self.files = files
+        self.additions = additions
+        self.deletions = deletions
+    }
+
+    public init(numstat: String) {
+        var stat = DiffStat()
+        for line in numstat.split(separator: "\n") {
+            let f = line.split(separator: "\t", maxSplits: 2)
+            guard f.count == 3 else { continue }
+            stat.files += 1
+            stat.additions += Int(f[0]) ?? 0
+            stat.deletions += Int(f[1]) ?? 0
+        }
+        self = stat
+    }
+
+    public var isEmpty: Bool { files == 0 }
+}

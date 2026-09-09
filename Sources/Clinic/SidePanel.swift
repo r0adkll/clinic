@@ -12,13 +12,13 @@ final class PanelPane: Identifiable {
     /// Panel tab identity. Two panes of the same kind never coexist, so a quick action re-focuses the
     /// pane it already opened; PRs are distinguished by their ref, so each PR gets its own tab.
     enum Kind: Hashable {
-        case terminal, git, files, attachments
+        case terminal, diff, files, attachments
         case pr(PullRequestRef)
 
         var symbol: String {
             switch self {
             case .terminal: "terminal"
-            case .git: "arrow.triangle.branch"
+            case .diff: "plus.forwardslash.minus"
             case .files: "doc.text.magnifyingglass"
             case .attachments: "photo.on.rectangle"
             case .pr: "arrow.triangle.pull"
@@ -28,7 +28,7 @@ final class PanelPane: Identifiable {
         var defaultTitle: String {
             switch self {
             case .terminal: "Terminal"
-            case .git: "Git"
+            case .diff: "Diff"
             case .files: "Files"
             case .attachments: "Images"
             case .pr(let ref): "PR #\(ref.number)"
@@ -39,7 +39,7 @@ final class PanelPane: Identifiable {
         var minWidth: CGFloat {
             switch self {
             case .terminal: 400
-            case .git, .pr: 380
+            case .diff, .pr: 380
             case .attachments: 320
             case .files: 520
             }
@@ -48,7 +48,7 @@ final class PanelPane: Identifiable {
 
     let id = UUID()
     let kind: Kind
-    var git: GitPageModel?
+    var diff: DiffPanelModel?
     var editor: EditorModel?
     var terminal: GhosttySurfaceView?
 
@@ -56,7 +56,7 @@ final class PanelPane: Identifiable {
 
     /// Releases the pane's resources; called when the pane or its tab closes.
     func tearDown() {
-        git?.stopWatching()
+        diff?.stopWatching()
         editor?.stop()
         terminal?.free()
         terminal = nil
@@ -117,7 +117,7 @@ final class SidePanel {
 
     /// Only the pane on screen watches the file system; the others idle until they come back to the front.
     private func syncWatchers() {
-        for pane in panes where !isVisible || pane.id != selectedId { pane.git?.stopWatching() }
+        for pane in panes where !isVisible || pane.id != selectedId { pane.diff?.stopWatching() }
     }
 
     /// Cycles the selection; ⌃⇥ inside the panel.

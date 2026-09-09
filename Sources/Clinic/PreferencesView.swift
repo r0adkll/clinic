@@ -11,6 +11,7 @@ enum Prefs {
 
 struct PreferencesView: View {
     @Environment(UsageService.self) private var usage
+    @Environment(SnapshotService.self) private var snapshots
     @AppStorage(Prefs.reopenLastSession) private var reopenLastSession = false
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage(Prefs.notificationSound) private var notificationSound = false
@@ -93,10 +94,20 @@ struct PreferencesView: View {
                         NSPasteboard.general.setString("/usr/bin/log show --info --predicate 'subsystem == \"com.r0adkll.clinic\" OR subsystem == \"com.mitchellh.ghostty\"' --last 10m --style compact", forType: .string)
                     }
                 }
+                LabeledContent("Diff snapshots") {
+                    HStack(spacing: 8) {
+                        Text(snapshots.diskUsage == 0 ? "None" : ByteCountFormatter.string(fromByteCount: snapshots.diskUsage, countStyle: .file))
+                            .foregroundStyle(.secondary).monospacedDigit()
+                        Button("Clear") { snapshots.clear() }.disabled(snapshots.diskUsage == 0)
+                    }
+                }
+                Text("Turn diffs are git trees Clinic writes to its own object store; your repositories are never written to. Clearing them loses the turn history, not any work.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("Clinic never writes to ~/.claude. Its own state lives in Application Support.").font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
             .tag("diagnostics")
+            .task { snapshots.refreshDiskUsage() }
             .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
         }
         .frame(width: 560, height: 420)

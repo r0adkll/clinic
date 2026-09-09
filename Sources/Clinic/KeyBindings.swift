@@ -7,7 +7,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case mcpServers, selectSessions, notifications, caffeine
-    case togglePanel, toggleGitPage, toggleEditor, toggleAttachments, togglePRPage
+    case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
     case togglePanelVisibility, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
 
     var id: String { rawValue }
@@ -36,7 +36,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "Notifications"
         case .caffeine: "Caffeine Mode"
         case .togglePanel: "Terminal Panel Tab"
-        case .toggleGitPage: "Git Panel Tab"
+        case .toggleDiffPage: "Diff Panel Tab"
         case .toggleEditor: "Files Panel Tab"
         case .toggleAttachments: "Images Panel Tab"
         case .togglePRPage: "Pull Request Panel Tab"
@@ -54,7 +54,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .mcpServers, .selectSessions, .notifications, .caffeine: "View"
-        case .togglePanel, .toggleGitPage, .toggleEditor, .toggleAttachments, .togglePRPage,
+        case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .togglePRPage,
              .togglePanelVisibility, .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
         case .nextTab, .previousTab: "Tabs"
         }
@@ -86,7 +86,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "cmd+shift+b"
         case .caffeine: nil
         case .togglePanel: "cmd+j"
-        case .toggleGitPage: "cmd+shift+g"
+        case .toggleDiffPage: "cmd+shift+g"
         case .toggleEditor: "cmd+shift+e"
         case .toggleAttachments: "cmd+shift+i"
         case .togglePRPage: "cmd+shift+p"

@@ -18,5 +18,5 @@ Native macOS Claude Code session manager (a clean-room Collins reimplementation 
 ## Rules
 - Swift 6 language mode, strict concurrency. All libghostty calls on the main actor.
 - `~/.claude` is read-only (ADR-018).
-- No third-party Swift packages (ADR-023).
+- Third-party Swift packages are allowed when they replace substantial work, and each adoption is recorded in ADR-058 (which superseded ADR-023's "no dependencies"). `ClinicCore` stays Foundation-only; packages attach to the app target.
 - Never bundle `vendor/ghostty/src/shell-integration` (GPLv3).

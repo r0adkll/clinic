@@ -3,8 +3,9 @@ import Foundation
 /// Read/write git operations for one repository. Every method shells out to `git -C <root>` off the
 /// main actor; stdout and stderr are captured separately and a non-zero exit throws `GitError`.
 public actor GitRepository {
-    /// Absolute top-level path of the working tree.
-    public let root: String
+    /// Absolute top-level path of the working tree. `nonisolated` because it never changes: callers
+    /// need it to key caches and scratch directories without hopping onto the actor.
+    public nonisolated let root: String
 
     public init(root: String) { self.root = root }
 
@@ -189,13 +190,7 @@ public actor GitRepository {
     public func commits(limit: Int = 100) async throws -> [GitCommit] {
         guard await refExists("HEAD") else { return [] }
         var args = ["log", "--no-color", "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s", "-n", String(max(limit, 1))]
-        if let base = await defaultBranch(), base != (await currentBranch()) {
-            if await refExists("refs/heads/\(base)") {
-                args.append("\(base)..HEAD")
-            } else if await refExists("refs/remotes/origin/\(base)") {
-                args.append("origin/\(base)..HEAD")
-            }
-        }
+        if let base = await branchBaseRef() { args.append("\(base)..HEAD") }
         let out = try await git(args).stdoutString
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
@@ -276,11 +271,94 @@ public actor GitRepository {
         await GitProcess.run(["rev-parse", "--verify", "-q", ref], in: root).status == 0
     }
 
+
+    /// The ref the current branch should be compared against — the default branch, local or on
+    /// `origin` — or nil when there is none, or when it *is* the current branch.
+    public func branchBaseRef() async -> String? {
+        guard let base = await defaultBranch(), base != (await currentBranch()) else { return nil }
+        if await refExists("refs/heads/\(base)") { return base }
+        if await refExists("refs/remotes/origin/\(base)") { return "origin/\(base)" }
+        return nil
+    }
+
+    /// `git diff <base>...<head>`: everything the branch added since it diverged, which is what the
+    /// branch scope shows and what a reviewer of the branch would see.
+    public func diff(branchFrom base: String, to head: String = "HEAD") async throws -> UnifiedDiff {
+        let args = ["diff"] + Self.diffFlags + ["\(base)...\(head)"]
+        return UnifiedDiff.parse(try await git(args).stdoutString)
+    }
+
+    /// One commit against its first parent. `-m --first-parent` is what makes a merge commit show a
+    /// diff at all; without it `git show` prints a header and nothing else.
+    public func diff(commit sha: String) async throws -> UnifiedDiff {
+        let args = ["show", "--format=", "-m", "--first-parent"] + Self.diffFlags + [sha]
+        return UnifiedDiff.parse(try await git(args).stdoutString)
+    }
+
+    // MARK: Snapshots (ADR-080)
+
+    /// Writes a tree object recording the whole working tree — tracked, modified and untracked
+    /// alike, `.gitignore` honoured — **without touching the repository**. New objects land in
+    /// `scratch.objectDirectory`; the repo's own object store is reached read-only through
+    /// alternates, and the index git needs is `scratch.indexFile`, never the user's.
+    ///
+    /// The scratch index is kept between calls on purpose: it carries git's stat cache, which is
+    /// what makes a repeat snapshot a stat walk rather than a re-hash of every file.
+    public func writeSnapshotTree(_ scratch: GitObjectScratch) async throws -> String {
+        try scratch.prepare()
+        let env = scratch.environment(repoRoot: root)
+        // `add -A .` against an index that may be empty (first call) or warm (every call after).
+        let add = await GitProcess.run(["add", "-A", "."], in: root, environment: env)
+        if add.status != 0 {
+            // A truncated or version-mismatched index is the one failure worth retrying; drop it and rebuild.
+            try? FileManager.default.removeItem(atPath: scratch.indexFile)
+            let retry = await GitProcess.run(["add", "-A", "."], in: root, environment: env)
+            guard retry.status == 0 else { throw retry.error(["add", "-A", "."]) }
+        }
+        let out = try await git(["write-tree"], environment: env).stdoutString
+        let sha = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard sha.count >= 40 else {
+            throw GitError(command: "write-tree", exitCode: 0, stderr: "", description: "git write-tree produced no tree")
+        }
+        return sha
+    }
+
+    /// `--numstat` totals for a tree pair. Cheap next to a patch, which is what makes per-turn
+    /// `+n −n` in the turn menu affordable.
+    public func stat(from base: String, to head: String, scratch: GitObjectScratch?) async throws -> DiffStat {
+        guard base != head else { return DiffStat() }
+        let env = scratch?.environment(repoRoot: root) ?? [:]
+        let out = try await git(["diff-tree", "-r", "--numstat", "--no-color", base, head], environment: env).stdoutString
+        return DiffStat(numstat: out)
+    }
+
+    /// `HEAD^{tree}`-style resolution, so a commit or branch can be one side of a snapshot diff.
+    public func tree(of ref: String) async throws -> String {
+        let out = try await git(["rev-parse", "--verify", "-q", "\(ref)^{tree}"]).stdoutString
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Unified diff between two trees. `scratch` must be the store the trees were written into,
+    /// otherwise git cannot resolve them.
+    public func diff(from base: String, to head: String, scratch: GitObjectScratch?) async throws -> UnifiedDiff {
+        guard base != head else { return UnifiedDiff() }
+        let env = scratch?.environment(repoRoot: root) ?? [:]
+        let args = ["diff-tree", "-p", "-r", "--find-renames"] + Self.diffFlags + [base, head]
+        return UnifiedDiff.parse(try await git(args, environment: env).stdoutString)
+    }
+
+    /// Diff from a snapshot tree to the working tree as it is right now, by taking a fresh snapshot
+    /// and comparing the pair. Used for the in-flight turn and every worktree-headed scope.
+    public func diff(from base: String, toWorktree scratch: GitObjectScratch) async throws -> UnifiedDiff {
+        let head = try await writeSnapshotTree(scratch)
+        return try await diff(from: base, to: head, scratch: scratch)
+    }
+
     // MARK: Process plumbing
 
     @discardableResult
-    private func git(_ args: [String], stdin: Data? = nil) async throws -> GitProcess.Result {
-        let r = await GitProcess.run(args, in: root, stdin: stdin)
+    private func git(_ args: [String], stdin: Data? = nil, environment: [String: String] = [:]) async throws -> GitProcess.Result {
+        let r = await GitProcess.run(args, in: root, stdin: stdin, environment: environment)
         guard r.status == 0 else { throw r.error(args) }
         return r
     }
@@ -296,15 +374,15 @@ enum GitProcess {
         func error(_ args: [String]) -> GitError { GitError(command: args.joined(separator: " "), exitCode: status, stderr: stderr) }
     }
 
-    static func run(_ args: [String], in directory: String, stdin: Data? = nil) async -> Result {
+    static func run(_ args: [String], in directory: String, stdin: Data? = nil, environment: [String: String] = [:]) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(args, in: directory, stdin: stdin))
+                cont.resume(returning: runSync(args, in: directory, stdin: stdin, environment: environment))
             }
         }
     }
 
-    private static func runSync(_ args: [String], in directory: String, stdin: Data?) -> Result {
+    private static func runSync(_ args: [String], in directory: String, stdin: Data?, environment: [String: String]) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = ["git", "-C", directory] + args
@@ -314,6 +392,7 @@ enum GitProcess {
         env["GIT_OPTIONAL_LOCKS"] = "0"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_PAGER"] = "cat"
+        for (k, v) in environment { env[k] = v }
         p.environment = env
 
         let out = Pipe(), err = Pipe()

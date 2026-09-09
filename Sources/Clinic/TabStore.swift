@@ -170,6 +170,8 @@ final class TabStore {
     let hooks: HookService
     let notifications: NotificationService
     let history: NotificationStore
+    /// Turn snapshots for the diff panel (ADR-080).
+    let snapshots = SnapshotService()
     /// Set by the app after construction (ADR-056, ADR-061).
     var mcp: MCPToolService?
     var backgroundAgents: BackgroundAgentsService?
@@ -219,6 +221,11 @@ final class TabStore {
         }
         hooks.onEvent = { [weak self] event in self?.handle(hookEvent: event) }
         notifications.onActivate = { [weak self] id in self?.reveal(sessionId: id) }
+        // ADR-080 retention: once the launch has settled, so restored sessions count as live.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            self?.snapshots.sweep()
+        }
     }
 
     /// ADR-034: shell integration scripts are GPLv3 and not bundled. If Ghostty.app is installed, let libghostty
@@ -592,7 +599,7 @@ final class TabStore {
 
     /// Pane kinds the panel's "+" menu can still add for this tab.
     func availablePanes(for tab: Tab) -> [PanelPane.Kind] {
-        var kinds: [PanelPane.Kind] = [.terminal, .git, .files]
+        var kinds: [PanelPane.Kind] = [.terminal, .diff, .files]
         if tab.sessionId != nil { kinds.append(.attachments) }
         kinds += pullRequests(for: tab).map { PanelPane.Kind.pr($0) }
         return kinds.filter { !tab.panel.isOpen($0) }
@@ -601,7 +608,7 @@ final class TabStore {
     /// Chip and menu label for a pane: live facts (branch, image count) win over the kind's default.
     func paneTitle(_ kind: PanelPane.Kind, in tab: Tab) -> String {
         switch kind {
-        case .git: return tab.gitBranch ?? "Git"
+        case .diff: return tab.gitBranch ?? "Diff"
         case .attachments:
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Images (\(count))" : "Images"
@@ -627,8 +634,8 @@ final class TabStore {
                 lastSurfaceError = "\(error)"
                 return nil
             }
-        case .git:
-            pane.git = GitPageModel()
+        case .diff:
+            pane.diff = DiffPanelModel()
         case .files:
             pane.editor = EditorModel(root: tab.pwd ?? tab.projectPath)
         case .attachments:
@@ -650,7 +657,7 @@ final class TabStore {
     func togglePanel(_ tab: Tab? = nil) { showPane(.terminal, in: tab) }
 
     /// ⌘⇧G: the git pane.
-    func toggleGitPage(_ tab: Tab? = nil) { showPane(.git, in: tab) }
+    func toggleDiffPanel(_ tab: Tab? = nil) { showPane(.diff, in: tab) }
 
     /// ⌘⇧E: the editor pane.
     func toggleEditor(_ tab: Tab? = nil) { showPane(.files, in: tab) }
@@ -734,8 +741,12 @@ final class TabStore {
             Self.log.debug("hook for unknown session \(event.sessionId.rawValue, privacy: .public): \(event.hookEventName, privacy: .public)")
             return
         }
+        // ADR-080: turn boundaries become snapshots. Before any early return below, and before the
+        // SessionEnd close path so a closing session still gets its last turn sealed.
+        snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
+        if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" { snapshots.forget(session: event.sessionId) }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
             Task { await sessions.refresh(transcriptPath: path); self.refreshTitle(tab); self.refreshFooter(tab) }
         } else if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" {

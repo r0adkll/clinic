@@ -142,7 +142,7 @@ struct EditorPanel: View {
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath
             var root = dir
-            if let repo = await GitRepository.discover(from: dir) { root = await repo.root }
+            if let repo = await GitRepository.discover(from: dir) { root = repo.root }
             model.rebind(root: root)
         }
         .sheet(isPresented: $quickOpen) { QuickOpenSheet(model: model) }
