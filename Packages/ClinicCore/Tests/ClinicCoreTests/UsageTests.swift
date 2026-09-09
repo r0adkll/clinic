@@ -24,6 +24,34 @@ import Testing
         #expect(throws: UsageError.self) { try UsageSnapshot.parse(Data("[]".utf8)) }
     }
 
+    /// The collapsed snapshot's labels and its drop order (ADR-085).
+    @Test func compactSnapshotKeepsThePressingBars() throws {
+        let json = """
+        {"limits":[{"kind":"session","percent":10,"severity":"normal"},
+                   {"kind":"weekly_all","percent":40,"severity":"normal"},
+                   {"kind":"weekly_scoped","percent":120,"severity":"exceeded","scope":{"model":{"display_name":"Claude Opus 4.5"}}}]}
+        """
+        let s = try UsageSnapshot.parse(Data(json.utf8))
+        #expect(s.bars.map(\.shortTitle) == ["5h", "7d", "Opus"])
+        // Two chips fit: the exceeded scoped bar stays, the calm session bar goes, order is preserved.
+        #expect(s.compactBars(limit: 2).map(\.kind) == ["weekly_all", "weekly_scoped"])
+        #expect(s.compactBars(limit: 1).map(\.kind) == ["weekly_scoped"])
+        #expect(s.compactBars(limit: 9).count == 3)
+        #expect(s.compactBars(limit: 0).isEmpty)
+    }
+
+    @Test func compactSnapshotFallsBackToPercent() throws {
+        let json = """
+        {"limits":[{"kind":"session","percent":80,"severity":"normal"},
+                   {"kind":"weekly_all","percent":15,"severity":"normal"}]}
+        """
+        let s = try UsageSnapshot.parse(Data(json.utf8))
+        #expect(s.compactBars(limit: 1).map(\.kind) == ["session"])
+        // An unknown kind still gets a label rather than an empty chip.
+        let odd = try UsageSnapshot.parse(Data(#"{"limits":[{"kind":"monthly_extra","percent":3}]}"#.utf8))
+        #expect(odd.bars[0].shortTitle == "Monthly")
+    }
+
     @Test func parsesCredentials() {
         let c = ClaudeCredentials.parse(Data(#"{"claudeAiOauth":{"accessToken":"tok","expiresAt":4102444800000,"subscriptionType":"max"}}"#.utf8))
         #expect(c?.accessToken == "tok" && c?.subscriptionType == "max" && c?.isExpired == false)

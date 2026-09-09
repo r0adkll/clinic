@@ -18,6 +18,17 @@ public struct UsageSnapshot: Sendable, Equatable {
             default: return kind.replacingOccurrences(of: "_", with: " ").capitalized
             }
         }
+        /// Two or three characters for the collapsed snapshot, where a chip gets ~20 pt of label (ADR-085).
+        public var shortTitle: String {
+            switch kind {
+            case "session": return "5h"
+            case "weekly_all": return "7d"
+            case "weekly_scoped":
+                let words = (modelName ?? "").split(separator: " ").filter { $0.caseInsensitiveCompare("claude") != .orderedSame }
+                return words.first.map(String.init) ?? "Model"
+            default: return title.split(separator: " ").first.map(String.init) ?? kind
+            }
+        }
     }
     public struct Credits: Sendable, Equatable {
         public var used: Double
@@ -31,6 +42,24 @@ public struct UsageSnapshot: Sendable, Equatable {
     public var fetchedAt: Date
 
     static let kindOrder = ["session": 0, "weekly_all": 1, "weekly_scoped": 2]
+    static let severityOrder = ["exceeded": 0, "warning": 1]
+
+    /// The `limit` most-pressing bars, back in display order (ADR-085). The collapsed snapshot shows one
+    /// chip per limit and drops the calmest first, so an exceeded model-scoped bar survives a narrow sidebar
+    /// while a quiet one makes way. Ties break on percent, then on the snapshot's own kind order.
+    public func compactBars(limit: Int) -> [Bar] {
+        guard limit < bars.count else { return bars }
+        return bars.enumerated()
+            .sorted { a, b in
+                let ra = Self.severityOrder[a.element.severity] ?? 2, rb = Self.severityOrder[b.element.severity] ?? 2
+                if ra != rb { return ra < rb }
+                if a.element.percent != b.element.percent { return a.element.percent > b.element.percent }
+                return a.offset < b.offset
+            }
+            .prefix(max(0, limit))
+            .sorted { $0.offset < $1.offset }
+            .map(\.element)
+    }
 
     /// Parses the `/api/oauth/usage` response body.
     public static func parse(_ data: Data, subscription: String = "", now: Date = Date()) throws -> UsageSnapshot {
