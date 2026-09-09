@@ -93,7 +93,11 @@ struct PRPage: View {
         let mark = prs.mark(for: ref)
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let mark { Image(systemName: mark.symbolName).foregroundStyle(PRStyle.color(mark)) }
+                if let mark {
+                    Image(systemName: mark.symbolName)
+                        .font(.system(size: PRStyle.glyphSize.header))
+                        .foregroundStyle(PRStyle.color(mark))
+                }
                 Text(pr?.title ?? "Pull request #" + String(ref.number)).font(.headline).lineLimit(2)
                 Spacer(minLength: 8)
                 Button { Task { await prs.refresh(ref) } } label: { Image(systemName: "arrow.clockwise") }
@@ -128,8 +132,8 @@ struct PRPage: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Image(systemName: line.symbol)
                             .foregroundStyle(PRStyle.tint(line.tone))
-                            .font(.caption)
-                            .frame(width: 14)
+                            .font(.system(size: PRStyle.glyphSize.statusLine))
+                            .frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(line.text).font(.subheadline.weight(line.tone == .blocking ? .semibold : .regular))
                             if let detail = line.detail {
@@ -402,6 +406,7 @@ struct PRChip: View {
         Button(action: onTap) {
             HStack(spacing: 4) {
                 Image(systemName: mark?.symbolName ?? PullRequestMark.symbol)
+                    .font(.system(size: PRStyle.glyphSize.chip))
                 Text("PR #" + String(ref.number)).monospacedDigit()
             }
             .font(.callout)
@@ -428,14 +433,37 @@ struct PRMarkView: View {
     let refs: [PullRequestRef]
     var body: some View {
         if let mark = prs.aggregateMark(for: refs) {
-            Image(systemName: mark.symbolName).font(.caption).foregroundStyle(PRStyle.color(mark)).help(mark.summary)
+            Image(systemName: mark.symbolName).font(.system(size: PRStyle.glyphSize.sidebar))
+                .foregroundStyle(PRStyle.color(mark)).help(mark.summary)
         } else if !refs.isEmpty {
-            Image(systemName: PullRequestMark.symbol).font(.caption).foregroundStyle(.tertiary).task { prs.ensureLoaded(refs) }
+            Image(systemName: PullRequestMark.symbol).font(.system(size: PRStyle.glyphSize.sidebar))
+                .foregroundStyle(.tertiary).task { prs.ensureLoaded(refs) }
         }
     }
 }
 
 enum PRStyle {
+    /// Point sizes for the PR glyph, per place it is drawn (ADR-089).
+    ///
+    /// Deliberately explicit rather than inherited from a text style. `arrow.trianglehead.pull` is a
+    /// tall, narrow shape, so at the same point size as the boxy glyphs beside it (`terminal`,
+    /// `doc.text.magnifyingglass`) it reads noticeably smaller — and its solid arrowhead, the whole
+    /// reason for preferring it to the old chevron, does not resolve until a couple of points above
+    /// the surrounding text. Each value is ~2 pt over its neighbour: macOS gives `.callout` 12 pt,
+    /// `.caption` 10 pt and `.headline` 13 pt.
+    enum glyphSize {
+        /// Footer chip, beside a 12 pt `.callout` label.
+        static let chip: CGFloat = 14
+        /// Sidebar row, beside 10 pt secondary text.
+        static let sidebar: CGFloat = 12
+        /// Panel header, beside the 13 pt `.headline` title.
+        static let header: CGFloat = 15
+        /// Leading glyph on a status line, beside 11 pt `.subheadline`.
+        static let statusLine: CGFloat = 13
+        /// Panel tab strip, beside the other pane glyphs at 10 pt.
+        static let tab: CGFloat = 12
+    }
+
     static func color(_ mark: PullRequestMark) -> Color {
         switch mark.state {
         case .merged: return .purple

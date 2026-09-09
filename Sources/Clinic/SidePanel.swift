@@ -25,6 +25,13 @@ final class PanelPane: Identifiable {
             }
         }
 
+        /// Point size for `symbol` in the tab strip. Everything is 10 pt (`.caption`) except the PR
+        /// glyph: `arrow.trianglehead.pull` is tall and narrow, so at 10 pt it reads smaller than the
+        /// boxy glyphs beside it and its arrowhead does not resolve at all (ADR-089).
+        var glyphSize: CGFloat {
+            if case .pr = self { PRStyle.glyphSize.tab } else { 10 }
+        }
+
         var defaultTitle: String {
             switch self {
             case .terminal: "Terminal"
@@ -195,7 +202,7 @@ struct SidePanelTabChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: pane.kind.symbol).font(.caption)
+            Image(systemName: pane.kind.symbol).font(.system(size: pane.kind.glyphSize))
             Text(tabs.paneTitle(pane.kind, in: tab)).font(.callout).lineLimit(1)
             Button { tabs.closePane(pane, in: tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
                 .buttonStyle(.borderless)
