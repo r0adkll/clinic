@@ -21,11 +21,17 @@ final class EditorPrefs {
     private init() {
         showTree = UserDefaults.standard.object(forKey: Self.showTreeKey) as? Bool ?? true
         let stored = UserDefaults.standard.double(forKey: Self.treeWidthKey)
-        treeWidth = stored > 0 ? CGFloat(stored) : 220
+        treeWidth = stored > 0 ? CGFloat(stored) : 180
     }
 
     static let minTreeWidth: CGFloat = 160
     static let maxTreeWidth: CGFloat = 480
+
+    /// Never below the minimum, never past the maximum, and never leaving the code view under 300 pt.
+    static func clamp(_ width: CGFloat, available: CGFloat) -> CGFloat {
+        let upper = max(minTreeWidth, min(maxTreeWidth, available - 300))
+        return min(max(width, minTreeWidth), upper)
+    }
 }
 
 /// Per-tab editor state (ADR-057): root, index, open file, dirty flag, external-change watch.
@@ -107,7 +113,7 @@ final class EditorModel {
             guard let s = String(data: data, encoding: .utf8) else { error = "Not a UTF-8 text file"; return }
             text = s; savedText = s
             openPath = path
-            language = CodeLanguage.detectLanguageFrom(url: URL(fileURLWithPath: path))
+            language = FileLanguage.detect(path: path, text: s)
             fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
             externalChangePending = false
             error = nil
@@ -166,33 +172,32 @@ struct EditorPanel: View {
     @Environment(SessionStore.self) private var sessions
     let tab: Tab
     @Bindable var model: EditorModel
-    /// The tree's width as it stood when this pane was built; see the note in `body`.
-    @State private var initialTreeWidth = EditorPrefs.shared.treeWidth
+    /// The live column width. Held here rather than read from `EditorPrefs` on every frame: the drag
+    /// writes it many times a second, and only its final value is worth persisting.
+    @State private var treeWidth = EditorPrefs.shared.treeWidth
     private var prefs: EditorPrefs { EditorPrefs.shared }
 
+    /// The width the tree may take in a pane this wide. Clamping here rather than when the drag stores
+    /// it means a narrow panel borrows from the tree and gives it back when it widens.
+    private func clamped(_ width: CGFloat, in available: CGFloat) -> CGFloat {
+        EditorPrefs.clamp(width, available: available)
+    }
+
     var body: some View {
-        // Both halves must claim the full height: an `HSplitView` whose children only have an ideal
-        // height collapses to it and sits along the bottom edge.
-        //
-        // The remembered width goes in as `idealWidth` and comes back out through the geometry reader
-        // (ADR-081). It is read once, into `@State`, on purpose: reading it in the body would let every
-        // width the drag reports re-propose the column, and the divider would fight the pointer.
-        HSplitView {
-            if prefs.showTree {
-                sidebar
-                    .frame(minWidth: EditorPrefs.minTreeWidth, idealWidth: initialTreeWidth,
-                           maxWidth: EditorPrefs.maxTreeWidth, maxHeight: .infinity)
-                    .background {
-                        GeometryReader { geo in
-                            // Rounded, so sub-point layout noise cannot drift the stored width.
-                            Color.clear.onChange(of: geo.size.width, initial: false) { _, width in
-                                EditorPrefs.shared.treeWidth = width.rounded()
-                            }
-                        }
-                    }
+        // A fixed-width tree column and a drag handle, not an `HSplitView`: the split view hands its
+        // first child the *maximum* its frame allows and ignores `idealWidth`, so a remembered width
+        // can be neither applied nor read back through it (ADR-081).
+        GeometryReader { geo in
+            let width = clamped(treeWidth, in: geo.size.width)
+            HStack(spacing: 0) {
+                if prefs.showTree {
+                    sidebar.frame(width: width)
+                    TreeResizeHandle(width: $treeWidth, base: width, available: geo.size.width)
+                }
+                FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
-                .frame(minWidth: 320, maxHeight: .infinity)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath
@@ -237,6 +242,41 @@ struct EditorPanel: View {
             }
             .listStyle(.sidebar)
         }
+    }
+}
+
+/// The draggable seam between the tree and the code view (ADR-081).
+///
+/// The gesture measures in **global** space. The handle moves as it is dragged, so a `.local`
+/// translation is taken against an origin that has just moved and the column chases the pointer —
+/// which is exactly how the first version of this behaved.
+private struct TreeResizeHandle: View {
+    @Binding var width: CGFloat
+    /// The width actually on screen when the drag starts (the stored width may be clamped smaller).
+    let base: CGFloat
+    let available: CGFloat
+    @State private var start: CGFloat?
+
+    var body: some View {
+        ZStack {
+            Color.clear
+            Divider()
+        }
+        .frame(width: 9)
+        .contentShape(Rectangle())
+        .pointerStyle(.columnResize)
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
+                    let from = start ?? base
+                    if start == nil { start = from }
+                    width = EditorPrefs.clamp(from + value.translation.width, available: available)
+                }
+                .onEnded { _ in
+                    start = nil
+                    EditorPrefs.shared.treeWidth = width.rounded()
+                }
+        )
     }
 }
 
@@ -327,6 +367,9 @@ struct FileEditorView: View {
 private struct CodeView: View {
     @Bindable var model: EditorModel
     @State private var editorState = SourceEditorState()
+    /// Held for the life of this view: a fresh provider on every body would make the editor drop and
+    /// redo all of its highlighting each update.
+    @State private var markdown = MarkdownHighlighter()
 
     var body: some View {
         SourceEditor(
@@ -337,7 +380,8 @@ private struct CodeView: View {
                 behavior: .init(isEditable: true, indentOption: .spaces(count: 4)),
                 peripherals: .init(showGutter: true, showMinimap: false, showReformattingGuide: false, showFoldingRibbon: false)
             ),
-            state: $editorState
+            state: $editorState,
+            highlightProviders: model.language.id == .markdown ? [markdown] : nil
         )
     }
 }

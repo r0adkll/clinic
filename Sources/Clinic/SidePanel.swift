@@ -45,7 +45,7 @@ final class PanelPane: Identifiable {
             // A hidden tree buys the panel back the width the tree was charging for (ADR-081). This
             // stays a constant deliberately: a minimum that tracked the live tree width would move the
             // panel's own divider while the tree divider was being dragged, and the two would fight.
-            case .files: EditorPrefs.shared.showTree ? 520 : 360
+            case .files: EditorPrefs.shared.showTree ? 500 : 360
             }
         }
     }
