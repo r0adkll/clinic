@@ -377,7 +377,7 @@ struct SessionRow: View {
                 }.buttonStyle(.plain)
             }
             if let tab, tab.isAttached, !tab.childExited {
-                Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(Color.accentColor).frame(width: 10)
+                Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(.secondary).frame(width: 10)
                     .help("Attached to a detached session (state not reported)")
             } else if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
                 Image(systemName: agent.needsAttention ? "exclamationmark.circle.fill" : "moon.zzz.fill")
@@ -484,51 +484,107 @@ struct ToolbarIcon: View {
     }
 }
 
-/// ADR-040 glyphs, system semantic colors only.
+/// The session status vocabulary (ADR-096).
+///
+/// Motion carries "running" and colour is spent only on the two states that want the user, so a
+/// sidebar with a dozen live sessions stays quiet. Nothing here is `Color.accentColor`: the accent
+/// already paints selection fills and active controls, so a status dot wearing it reads as chrome
+/// rather than as state — and it would mean something different for every user's accent.
 struct StateGlyph: View {
     let tab: Tab?
-    @State private var pulse = false
+    /// 10 pt is the sidebar's glyph column (ADR-077); the tab bar and ⌘K reuse it.
+    var size: CGFloat = 10
 
     var body: some View {
         Group {
-            if let tab {
-                if tab.unread {
-                    Circle().fill(Color.accentColor)
-                } else {
-                    switch tab.state {
-                    case .working, .launching:
-                        Circle().fill(Color.accentColor).opacity(pulse ? 0.35 : 1)
-                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
-                            .onAppear { pulse = true }
-                    case .waitingForPermission, .waitingForInput:
-                        Circle().fill(Color.orange)
-                    case .idle:
-                        Circle().fill(Color.secondary)
-                    case .exited:
-                        Circle().strokeBorder(Color.secondary, lineWidth: 1.5)
-                    case nil:
-                        Circle().fill(Color.secondary)
-                    }
-                }
-            } else {
+            switch appearance {
+            case .absent:
                 Circle().fill(.clear)
+            case .spinner(let tint):
+                SpinningArc(tint: tint, size: size)
+            case .attention(let color):
+                PulsingDot(color: color)
+            case .dot(let style):
+                Circle().fill(style)
+            case .ring:
+                Circle().strokeBorder(Color.secondary, lineWidth: 1.5)
             }
         }
-        .frame(width: 10, height: 10)
+        .frame(width: size, height: size)
         .help(helpText)
+    }
+
+    private enum Appearance {
+        case absent, spinner(AnyShapeStyle), attention(Color), dot(AnyShapeStyle), ring
+    }
+
+    /// Live state outranks the `unread` flag: a session that is working again has more to say than
+    /// the fact that its last answer went unseen.
+    private var appearance: Appearance {
+        guard let tab else { return .absent }
+        switch tab.state {
+        // The working arc takes no colour of its own, so it inherits the row's label — legible on a
+        // selected row, where a fixed dark tint would vanish into the selection fill.
+        case .working: return .spinner(AnyShapeStyle(.foreground))
+        case .launching: return .spinner(AnyShapeStyle(HierarchicalShapeStyle.secondary))
+        case .waitingForPermission, .waitingForInput: return .attention(.orange)
+        case .exited: return tab.unread ? .dot(AnyShapeStyle(Color.blue)) : .ring
+        case .idle, nil: return .dot(tab.unread ? AnyShapeStyle(Color.blue) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+        }
     }
 
     private var helpText: String {
         guard let tab else { return "Not open" }
-        if tab.unread { return "Finished — unread" }
         switch tab.state {
         case .launching: return "Starting"
         case .working: return "Working"
         case .waitingForPermission: return "Waiting for permission"
         case .waitingForInput: return "Waiting for your input"
-        case .idle: return "Idle at the prompt"
-        case .exited: return "Exited"
+        case .idle: return tab.unread ? "Finished — unread" : "Idle at the prompt"
+        case .exited: return tab.unread ? "Exited — unread" : "Exited"
         case nil: return "Shell"
         }
+    }
+}
+
+/// The `working` glyph: an open arc turning once a second. Reduce Motion freezes it — the gap in the
+/// ring still tells it apart from every solid dot.
+private struct SpinningArc: View {
+    let tint: AnyShapeStyle
+    let size: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
+
+    private var lineWidth: CGFloat { max(1.5, size * 0.18) }
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.7)
+            .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .padding(lineWidth / 2)     // the stroke straddles the path, so inset it back into `size`
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: turning)
+            .onAppear { if !reduceMotion { turning = true } }
+    }
+}
+
+/// Waiting on the user: a slow breath. Enough to catch the eye down a long sidebar, slower than the
+/// arc so the two motions never read as the same thing. Reduce Motion leaves the dot at full size.
+///
+/// The breath is deliberately shallow. A deeper one was tried and rejected: at the bottom of its
+/// swing the dot was smaller and fainter than the idle dot beside it, so the one state that wants
+/// the user was the quietest thing on screen for half of every cycle.
+private struct PulsingDot: View {
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .scaleEffect(breathing ? 0.85 : 1)
+            .opacity(breathing ? 0.7 : 1)
+            .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: breathing)
+            .onAppear { if !reduceMotion { breathing = true } }
     }
 }

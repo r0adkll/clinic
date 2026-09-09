@@ -68,7 +68,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let none = NSMenuItem(title: "No open sessions", action: nil, keyEquivalent: ""); none.isEnabled = false; menu.addItem(none)
         }
         for tab in sessionTabs {
-            let glyph: String = tab.unread ? "●" : { switch tab.state { case .working, .launching: return "◐"; case .waitingForPermission, .waitingForInput: return "!"; case .exited: return "○"; default: return "·" } }()
+            // Same precedence as StateGlyph (ADR-096): live state first, then the unread flag.
+            let glyph: String = switch tab.state {
+            case .working, .launching: "◐"
+            case .waitingForPermission, .waitingForInput: "!"
+            case .exited: tab.unread ? "●" : "○"
+            default: tab.unread ? "●" : "·"
+            }
             let mi = NSMenuItem(title: "\(glyph) \(tab.title)", action: #selector(reveal(_:)), keyEquivalent: "")
             mi.target = self; mi.representedObject = tab.id
             menu.addItem(mi)
