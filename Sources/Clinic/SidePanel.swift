@@ -35,13 +35,15 @@ final class PanelPane: Identifiable {
             }
         }
 
-        /// How narrow the panel may get while this pane is showing.
-        var minWidth: CGFloat {
+        /// How narrow the panel may get while this pane is showing. Main-actor because the Files pane's
+        /// answer depends on the shared tree preference (ADR-081).
+        @MainActor var minWidth: CGFloat {
             switch self {
             case .terminal: 400
             case .diff, .pr: 380
             case .attachments: 320
-            case .files: 520
+            // A hidden tree buys the panel back the width the tree was charging for (ADR-081).
+            case .files: EditorPrefs.shared.showTree ? 520 : 360
             }
         }
     }
@@ -70,7 +72,10 @@ final class PanelPane: Identifiable {
 final class SidePanel {
     private(set) var panes: [PanelPane] = []
     var selectedId: UUID? { didSet { syncWatchers() } }
-    var isVisible = false { didSet { syncWatchers() } }
+    /// Hiding the panel un-zooms it, so the two controls can never leave a tab with no way back (ADR-081).
+    var isVisible = false { didSet { if !isVisible { isZoomed = false }; syncWatchers() } }
+    /// The panel fills the tab, with the agent surface hidden behind it (ADR-081).
+    var isZoomed = false
 
     var selected: PanelPane? { panes.first { $0.id == selectedId } }
     var isEmpty: Bool { panes.isEmpty }
@@ -113,6 +118,7 @@ final class SidePanel {
         panes = []
         selectedId = nil
         isVisible = false
+        isZoomed = false
     }
 
     /// Only the pane on screen watches the file system; the others idle until they come back to the front.
@@ -128,8 +134,10 @@ final class SidePanel {
     }
 
     /// Everything that changes what the AppKit host must show, in one string (see `TerminalStack`).
+    /// The tree toggle is in here because it changes the Files pane's minimum width, which only the
+    /// host knows what to do with (ADR-081).
     var renderKey: String {
-        "\(isVisible)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
+        "\(isVisible)|\(isZoomed)|\(EditorPrefs.shared.showTree)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
     }
 }
 

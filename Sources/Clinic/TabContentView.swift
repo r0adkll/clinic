@@ -14,6 +14,8 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         let page: AnyView?
         let terminal: GhosttySurfaceView?
         let minWidth: CGFloat
+        /// The panel fills the tab, hiding the split view whole (ADR-081).
+        let zoomed: Bool
     }
 
     private let outer = NSSplitView()             // left: agent surface, right: panel
@@ -24,6 +26,8 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     /// True while the panel is being installed and positioned, when the split view hands it interim
     /// widths of its own that must not be mistaken for a width the user chose.
     private var isAdjusting = false
+    /// The panel is pinned over this whole view and the split view is hidden (ADR-081).
+    private(set) var isZoomed = false
 
     /// The width the user last settled the panel at: shared by every tab and window, kept across launches.
     /// Hiding the panel takes it out of the split view, so its own autosave cannot do this for us.
@@ -61,7 +65,8 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     func setPanel(_ content: PanelContent?) {
         guard let content else {
             if panel.superview != nil {
-                rememberWidth()
+                if !isZoomed { rememberWidth() }
+                leaveZoom()
                 outer.removeArrangedSubview(panel)
                 panel.removeFromSuperview()
                 panel.clear()
@@ -69,6 +74,12 @@ final class TabContentView: NSView, NSSplitViewDelegate {
             return
         }
         rightMin = content.minWidth
+        if content.zoomed {
+            panel.apply(content)
+            enterZoom()
+            return
+        }
+        leaveZoom()
         let isNew = panel.superview == nil
         if isNew {
             isAdjusting = true
@@ -115,16 +126,43 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         }
     }
 
+    /// Zoom: the panel comes out of the split view and is pinned over this whole view, and the split
+    /// view is hidden. Driving the divider to zero instead would resize the agent surface to zero
+    /// columns and reflow its scrollback; hidden, it keeps the size it had (ADR-081). The libghostty
+    /// surfaces are never re-parented — only the panel that hosts one moves.
+    private func enterZoom() {
+        guard !isZoomed else { return }
+        if panel.superview === outer {
+            rememberWidth()
+            outer.removeArrangedSubview(panel)
+            panel.removeFromSuperview()
+        }
+        isZoomed = true
+        outer.isHidden = true
+        panel.frame = bounds
+        panel.autoresizingMask = [.width, .height]
+        addSubview(panel)
+        panel.layoutSubtreeIfNeeded()
+    }
+
+    /// Takes the panel back out of zoom; `setPanel` then puts it into the split view as if it were new.
+    private func leaveZoom() {
+        guard isZoomed else { return }
+        isZoomed = false
+        panel.removeFromSuperview()
+        outer.isHidden = false
+    }
+
     /// Records the panel's current width. Ignores widths below any pane minimum, which are only ever the
     /// transient sizes a freshly added arranged subview passes through.
     private func rememberWidth() {
         let width = panel.frame.width
-        guard !isAdjusting, width >= 200, abs(width - Self.savedWidth) >= 1 else { return }
+        guard !isAdjusting, !isZoomed, panel.superview === outer, width >= 200, abs(width - Self.savedWidth) >= 1 else { return }
         Self.savedWidth = width
     }
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard notification.object as AnyObject? === outer, panel.superview != nil else { return }
+        guard notification.object as AnyObject? === outer, panel.superview === outer else { return }
         rememberWidth()
     }
 
@@ -206,12 +244,8 @@ final class SidePanelHostView: NSView {
         }
         terminalHost.show(c.terminal)
         terminalHost.isHidden = c.terminal == nil
-        // This view's frame comes from the split view, so its constraint subtree is only resolved on
-        // demand: without this a freshly added host stays at zero size and renders blank.
-        needsLayout = true
-        layoutSubtreeIfNeeded()
-        // This view's frame comes from the split view, so its constraint subtree is only resolved on
-        // demand: without this a freshly added host stays at zero size and renders blank.
+        // This view's frame comes from its host, so its constraint subtree is only resolved on demand:
+        // without this a freshly added host stays at zero size and renders blank.
         needsLayout = true
         layoutSubtreeIfNeeded()
     }

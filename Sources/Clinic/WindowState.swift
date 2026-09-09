@@ -107,7 +107,9 @@ struct TerminalStack: NSViewRepresentable {
         for tab in live { tab.contentView.setPanel(panelContent(tab)) }
         if visible, let tab = live.first(where: { $0.id == selectedId }) {
             DispatchQueue.main.async {
-                guard let w = tab.surface.window, w.firstResponder !== tab.surface, !tab.panel.isFront(.terminal) else { return }
+                // A zoomed panel hides the agent surface: focus must not fall back into it (ADR-081).
+                guard let w = tab.surface.window, w.firstResponder !== tab.surface,
+                      !tab.panel.isFront(.terminal), !tab.panel.isZoomed else { return }
                 w.makeFirstResponder(tab.surface)
             }
         }
@@ -128,7 +130,7 @@ struct TerminalStack: NSViewRepresentable {
         guard let pane = tab.panel.selected else {
             return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)),
                                                page: page(SidePanelEmptyState(tab: tab)),
-                                               terminal: nil, minWidth: 320)
+                                               terminal: nil, minWidth: 320, zoomed: tab.panel.isZoomed)
         }
         var page: AnyView?
         var terminal: GhosttySurfaceView?
@@ -140,7 +142,7 @@ struct TerminalStack: NSViewRepresentable {
         case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))
         }
         return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)), page: page,
-                                           terminal: terminal, minWidth: pane.kind.minWidth)
+                                           terminal: terminal, minWidth: pane.kind.minWidth, zoomed: tab.panel.isZoomed)
     }
 }
 

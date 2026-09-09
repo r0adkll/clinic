@@ -450,7 +450,7 @@ final class TabStore {
     func selectionChanged(in window: WindowState) {
         for t in tabs(in: window) {
             let hidden = (t.id != window.selectedTabId)
-            t.surface.isOccluded = hidden
+            t.surface.isOccluded = hidden || t.panel.isZoomed
             t.panelSurface?.isOccluded = hidden || !t.panel.isFront(.terminal)
         }
         if let tab = selectedTab(in: window) {
@@ -574,6 +574,25 @@ final class TabStore {
         focusPanel(tab)
     }
 
+    /// ⌘⌥⇧J: the panel fills the tab, with the agent surface hidden behind it (ADR-081). Zooming a
+    /// hidden panel shows it, so the action always lands somewhere.
+    func togglePanelZoom(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        if tab.panel.isZoomed {
+            tab.panel.isZoomed = false
+        } else {
+            tab.panel.isVisible = true
+            tab.panel.isZoomed = true
+        }
+        focusPanel(tab)
+    }
+
+    /// ⌘⌃E: the Files pane's tree, a preference every pane shares (ADR-081).
+    func toggleFileTree() { EditorPrefs.shared.showTree.toggle() }
+
+    /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
+    var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
+
     func selectPane(_ pane: PanelPane, in tab: Tab) {
         tab.panel.select(pane)
         focusPanel(tab)
@@ -646,11 +665,17 @@ final class TabStore {
         return pane
     }
 
-    /// Keeps the shell pane's occlusion and the first responder in step with what the panel is showing.
+    /// Keeps both surfaces' occlusion and the first responder in step with what the panel is showing.
+    /// A zoomed panel hides the agent surface, so it stops rendering and must not keep the keyboard.
     private func focusPanel(_ tab: Tab) {
-        tab.panelSurface?.isOccluded = window(of: tab).selectedTabId != tab.id || !tab.panel.isFront(.terminal)
-        let target = tab.panel.isFront(.terminal) ? tab.panelSurface : tab.surface
-        DispatchQueue.main.async { target?.window?.makeFirstResponder(target) }
+        let unselected = window(of: tab).selectedTabId != tab.id
+        tab.panelSurface?.isOccluded = unselected || !tab.panel.isFront(.terminal)
+        tab.surface.isOccluded = unselected || tab.panel.isZoomed
+        let target: GhosttySurfaceView? = if tab.panel.isFront(.terminal) { tab.panelSurface }
+                                          else if tab.panel.isZoomed { nil }
+                                          else { tab.surface }
+        let window = tab.surface.window
+        DispatchQueue.main.async { window?.makeFirstResponder(target) }
     }
 
     /// ⌘J: the shell pane.

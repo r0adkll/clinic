@@ -98,6 +98,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
                 if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
+                // `-ClinicHideFileTree YES` (ADR-081): the Files pane with its tree collapsed.
+                if UserDefaults.standard.bool(forKey: "ClinicHideFileTree") { EditorPrefs.shared.showTree = false }
+            }
+        }
+        // `-ClinicZoomPanelAfterLaunch <seconds>` (ADR-081): let the panel settle, then zoom it over the tab.
+        let zoomAfter = UserDefaults.standard.double(forKey: "ClinicZoomPanelAfterLaunch")
+        if zoomAfter > 0 { Task { try? await Task.sleep(for: .seconds(zoomAfter)); tabs.togglePanelZoom() } }
+        // `-ClinicOpenFileWindowOnLaunch <path>` (ADR-081): pop a file straight out into its own window.
+        if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileWindowOnLaunch"), !file.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                let root = tabs.selectedTab.map { $0.pwd ?? $0.projectPath } ?? (file as NSString).deletingLastPathComponent
+                FileWindowController.show(path: file, root: root)
             }
         }
         // `-ClinicOpenDiffPanelOnLaunch YES [-ClinicDiffScope turn|session|workingTree|branch]`
@@ -225,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishTermination() {
+        FileWindowController.closeAll()
         for tab in tabs.tabs { tab.surface.free(); tab.panelSurface?.free() }
         hooks.stop()
         mcp.stop()
@@ -295,6 +309,10 @@ struct ClinicCommands: Commands {
         CommandMenu("Panel") {
             Button(tabs.selectedTab?.panel.isVisible == true ? "Hide Panel" : "Show Panel") { tabs.togglePanelVisibility() }
                 .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
+            Button(tabs.selectedTab?.panel.isZoomed == true ? "Unzoom Panel" : "Zoom Panel") { tabs.togglePanelZoom() }
+                .keyboardShortcut(key(.zoomPanel)).disabled(tabs.selectedTab == nil)
+            Toggle("Show File Tree", isOn: Binding(get: { EditorPrefs.shared.showTree }, set: { EditorPrefs.shared.showTree = $0 }))
+                .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.isFilesPaneFront)
             Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)

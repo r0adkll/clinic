@@ -8,7 +8,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case mcpServers, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
-    case togglePanelVisibility, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
+    case togglePanelVisibility, zoomPanel, toggleFileTree, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
 
     var id: String { rawValue }
 
@@ -41,6 +41,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleAttachments: "Images Panel Tab"
         case .togglePRPage: "Pull Request Panel Tab"
         case .togglePanelVisibility: "Show / Hide Panel"
+        case .zoomPanel: "Zoom Panel"
+        case .toggleFileTree: "Show / Hide File Tree"
         case .nextPanelTab: "Next Panel Tab"
         case .previousPanelTab: "Previous Panel Tab"
         case .closePanelTab: "Close Panel Tab"
@@ -55,7 +57,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .mcpServers, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .togglePRPage,
-             .togglePanelVisibility, .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
+             .togglePanelVisibility, .zoomPanel, .toggleFileTree,
+             .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
         case .nextTab, .previousTab: "Tabs"
         }
     }
@@ -91,6 +94,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleAttachments: "cmd+shift+i"
         case .togglePRPage: "cmd+shift+p"
         case .togglePanelVisibility: "cmd+opt+j"
+        case .zoomPanel: "cmd+opt+shift+j"
+        case .toggleFileTree: "cmd+ctrl+e"
         case .nextPanelTab: "cmd+ctrl+]"
         case .previousPanelTab: "cmd+ctrl+["
         case .closePanelTab: "cmd+ctrl+w"

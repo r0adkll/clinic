@@ -15,9 +15,18 @@ struct TabBarView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 5)
             }
-            // The panel's show/hide lives here, always available whatever the panel holds (ADR-079).
+            // The panel's show/hide and zoom live here, always available whatever the panel holds
+            // (ADR-079, ADR-081): both act on the panel rather than on anything inside it.
             if let tab = tabs.selectedTab(in: window), !tab.isReplay {
                 Divider().frame(height: 18)
+                Button { tabs.togglePanelZoom(tab) } label: {
+                    Image(systemName: tab.panel.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .foregroundStyle(tab.panel.isZoomed ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .padding(.leading, 8)
+                .help(tab.panel.isZoomed ? "Shrink the panel back beside the session" + bindings.hint(.zoomPanel)
+                                         : "Expand the panel to fill the window" + bindings.hint(.zoomPanel))
                 Button { tabs.togglePanelVisibility(tab) } label: {
                     Image(systemName: "sidebar.right")
                         .foregroundStyle(tab.panel.isVisible ? Color.accentColor : Color.secondary)

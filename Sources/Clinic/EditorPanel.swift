@@ -4,7 +4,22 @@ import CodeEditSourceEditor
 import CodeEditLanguages
 import ClinicCore
 
+/// Layout choices the Files panes and file windows share (ADR-081). Held in one observable object so
+/// hiding the tree in one pane hides it in every other, and persisted: it says how you read code, not
+/// how one pane is arranged.
+@MainActor
+@Observable
+final class EditorPrefs {
+    static let shared = EditorPrefs()
+    static let showTreeKey = "ClinicEditorShowTree"
+
+    var showTree: Bool { didSet { UserDefaults.standard.set(showTree, forKey: Self.showTreeKey) } }
+
+    private init() { showTree = UserDefaults.standard.object(forKey: Self.showTreeKey) as? Bool ?? true }
+}
+
 /// Per-tab editor state (ADR-057): root, index, open file, dirty flag, external-change watch.
+/// A file window (ADR-081) uses one too, with `tree: false`: it indexes for quick open but builds no tree.
 @MainActor
 @Observable
 final class EditorModel {
@@ -23,9 +38,14 @@ final class EditorModel {
     private var fileModified: Date?
     var recentlyOpened: [String] = []
     private(set) var tree: [FileTreeNode] = []
+    /// False for a file window, which shows one file and never a tree.
+    private let buildsTree: Bool
+    /// Told when a different file is opened, so a file window can re-title itself (ADR-081).
+    @ObservationIgnored var onOpen: ((String) -> Void)?
 
-    init(root: String) {
+    init(root: String, tree buildsTree: Bool = true) {
         self.root = root
+        self.buildsTree = buildsTree
         self.index = FileIndex(root: root)
         watch()
         Task { await reloadTree() }
@@ -33,6 +53,7 @@ final class EditorModel {
 
     /// Rebuilds the tree from the flat index (hidden entries filtered per `showHidden`).
     func reloadTree() async {
+        guard buildsTree else { return }
         let files = await index.files()
         tree = FileTreeNode.build(from: files, showHidden: showHidden)
     }
@@ -79,6 +100,7 @@ final class EditorModel {
             recentlyOpened.removeAll { $0 == path }
             recentlyOpened.insert(path, at: 0)
             if recentlyOpened.count > 20 { recentlyOpened.removeLast() }
+            onOpen?(path)
         } catch { self.error = "\(error)" }
     }
 
@@ -123,21 +145,22 @@ final class EditorModel {
     }
 }
 
-/// Right-column editor: file tree + quick open + agent files beside a tree-sitter editor (ADR-057).
+/// Right-column Files pane: an optional file tree beside the shared code view (ADR-057, ADR-081).
 struct EditorPanel: View {
     @Environment(SessionStore.self) private var sessions
     let tab: Tab
     @Bindable var model: EditorModel
-    @State private var editorState = SourceEditorState()
-    @State private var quickOpen = false
-    @FocusState private var editorFocused: Bool
+    private var prefs: EditorPrefs { EditorPrefs.shared }
 
     var body: some View {
         // Both halves must claim the full height: an `HSplitView` whose children only have an ideal
         // height collapses to it and sits along the bottom edge (visible with no file open).
         HSplitView {
-            sidebar.frame(minWidth: 180, idealWidth: 220, maxWidth: 360, maxHeight: .infinity)
-            editor.frame(minWidth: 320, maxHeight: .infinity)
+            if prefs.showTree {
+                sidebar.frame(minWidth: 180, idealWidth: 220, maxWidth: 360, maxHeight: .infinity)
+            }
+            FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
+                .frame(minWidth: 320, maxHeight: .infinity)
         }
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath
@@ -145,11 +168,6 @@ struct EditorPanel: View {
             if let repo = await GitRepository.discover(from: dir) { root = repo.root }
             model.rebind(root: root)
         }
-        .sheet(isPresented: $quickOpen) { QuickOpenSheet(model: model) }
-        .alert("File changed on disk", isPresented: $model.externalChangePending) {
-            Button("Reload") { model.reloadFromDisk() }
-            Button("Keep mine", role: .cancel) { model.externalChangePending = false }
-        } message: { Text("You have unsaved edits to \((model.openPath as NSString?)?.lastPathComponent ?? "this file").") }
     }
 
     private var sidebar: some View {
@@ -157,7 +175,6 @@ struct EditorPanel: View {
             HStack(spacing: 6) {
                 Text((model.root as NSString).lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1).help(model.root)
                 Spacer()
-                Button { quickOpen = true } label: { Image(systemName: "magnifyingglass") }.buttonStyle(.borderless).help("Quick open (⌘⇧O)").keyboardShortcut("o", modifiers: [.command, .shift])
                 Toggle(isOn: $model.showHidden) { Image(systemName: "eye") }.toggleStyle(.button).buttonStyle(.borderless).help("Show hidden files")
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -168,6 +185,7 @@ struct EditorPanel: View {
                         ForEach(files.reversed(), id: \.self) { path in
                             Label((path as NSString).lastPathComponent, systemImage: "pencil.line").lineLimit(1).help(path)
                                 .contentShape(Rectangle()).onTapGesture { model.open(absolute: path) }
+                                .contextMenu { FileRowMenu(path: path, root: model.root) }
                         }
                     }
                 }
@@ -180,6 +198,7 @@ struct EditorPanel: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { model.open(relative: node.relativePath) }
                                 .listRowBackground(model.relativeOpenPath == node.relativePath ? Color.accentColor.opacity(0.15) : Color.clear)
+                                .contextMenu { FileRowMenu(path: (model.root as NSString).appendingPathComponent(node.relativePath), root: model.root) }
                         }
                     }
                 }
@@ -187,27 +206,33 @@ struct EditorPanel: View {
             .listStyle(.sidebar)
         }
     }
+}
 
-    private var editor: some View {
+/// Context menu shared by the tree rows and the agent-files list (ADR-081).
+struct FileRowMenu: View {
+    let path: String
+    let root: String
+
+    var body: some View {
+        Button("Open in New Window") { FileWindowController.show(path: path, root: root) }
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
+    }
+}
+
+/// The code view and its header: the right half of the Files pane, and the whole of a file window
+/// (ADR-081). Quick open and the external-change prompt live here, so both hosts get them.
+struct FileEditorView: View {
+    @Bindable var model: EditorModel
+    /// The panel shows the tree toggle and the pop-out; a file window is already popped out and has no tree.
+    var showsTreeToggle = false
+    var showsPopOut = false
+    @State private var editorState = SourceEditorState()
+    @State private var quickOpen = false
+
+    var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if let rel = model.relativeOpenPath {
-                    Text(rel).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.head)
-                    if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
-                    Text(model.language.tsName).font(.caption).foregroundStyle(.tertiary)
-                } else {
-                    Text("No file open").foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.openPath != nil {
-                    Button("Revert") { model.revert() }.disabled(!model.isDirty)
-                    Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command).disabled(!model.isDirty)
-                    Button { if let p = model.openPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } } label: { Image(systemName: "folder") }.help("Reveal in Finder")
-                }
-            }
-            .controlSize(.small)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(.bar)
+            header
             Divider()
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).padding(6) }
             if model.openPath != nil {
@@ -225,6 +250,48 @@ struct EditorPanel: View {
                 ContentUnavailableView("Pick a file", systemImage: "doc.text", description: Text("From the tree, the agent's files, or ⌘⇧O."))
             }
         }
+        .sheet(isPresented: $quickOpen) { QuickOpenSheet(model: model) }
+        .alert("File changed on disk", isPresented: $model.externalChangePending) {
+            Button("Reload") { model.reloadFromDisk() }
+            Button("Keep mine", role: .cancel) { model.externalChangePending = false }
+        } message: { Text("You have unsaved edits to \((model.openPath as NSString?)?.lastPathComponent ?? "this file").") }
+    }
+
+    /// The header is on screen in both tree states, so the tree toggle can never hide itself.
+    private var header: some View {
+        HStack(spacing: 8) {
+            if showsTreeToggle {
+                Button { EditorPrefs.shared.showTree.toggle() } label: {
+                    Image(systemName: EditorPrefs.shared.showTree ? "sidebar.left" : "sidebar.leading")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(EditorPrefs.shared.showTree ? Color.accentColor : Color.secondary)
+                .help(EditorPrefs.shared.showTree ? "Hide the file tree (⌘⌃E)" : "Show the file tree (⌘⌃E)")
+            }
+            Button { quickOpen = true } label: { Image(systemName: "magnifyingglass") }
+                .buttonStyle(.borderless).help("Quick open (⌘⇧O)").keyboardShortcut("o", modifiers: [.command, .shift])
+            if let rel = model.relativeOpenPath {
+                Text(rel).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.head)
+                if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
+                Text(model.language.tsName).font(.caption).foregroundStyle(.tertiary)
+            } else {
+                Text("No file open").foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let path = model.openPath {
+                Button("Revert") { model.revert() }.disabled(!model.isDirty)
+                Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command).disabled(!model.isDirty)
+                if showsPopOut {
+                    Button { FileWindowController.show(path: path, root: model.root) } label: { Image(systemName: "macwindow") }
+                        .help("Open this file in its own window")
+                }
+                Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: { Image(systemName: "folder") }
+                    .help("Reveal in Finder")
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.bar)
     }
 }
 
