@@ -1,6 +1,7 @@
 import Foundation
 import ServiceManagement
 import os
+import ClinicCore
 
 /// The launchd half of *Run automations when Clinic isn't open* (ADR-095).
 ///
@@ -28,6 +29,10 @@ enum AutomationWake {
     /// Settings — so the caller gets the error to show rather than a silent no-op.
     @discardableResult
     static func setEnabled(_ enabled: Bool) -> String? {
+        // Registering from a smoke instance would install a real LaunchAgent, pointing at the
+        // installed app, that outlives the test — and the preference behind it is shared with the
+        // live app because `CLINIC_APP_SUPPORT` does not isolate `UserDefaults`.
+        guard !ClinicPaths.isSmokeInstance else { return "Not available in a smoke instance." }
         let service = SMAppService.agent(plistName: plistName)
         do {
             if enabled {
@@ -47,7 +52,7 @@ enum AutomationWake {
     // MARK: - Quit suppression
 
     private static var markerURL: URL {
-        ClinicPathsShim.directory.appendingPathComponent("wake-suppressed", isDirectory: false)
+        ClinicPaths.directory.appendingPathComponent("wake-suppressed", isDirectory: false)
     }
 
     /// Called when the user quits Clinic on purpose. Until the next login the wake agent will find
@@ -73,21 +78,6 @@ enum AutomationWake {
         var mib: [Int32] = [CTL_KERN, KERN_BOOTTIME]
         guard sysctl(&mib, 2, &tv, &size, nil, 0) == 0 else { return 0 }
         return Double(tv.tv_sec)
-    }
-}
-
-/// `ClinicPaths` lives in ClinicCore; this keeps the wake controller from importing it just for one
-/// directory, and honours `CLINIC_APP_SUPPORT` the same way so a smoke instance never writes a marker
-/// the real app would then obey.
-enum ClinicPathsShim {
-    static var directory: URL {
-        let base: URL
-        if let o = ProcessInfo.processInfo.environment["CLINIC_APP_SUPPORT"], !o.isEmpty {
-            base = URL(fileURLWithPath: o, isDirectory: true)
-        } else {
-            base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        }
-        return base.appendingPathComponent("Clinic", isDirectory: true)
     }
 }
 

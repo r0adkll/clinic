@@ -19,7 +19,13 @@ final class UsageService {
     var isConnected: Bool { UserDefaults.standard.bool(forKey: Self.connectedKey) }
 
     /// Starts polling only if the user connected earlier.
+    ///
+    /// Never in a smoke instance. `CLINIC_APP_SUPPORT` does not isolate `UserDefaults`, so a smoke run
+    /// inherits the real app's consent and polls on launch — and because the smoke build lives at a
+    /// different path than the keychain item's ACL trusts, macOS puts up a password prompt over the
+    /// window under test. Connecting by hand still works if a run actually needs usage.
     func start() {
+        guard !ClinicPaths.isSmokeInstance else { return }
         guard isConnected, timer == nil else { return }
         timer = Task { [weak self] in
             while !Task.isCancelled {

@@ -48,4 +48,16 @@ public enum ClinicPaths {
     }
     /// `…/Application Support/Clinic`
     public static var directory: URL { appSupport.appendingPathComponent("Clinic", isDirectory: true) }
+
+    /// True when this process is a **smoke instance** — one launched with `CLINIC_APP_SUPPORT` so it
+    /// keeps its own state, sockets and chats away from the app the user is really using (ADR-038).
+    ///
+    /// Worth knowing what that variable does *not* isolate: `UserDefaults` is keyed by bundle id, so
+    /// every preference — shortcut overrides, panel visibility, quit behaviour, the usage consent —
+    /// is shared with the live app. A smoke run therefore inherits real consent it cannot honour and
+    /// can write preferences the real app will obey. Anything that reaches outside Clinic's own
+    /// container on the strength of a stored preference must check this first.
+    public static var isSmokeInstance: Bool {
+        !(ProcessInfo.processInfo.environment["CLINIC_APP_SUPPORT"] ?? "").isEmpty
+    }
 }
