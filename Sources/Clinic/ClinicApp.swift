@@ -123,12 +123,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `-ClinicAutomationDraftOnLaunch <template-id|blank>`: open the editor straight away, so its
         // layout can be screenshotted without synthesising clicks into the gallery.
         if let which = UserDefaults.standard.string(forKey: "ClinicAutomationDraftOnLaunch"), !which.isEmpty {
-            let target: Automation.Target = sessions.projects.first { !SessionStore.isChats($0.path) }
-                .map { .project(path: $0.path) } ?? .chat
-            automations.draft = AutomationTemplate.bundled.first { $0.id == which }
-                .map { AutomationDraft(template: $0, target: target) }
-                ?? AutomationDraft(target: target)
             tabs.activeWindow.screen = .automations
+            Task { @MainActor in
+                // Wait for the session scan: projects are discovered from transcripts, so reading them
+                // synchronously here picks nothing and the draft falls back to Chat.
+                await sessions.initialScan?.value
+                let target: Automation.Target = sessions.projects.first { !SessionStore.isChats($0.path) }
+                    .map { .project(path: $0.path) } ?? .chat
+                automations.draft = AutomationTemplate.bundled.first { $0.id == which }
+                    .map { AutomationDraft(template: $0, target: target) }
+                    ?? AutomationDraft(target: target)
+            }
         }
 
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
