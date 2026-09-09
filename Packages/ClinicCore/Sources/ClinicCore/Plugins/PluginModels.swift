@@ -27,6 +27,48 @@ public struct MarketplaceRef: Sendable, Hashable, Identifiable {
     }
 }
 
+/// What a plugin can add to a session. A Claude Code plugin is a bundle, not one thing: the same repo
+/// may ship a skill, a subagent and an MCP server. This is the axis the Marketplace filters on, and the
+/// order is fixed — the filter bar should not reshuffle itself as the catalogue changes underneath it.
+public enum PluginKind: String, Sendable, Hashable, CaseIterable, Identifiable {
+    case skills, agents, commands, mcpServers, hooks, lspServers
+
+    public var id: String { rawValue }
+
+    /// The filter chip's word. Short, because six of them share one row.
+    public var label: String {
+        switch self {
+        case .skills: "Skills"
+        case .agents: "Agents"
+        case .commands: "Commands"
+        case .mcpServers: "MCP"
+        case .hooks: "Hooks"
+        case .lspServers: "LSP"
+        }
+    }
+
+    /// The detail pane's heading, where there is room to say it in full.
+    public var groupLabel: String {
+        switch self {
+        case .mcpServers: "MCP servers"
+        case .lspServers: "LSP servers"
+        default: label
+        }
+    }
+
+    /// `server.rack` is deliberately the MCP Servers screen's own glyph (ADR-093): one idea, one mark.
+    public var symbol: String {
+        switch self {
+        case .skills: "graduationcap"
+        case .agents: "person.2"
+        case .commands: "slash.circle"
+        case .mcpServers: "server.rack"
+        case .hooks: "bolt"
+        case .lspServers: "curlybraces"
+        }
+    }
+}
+
 /// What a plugin is made of, from `plugin-catalog-cache.json`.
 public struct PluginComponents: Sendable, Hashable {
     public var skills: [String] = []
@@ -38,16 +80,27 @@ public struct PluginComponents: Sendable, Hashable {
 
     public init() {}
 
-    public var isEmpty: Bool {
-        skills.isEmpty && agents.isEmpty && commands.isEmpty && hooks.isEmpty && mcpServers.isEmpty && lspServers.isEmpty
+    public func names(of kind: PluginKind) -> [String] {
+        switch kind {
+        case .skills: skills
+        case .agents: agents
+        case .commands: commands
+        case .mcpServers: mcpServers
+        case .hooks: hooks
+        case .lspServers: lspServers
+        }
     }
 
-    /// `[("Skills", [...]), ("Agents", [...])]` — only the kinds this plugin actually has.
-    public var groups: [(label: String, names: [String])] {
-        [("Skills", skills), ("Agents", agents), ("Commands", commands),
-         ("Hooks", hooks), ("MCP servers", mcpServers), ("LSP servers", lspServers)]
-            .filter { !$0.1.isEmpty }
-            .map { (label: $0.0, names: $0.1) }
+    public func count(of kind: PluginKind) -> Int { names(of: kind).count }
+
+    /// The kinds this plugin actually has, in `PluginKind`'s order.
+    public var kinds: [PluginKind] { PluginKind.allCases.filter { !names(of: $0).isEmpty } }
+
+    public var isEmpty: Bool { kinds.isEmpty }
+
+    /// `[(.skills, [...]), (.agents, [...])]` — only the kinds this plugin actually has.
+    public var groups: [(kind: PluginKind, names: [String])] {
+        kinds.map { (kind: $0, names: names(of: $0)) }
     }
 }
 
@@ -84,6 +137,12 @@ public struct PluginEntry: Sendable, Hashable, Identifiable {
     public var isBlocked: Bool { blockedReason != nil }
 
     public var homepageURL: URL? { homepage.flatMap(URL.init(string:)) }
+
+    /// The kinds this plugin adds, empty when the catalogue cache has not been written yet — an unknown
+    /// inventory reads as "adds nothing", which keeps it out of a kind filter rather than into every one.
+    public var kinds: [PluginKind] { components?.kinds ?? [] }
+
+    public func provides(_ kind: PluginKind) -> Bool { (components?.count(of: kind) ?? 0) > 0 }
 
     /// Matches the Discover search field: name, description, author, category and marketplace.
     public func matches(_ query: String) -> Bool {

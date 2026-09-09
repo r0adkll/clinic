@@ -48,6 +48,8 @@ final class MarketplaceModel {
     var section: Section = .discover
     var query = ""
     var category: String?
+    /// The kind of thing a plugin adds — skills, agents, commands, MCP servers… nil is "All".
+    var kind: PluginKind?
     var sort: Sort = .popular
     var selectedId: String?
     var marketplaceSource = ""
@@ -102,23 +104,46 @@ final class MarketplaceModel {
         Set(entries.compactMap(\.category)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    /// The Discover list: search, category, then the chosen order.
-    var filtered: [PluginEntry] {
-        let base = entries.filter { entry in
-            entry.matches(query) && (category == nil || entry.category == category)
-        }
-        switch sort {
-        case .name: return base
-        case .popular: return base.sorted { ($0.installCount ?? -1) > ($1.installCount ?? -1) }
+    /// A section's list with everything *except* the kind chips applied. The chips count against this,
+    /// so each one's number is exactly what clicking it would show.
+    private func base(_ section: Section) -> [PluginEntry] {
+        switch section {
+        case .discover:
+            let base = entries.filter { entry in
+                entry.matches(query) && (category == nil || entry.category == category)
+            }
+            switch sort {
+            case .name: return base
+            case .popular: return base.sorted { ($0.installCount ?? -1) > ($1.installCount ?? -1) }
+            }
+        case .installed: return installed.filter { $0.matches(query) }
+        case .marketplaces: return []
         }
     }
 
+    var unfiltered: [PluginEntry] { base(section) }
+
     var visible: [PluginEntry] {
-        switch section {
-        case .discover: filtered
-        case .installed: installed.filter { $0.matches(query) }
-        case .marketplaces: []
+        guard let kind else { return unfiltered }
+        return unfiltered.filter { $0.provides(kind) }
+    }
+
+    /// Kind → how many of `unfiltered` provide it, in one pass; the filter bar reads the whole dictionary
+    /// rather than counting six times per redraw.
+    var kindCounts: [PluginKind: Int] {
+        var counts: [PluginKind: Int] = [:]
+        for entry in unfiltered {
+            for kind in entry.kinds { counts[kind, default: 0] += 1 }
         }
+        return counts
+    }
+
+    /// The number on each segment: that section's own filters, plus the kind chips, which span sections.
+    func count(of section: Section) -> Int {
+        guard section != .marketplaces else { return marketplaces.count }
+        let base = base(section)
+        guard let kind else { return base.count }
+        return base.count { $0.provides(kind) }
     }
 
     var selected: PluginEntry? { selectedId.flatMap { id in entries.first { $0.id == id } } }

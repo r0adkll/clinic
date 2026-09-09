@@ -69,16 +69,37 @@ struct MarketplaceScreen: View {
                 Spacer(minLength: 0)
                 if model.isLoading { ProgressView().controlSize(.small) }
             }
+            if model.section != .marketplaces { kindFilter }
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
     }
 
-    private func label(for section: MarketplaceModel.Section) -> String {
-        switch section {
-        case .discover: model.entries.isEmpty ? "Discover" : "Discover (\(model.filtered.count))"
-        case .installed: model.installed.isEmpty ? "Installed" : "Installed (\(model.installed.count))"
-        case .marketplaces: model.marketplaces.isEmpty ? "Marketplaces" : "Marketplaces (\(model.marketplaces.count))"
+    /// The kind chips: a plugin is a bundle, so this filters by what it *adds* — skills, agents,
+    /// commands, MCP servers — across whichever section is showing.
+    @ViewBuilder
+    private var kindFilter: some View {
+        let counts = model.kindCounts
+        // Only kinds something in the current list has, plus the selected one even when a search has
+        // just emptied it — a chip that filters must stay on screen to be turned off.
+        let kinds = PluginKind.allCases.filter { counts[$0, default: 0] > 0 || model.kind == $0 }
+        if !kinds.isEmpty {
+            HStack(spacing: 6) {
+                PluginKindChip(label: "All", count: model.unfiltered.count, selected: model.kind == nil) {
+                    model.kind = nil
+                }
+                ForEach(kinds) { kind in
+                    PluginKindChip(kind: kind, count: counts[kind, default: 0], selected: model.kind == kind) {
+                        model.kind = model.kind == kind ? nil : kind
+                    }
+                }
+                Spacer(minLength: 0)
+            }
         }
+    }
+
+    private func label(for section: MarketplaceModel.Section) -> String {
+        let count = model.count(of: section)
+        return count == 0 ? section.label : "\(section.label) (\(count))"
     }
 
     // MARK: Content
@@ -123,12 +144,17 @@ struct MarketplaceScreen: View {
         .listStyle(.inset)
         .overlay {
             if model.visible.isEmpty && !model.isLoading {
-                if model.section == .installed {
+                if model.section == .installed && model.installed.isEmpty {
                     ContentUnavailableView("No plugins installed", systemImage: "shippingbox",
                                            description: Text("Install one from Discover."))
                 } else if model.entries.isEmpty {
                     ContentUnavailableView("No plugins to show", systemImage: "shippingbox",
                                            description: Text("Add a marketplace to see what it offers."))
+                } else if let kind = model.kind {
+                    ContentUnavailableView("No \(kind.groupLabel.lowercased())", systemImage: kind.symbol,
+                                           description: Text(model.query.isEmpty
+                                               ? "Nothing here adds \(kind.groupLabel.lowercased())."
+                                               : "Nothing matching “\(model.query)” adds \(kind.groupLabel.lowercased())."))
                 } else {
                     ContentUnavailableView.search(text: model.query)
                 }
@@ -175,6 +201,14 @@ struct PluginRow: View {
                     if let category = entry.category {
                         Text(category).font(.caption2).foregroundStyle(.tertiary)
                             .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                    // What it adds, in the same order the filter chips run: a row filtered to Skills
+                    // should show why it is here.
+                    ForEach(entry.kinds) { kind in
+                        Label("\(entry.components?.count(of: kind) ?? 0)", systemImage: kind.symbol)
+                            .font(.caption2).foregroundStyle(.tertiary).labelStyle(.titleAndIcon)
+                            .help("\(entry.components?.count(of: kind) ?? 0) \(kind.groupLabel.lowercased())")
                     }
                 }
             }
@@ -265,9 +299,10 @@ struct PluginDetail: View {
     private func inventory(_ components: PluginComponents) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("What it adds").font(.callout.weight(.semibold))
-            ForEach(components.groups, id: \.label) { group in
+            ForEach(components.groups, id: \.kind) { group in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(group.label) (\(group.names.count))").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Label("\(group.kind.groupLabel) (\(group.names.count))", systemImage: group.kind.symbol)
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     Text(group.names.joined(separator: ", ")).font(.caption).foregroundStyle(.primary).textSelection(.enabled)
                 }
             }
@@ -450,6 +485,37 @@ struct ConfirmCommandSheet: View {
         }
         .padding(20)
         .frame(width: 520)
+    }
+}
+
+/// One kind filter. Takes the accent tint the new-session control bar uses for an active pill, so a
+/// narrowed list is visible from across the screen.
+struct PluginKindChip: View {
+    var kind: PluginKind?
+    var label: String?
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let kind { Image(systemName: kind.symbol).imageScale(.small) }
+                Text(label ?? kind?.label ?? "")
+                Text("\(count)").monospacedDigit()
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.tertiary))
+            }
+            .font(.callout)
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.07), in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(kind.map { "Show only plugins that add \($0.groupLabel.lowercased())" } ?? "Show every plugin")
     }
 }
 

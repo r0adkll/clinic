@@ -137,6 +137,32 @@ import Testing
         #expect(bare.first { $0.id == "tdd@matt" }?.author == nil)
     }
 
+    @Test func kindsDescribeWhatAPluginAdds() {
+        let entries = PluginCatalog.merge(
+            list: PluginCatalog.parseList(Data(listJSON.utf8)),
+            cache: PluginCatalog.parseCatalogCache(Data(cacheJSON.utf8)))
+
+        let tdd = try! #require(entries.first { $0.id == "tdd@matt" })
+        // Declaration order, not the order the JSON happened to list them in.
+        #expect(tdd.kinds == [.skills, .mcpServers])
+        #expect(tdd.provides(.skills) && tdd.provides(.mcpServers))
+        #expect(!tdd.provides(.agents) && !tdd.provides(.hooks))
+        #expect(tdd.components?.count(of: .skills) == 2)
+        #expect(tdd.components?.groups.map(\.kind) == [.skills, .mcpServers])
+        #expect(tdd.components?.groups.first?.names == ["tdd", "grilling"])
+
+        // No cache entry means an unknown inventory, which must not answer yes to every filter.
+        let aikido = try! #require(entries.first { $0.id == "aikido@matt" })
+        #expect(aikido.components == nil && aikido.kinds.isEmpty)
+        #expect(PluginKind.allCases.allSatisfy { !aikido.provides($0) })
+    }
+
+    @Test func kindLabelsAreShortInTheBarAndFullInTheDetail() {
+        #expect(PluginKind.mcpServers.label == "MCP" && PluginKind.mcpServers.groupLabel == "MCP servers")
+        #expect(PluginKind.skills.label == "Skills" && PluginKind.skills.groupLabel == "Skills")
+        #expect(PluginKind.allCases.map(\.rawValue) == ["skills", "agents", "commands", "mcpServers", "hooks", "lspServers"])
+    }
+
     @Test func searchMatchesEveryFacet() {
         var e = PluginEntry(id: "tdd@matt", name: "tdd", marketplace: "matt", description: "Test-driven development")
         e.author = "Matt Pocock"; e.category = "productivity"
