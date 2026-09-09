@@ -176,7 +176,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { try? await Task.sleep(for: .seconds(2)); NotificationCenter.default.post(name: .clinicGenerateIcon, object: path) }
         }
         if UserDefaults.standard.bool(forKey: "ClinicNewChatOnLaunch") { tabs.newChat() }
-        if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionScreenOnLaunch"), !path.isEmpty { tabs.startNewSession(projectPath: path) }
+        if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionScreenOnLaunch"), !path.isEmpty {
+            tabs.startNewSession(projectPath: path)
+            // `-ClinicDraftPromptOnLaunch <text>`: fill the editor, so a screenshot shows typed text where the
+            // placeholder would otherwise be — the only way to check the two line up (ADR-082).
+            if let text = UserDefaults.standard.string(forKey: "ClinicDraftPromptOnLaunch"), !text.isEmpty {
+                tabs.editingDraft?.prompt = text
+            }
+            // `-ClinicDraftEffortOnLaunch <level>`: the effort gauge only has something to show once a level is set.
+            if let effort = UserDefaults.standard.string(forKey: "ClinicDraftEffortOnLaunch"), !effort.isEmpty {
+                tabs.editingDraft?.effort = effort
+            }
+            // `-ClinicDraftWorktreeOnLaunch YES [-ClinicDraftBranchOnLaunch <name>]` (ADR-083): the worktree row
+            // is only on screen once the toggle is on.
+            if UserDefaults.standard.bool(forKey: "ClinicDraftWorktreeOnLaunch") {
+                tabs.editingDraft?.worktree = true
+                if let name = UserDefaults.standard.string(forKey: "ClinicDraftBranchOnLaunch") { tabs.editingDraft?.worktreeName = name }
+            }
+        }
         // `-ClinicSelectTabAfterLaunch <index>`: select a tab once launch tabs exist (attention smoke tests).
         if UserDefaults.standard.object(forKey: "ClinicSelectTabAfterLaunch") != nil {
             let i = UserDefaults.standard.integer(forKey: "ClinicSelectTabAfterLaunch")

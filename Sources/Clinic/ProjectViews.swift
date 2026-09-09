@@ -166,6 +166,7 @@ final class ProjectIconCache {
     private(set) var revision = 0
     /// Lookups fill the cache lazily, so this storage must stay out of observation (it is written during `body`).
     @ObservationIgnored private var cache: [String: NSImage?] = [:]
+    @ObservationIgnored private var tints: [String: Color?] = [:]
     static let candidates = ["project-icon.svg", "project-icon.png", ".clinic/icon.svg", ".clinic/icon.png"]
 
     func image(for path: String) -> NSImage? {
@@ -181,7 +182,40 @@ final class ProjectIconCache {
 
     /// Drops one project's icon (or all of them) and asks every `ProjectIcon` to look again.
     func invalidate(_ path: String? = nil) {
-        if let path { cache[path] = nil } else { cache.removeAll() }
+        if let path { cache[path] = nil; tints[path] = nil } else { cache.removeAll(); tints.removeAll() }
         revision &+= 1
+    }
+
+    /// The icon's average colour, lifted into a usable wash — the new-session screen tints itself with it (ADR-082).
+    /// Falls back to the hashed monogram colour when the project has no icon.
+    func tint(for path: String) -> Color {
+        if let cached = tints[path] { return cached ?? ProjectIcon.color(for: path) }
+        let found = image(for: path).flatMap(Self.averageColor)
+        tints[path] = found
+        return found ?? ProjectIcon.color(for: path)
+    }
+
+    /// Draws the icon into a single pixel. Dark or mostly-transparent icons still have a hue worth using,
+    /// so saturation and brightness are floored rather than taken as measured.
+    private static func averageColor(_ image: NSImage) -> Color? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var px = [UInt8](repeating: 0, count: 4)
+        let drawn: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                      bytesPerRow: 4, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        let alpha = Double(px[3]) / 255
+        guard drawn, alpha > 0.05 else { return nil }
+        let rgb = (0..<3).map { Double(px[$0]) / 255 / alpha }
+        var h: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0
+        guard let c = NSColor(srgbRed: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1).usingColorSpace(.deviceRGB) else { return nil }
+        c.getHue(&h, saturation: &sat, brightness: &bri, alpha: nil)
+        guard sat > 0.04 else { return nil }
+        return Color(hue: Double(h), saturation: min(1, Double(sat) * 1.5 + 0.1), brightness: max(0.6, Double(bri)))
     }
 }
