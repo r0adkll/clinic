@@ -130,7 +130,7 @@ struct MarketplaceNavRow: View {
                 Spacer(minLength: 4)
             }
             .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.primary))
-            .padding(.vertical, 2).padding(.horizontal, 6)
+            .padding(.vertical, 4).padding(.horizontal, 6)
             .background(background, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
