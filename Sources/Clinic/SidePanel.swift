@@ -42,9 +42,10 @@ final class PanelPane: Identifiable {
             case .terminal: 400
             case .diff, .pr: 380
             case .attachments: 320
-            // A hidden tree buys the panel back the width the tree was charging for; a remembered
-            // one charges what the user set it to (ADR-081).
-            case .files: EditorPrefs.shared.showTree ? EditorPrefs.shared.treeWidth + 330 : 360
+            // A hidden tree buys the panel back the width the tree was charging for (ADR-081). This
+            // stays a constant deliberately: a minimum that tracked the live tree width would move the
+            // panel's own divider while the tree divider was being dragged, and the two would fight.
+            case .files: EditorPrefs.shared.showTree ? 520 : 360
             }
         }
     }

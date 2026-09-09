@@ -24,13 +24,8 @@ final class EditorPrefs {
         treeWidth = stored > 0 ? CGFloat(stored) : 220
     }
 
-    /// The width the tree may actually take right now: never below 160, and never so wide that the code
-    /// view is left with less than it can use. Clamping on the way *out* rather than on the way in means
-    /// a narrow panel borrows width from the tree and gives it back when it widens.
-    static func treeWidth(in available: CGFloat) -> CGFloat {
-        let upper = max(160, available - 300)
-        return min(max(shared.treeWidth, 160), upper)
-    }
+    static let minTreeWidth: CGFloat = 160
+    static let maxTreeWidth: CGFloat = 480
 }
 
 /// Per-tab editor state (ADR-057): root, index, open file, dirty flag, external-change watch.
@@ -171,21 +166,33 @@ struct EditorPanel: View {
     @Environment(SessionStore.self) private var sessions
     let tab: Tab
     @Bindable var model: EditorModel
+    /// The tree's width as it stood when this pane was built; see the note in `body`.
+    @State private var initialTreeWidth = EditorPrefs.shared.treeWidth
     private var prefs: EditorPrefs { EditorPrefs.shared }
 
     var body: some View {
-        // Hand-rolled split rather than `HSplitView`: the tree's width is remembered (ADR-081), and
-        // SwiftUI's split view neither reports the width the user dragged to nor accepts one back.
-        GeometryReader { geo in
-            HStack(spacing: 0) {
-                if prefs.showTree {
-                    sidebar.frame(width: EditorPrefs.treeWidth(in: geo.size.width))
-                    TreeResizeHandle(available: geo.size.width)
-                }
-                FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Both halves must claim the full height: an `HSplitView` whose children only have an ideal
+        // height collapses to it and sits along the bottom edge.
+        //
+        // The remembered width goes in as `idealWidth` and comes back out through the geometry reader
+        // (ADR-081). It is read once, into `@State`, on purpose: reading it in the body would let every
+        // width the drag reports re-propose the column, and the divider would fight the pointer.
+        HSplitView {
+            if prefs.showTree {
+                sidebar
+                    .frame(minWidth: EditorPrefs.minTreeWidth, idealWidth: initialTreeWidth,
+                           maxWidth: EditorPrefs.maxTreeWidth, maxHeight: .infinity)
+                    .background {
+                        GeometryReader { geo in
+                            // Rounded, so sub-point layout noise cannot drift the stored width.
+                            Color.clear.onChange(of: geo.size.width, initial: false) { _, width in
+                                EditorPrefs.shared.treeWidth = width.rounded()
+                            }
+                        }
+                    }
             }
-            .frame(width: geo.size.width, height: geo.size.height)
+            FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
+                .frame(minWidth: 320, maxHeight: .infinity)
         }
         .task(id: tab.pwd) {
             let dir = tab.pwd ?? tab.projectPath
@@ -230,33 +237,6 @@ struct EditorPanel: View {
             }
             .listStyle(.sidebar)
         }
-    }
-}
-
-/// The draggable seam between the tree and the code view. It is a real 9 pt column rather than an
-/// overlay on a hairline, so the whole grab area is inside the view that handles the drag (ADR-081).
-private struct TreeResizeHandle: View {
-    let available: CGFloat
-    @State private var startWidth: CGFloat?
-
-    var body: some View {
-        ZStack {
-            Color.clear
-            Divider()
-        }
-        .frame(width: 9)
-        .contentShape(Rectangle())
-        .pointerStyle(.columnResize)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    let base = startWidth ?? EditorPrefs.treeWidth(in: available)
-                    if startWidth == nil { startWidth = base }
-                    let upper = max(160, available - 300)
-                    EditorPrefs.shared.treeWidth = min(max(base + value.translation.width, 160), upper)
-                }
-                .onEnded { _ in startWidth = nil }
-        )
     }
 }
 
