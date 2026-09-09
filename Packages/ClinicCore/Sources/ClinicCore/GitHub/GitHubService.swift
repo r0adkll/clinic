@@ -23,7 +23,23 @@ public actor GitHubService {
         case merge(PullRequestRef, MergeMethod, auto: Bool)
         case disableAutoMerge(PullRequestRef)
         case checks(PullRequestRef)
+        case bodyHTML(PullRequestRef)
     }
+
+    /// One GraphQL query for GitHub's own rendering of the PR body and every comment and review on
+    /// it (ADR-090). Node ids come back alongside so `PullRequest.applying` can match them to what
+    /// `gh pr view --json` already parsed.
+    static let bodyHTMLQuery = """
+    query($owner:String!,$repo:String!,$number:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$number){
+          bodyHTML
+          comments(first:100){nodes{id bodyHTML}}
+          reviews(first:100){nodes{id bodyHTML}}
+        }
+      }
+    }
+    """
 
     static func arguments(for op: Operation) -> [String] {
         switch op {
@@ -35,6 +51,11 @@ public actor GitHubService {
         case .merge(let ref, let method, let auto): ["pr", "merge", ref.url.absoluteString, "--\(method.rawValue)"] + (auto ? ["--auto"] : [])
         case .disableAutoMerge(let ref): ["pr", "merge", ref.url.absoluteString, "--disable-auto"]
         case .checks(let ref): ["pr", "checks", ref.url.absoluteString, "--json", checksFields.joined(separator: ",")]
+        case .bodyHTML(let ref):
+            // `-F` sends number as a real Int; `-f` would make it a String and GraphQL would reject it.
+            ["api", "graphql", "--hostname", ref.host,
+             "-F", "owner=\(ref.owner)", "-F", "repo=\(ref.name)", "-F", "number=\(ref.number)",
+             "-f", "query=\(bodyHTMLQuery)"]
         }
     }
 
@@ -96,6 +117,11 @@ public actor GitHubService {
     public func pullRequest(_ ref: PullRequestRef) async throws -> PullRequest {
         let r = try await gh(.view(ref))
         return try PullRequest.parse(r.stdout, ref: ref)
+    }
+
+    /// GitHub's rendered HTML for the body and every comment (ADR-090).
+    public func renderedHTML(_ ref: PullRequestRef) async throws -> PullRequest.RenderedHTML {
+        try PullRequest.parseRenderedHTML(try await gh(.bodyHTML(ref)).stdout)
     }
 
     /// `gh pr diff <url>`.

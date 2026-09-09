@@ -54,11 +54,28 @@ final class PRStore {
         guard availability?.isReady != false else { return }
         loading.insert(ref.id); defer { loading.remove(ref.id) }
         do {
-            pullRequests[ref.id] = try await service.pullRequest(ref)
+            let pr = try await service.pullRequest(ref)
+            pullRequests[ref.id] = pr
             errors[ref.id] = nil
+            await loadRenderedHTML(ref)
         } catch {
             errors[ref.id] = "\(error)"
             Self.log.warning("pr \(ref.url.absoluteString, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    /// GitHub's own rendering of the body and comments (ADR-090), folded into the PR already on
+    /// screen. Deliberately a second, non-fatal call: the panel is fully usable without it — bodies
+    /// fall back to the Markdown source — so a GraphQL failure must not blank a PR that loaded fine.
+    ///
+    /// Re-run on every refresh rather than cached, because the image URLs GitHub embeds are signed
+    /// and expire after five minutes.
+    func loadRenderedHTML(_ ref: PullRequestRef) async {
+        guard let pr = pullRequests[ref.id] else { return }
+        do {
+            pullRequests[ref.id] = pr.applying(try await service.renderedHTML(ref))
+        } catch {
+            Self.log.warning("pr html \(ref.url.absoluteString, privacy: .public): \(error, privacy: .public)")
         }
     }
 

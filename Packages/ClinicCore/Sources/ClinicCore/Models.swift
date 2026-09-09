@@ -126,6 +126,9 @@ public struct PullRequestRef: Hashable, Codable, Sendable, Identifiable {
     /// True when the ref was found in the session's first prompt rather than a `pr-link` transcript record.
     public var fromPrompt: Bool
     public var id: String { url.absoluteString }
+    /// `repository` is stored as "owner/name"; GraphQL wants the halves separately.
+    public var owner: String { String(repository.split(separator: "/").first ?? "") }
+    public var name: String { repository.split(separator: "/").dropFirst().first.map(String.init) ?? "" }
 
     /// Parses `https://<host>/<owner>/<repo>/pull/<n>[/…]`. Any host is accepted (GitHub Enterprise); the path shape must match.
     public init?(url: URL, fromPrompt: Bool = false) {

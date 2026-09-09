@@ -55,11 +55,13 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
         public var reviewState: String?
         public var path: String?
         public var line: Int?
+        /// GitHub's own rendering of `body`, fetched separately (ADR-090). Nil until that call lands.
+        public var bodyHTML: String?
 
         public init(id: String, kind: Kind, author: Author, body: String, createdAt: Date, url: URL? = nil,
-                    reviewState: String? = nil, path: String? = nil, line: Int? = nil) {
+                    reviewState: String? = nil, path: String? = nil, line: Int? = nil, bodyHTML: String? = nil) {
             self.id = id; self.kind = kind; self.author = author; self.body = body; self.createdAt = createdAt; self.url = url
-            self.reviewState = reviewState; self.path = path; self.line = line
+            self.reviewState = reviewState; self.path = path; self.line = line; self.bodyHTML = bodyHTML
         }
     }
 
@@ -88,19 +90,22 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     /// Issue comments and reviews merged, chronological.
     public var comments: [Comment]
     public var fetchedAt: Date
+    /// GitHub's own rendering of `body` (ADR-090). Nil until `GitHubService.bodyHTML` lands, so the
+    /// panel can show the Markdown source immediately and swap in the real thing when it arrives.
+    public var bodyHTML: String?
     public var id: String { ref.id }
 
     public init(ref: PullRequestRef, title: String, body: String = "", state: State, isDraft: Bool = false, author: Author,
                 headRefName: String = "", baseRefName: String = "", createdAt: Date, updatedAt: Date, mergedAt: Date? = nil,
                 mergeable: String = "UNKNOWN", mergeStateStatus: String = "UNKNOWN", reviewDecision: String = "",
                 autoMergeEnabled: Bool = false, additions: Int = 0, deletions: Int = 0, changedFiles: Int = 0,
-                checks: [Check] = [], comments: [Comment] = [], fetchedAt: Date = Date()) {
+                checks: [Check] = [], comments: [Comment] = [], fetchedAt: Date = Date(), bodyHTML: String? = nil) {
         self.ref = ref; self.title = title; self.body = body; self.state = state; self.isDraft = isDraft; self.author = author
         self.headRefName = headRefName; self.baseRefName = baseRefName; self.createdAt = createdAt; self.updatedAt = updatedAt
         self.mergedAt = mergedAt; self.mergeable = mergeable; self.mergeStateStatus = mergeStateStatus
         self.reviewDecision = reviewDecision; self.autoMergeEnabled = autoMergeEnabled; self.additions = additions
         self.deletions = deletions; self.changedFiles = changedFiles; self.checks = checks; self.comments = comments
-        self.fetchedAt = fetchedAt
+        self.fetchedAt = fetchedAt; self.bodyHTML = bodyHTML
     }
 
     // MARK: Parsing
@@ -157,6 +162,47 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
             checks: parseRollup(obj["statusCheckRollup"]),
             comments: comments,
             fetchedAt: now)
+    }
+
+    /// GitHub's rendered HTML for this PR and every comment/review on it, keyed by node id.
+    ///
+    /// The ids are the same GraphQL node ids `gh pr view --json comments,reviews` reports, which is
+    /// the whole reason this is a second GraphQL call rather than the REST `body_html`: REST hands
+    /// back numeric ids that would have to be matched by author and timestamp instead (ADR-090).
+    public struct RenderedHTML: Equatable, Sendable {
+        public var body: String?
+        public var byID: [String: String]
+        public init(body: String?, byID: [String: String]) { self.body = body; self.byID = byID }
+    }
+
+    /// Parses the `bodyHTML` GraphQL response.
+    public static func parseRenderedHTML(_ data: Data) throws -> RenderedHTML {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pr = ((obj["data"] as? [String: Any])?["repository"] as? [String: Any])?["pullRequest"] as? [String: Any] else {
+            throw GitHubError(command: "api graphql", exitCode: 0, stderr: "unexpected GraphQL shape (no pullRequest)")
+        }
+        var byID: [String: String] = [:]
+        for key in ["comments", "reviews"] {
+            for n in (pr[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [] {
+                guard let id = n["id"] as? String, let html = n["bodyHTML"] as? String else { continue }
+                byID[id] = html
+            }
+        }
+        return RenderedHTML(body: pr["bodyHTML"] as? String, byID: byID)
+    }
+
+    /// Folds rendered HTML into an already-parsed PR. Anything the payload does not cover keeps
+    /// whatever it had, so a partial response degrades to Markdown rather than to blank.
+    public func applying(_ html: RenderedHTML) -> PullRequest {
+        var copy = self
+        if let body = html.body { copy.bodyHTML = body }
+        copy.comments = comments.map { c in
+            guard let rendered = html.byID[c.id] else { return c }
+            var c = c
+            c.bodyHTML = rendered
+            return c
+        }
+        return copy
     }
 
     /// `statusCheckRollup[]` from `gh pr view`: a mix of `CheckRun` (`name/status/conclusion/detailsUrl/workflowName`) and

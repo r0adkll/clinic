@@ -221,9 +221,12 @@ struct PRPage: View {
     @ViewBuilder
     private func sections(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
         section(.description, count: nil) {
-            if pr.body.isEmpty {
+            if let html = pr.bodyHTML, !html.isEmpty {
+                GitHubHTMLView(html: html)
+            } else if pr.body.isEmpty {
                 Text("No description.").foregroundStyle(.secondary)
             } else {
+                // GitHub's rendering has not landed yet (or the call failed): show the source.
                 MarkdownText(pr.body)
             }
         }
@@ -321,7 +324,11 @@ struct PRPage: View {
                 Spacer(minLength: 0)
                 Text(c.createdAt, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary)
             }
-            if !c.body.isEmpty { MarkdownText(c.body) }
+            if let html = c.bodyHTML, !html.isEmpty {
+                GitHubHTMLView(html: html)
+            } else if !c.body.isEmpty {
+                MarkdownText(c.body)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

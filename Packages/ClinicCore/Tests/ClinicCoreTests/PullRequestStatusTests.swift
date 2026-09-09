@@ -163,3 +163,61 @@ import Testing
         #expect(s.canMerge)
     }
 }
+
+/// GitHub's own rendering, merged in by node id (ADR-090).
+@Suite struct RenderedHTMLTests {
+    let ref = PullRequestRef(url: URL(string: "https://github.com/octocat/example/pull/42")!)!
+
+    @Test func splitsRepositoryForGraphQLVariables() {
+        #expect(ref.owner == "octocat")
+        #expect(ref.name == "example")
+        #expect(ref.host == "github.com")
+    }
+
+    @Test func argumentsSendNumberAsAnInt() {
+        let args = GitHubService.arguments(for: .bodyHTML(ref))
+        #expect(args.prefix(4) == ["api", "graphql", "--hostname", "github.com"])
+        // `-F` (typed) not `-f` (string): GraphQL rejects a String where Int! is declared.
+        #expect(args.contains("-F") && args.contains("number=42"))
+        #expect(args.contains("owner=octocat") && args.contains("repo=example"))
+        #expect(args.last?.contains("bodyHTML") == true)
+    }
+
+    @Test func parsesBodyAndCommentHTMLByNodeID() throws {
+        let json = """
+        {"data":{"repository":{"pullRequest":{
+          "bodyHTML":"<p>hi</p>",
+          "comments":{"nodes":[{"id":"IC_1","bodyHTML":"<table></table>"}]},
+          "reviews":{"nodes":[{"id":"PRR_1","bodyHTML":"<p>lgtm</p>"}]}
+        }}}}
+        """
+        let html = try PullRequest.parseRenderedHTML(Data(json.utf8))
+        #expect(html.body == "<p>hi</p>")
+        #expect(html.byID == ["IC_1": "<table></table>", "PRR_1": "<p>lgtm</p>"])
+    }
+
+    @Test func mergingKeepsWhatThePayloadDoesNotCover() {
+        let opened = Date(timeIntervalSince1970: 1_000_000)
+        let comments = [
+            PullRequest.Comment(id: "IC_1", kind: .comment, author: .init(login: "a"), body: "raw a", createdAt: opened),
+            PullRequest.Comment(id: "IC_2", kind: .comment, author: .init(login: "b"), body: "raw b", createdAt: opened),
+        ]
+        let pr = PullRequest(ref: ref, title: "t", body: "raw body", state: .open, author: .init(login: "a"),
+                             createdAt: opened, updatedAt: opened, comments: comments)
+        let merged = pr.applying(.init(body: "<p>body</p>", byID: ["IC_1": "<p>a</p>"]))
+        #expect(merged.bodyHTML == "<p>body</p>")
+        #expect(merged.comments[0].bodyHTML == "<p>a</p>")
+        // Not in the payload: keeps its Markdown and renders as before rather than going blank.
+        #expect(merged.comments[1].bodyHTML == nil)
+        #expect(merged.comments[1].body == "raw b")
+
+        // A response with no bodyHTML at all must not wipe what is already there.
+        let again = merged.applying(.init(body: nil, byID: [:]))
+        #expect(again.bodyHTML == "<p>body</p>")
+        #expect(again.comments[0].bodyHTML == "<p>a</p>")
+    }
+
+    @Test func rejectsAnUnexpectedShape() {
+        #expect(throws: GitHubError.self) { try PullRequest.parseRenderedHTML(Data("{\"data\":{}}".utf8)) }
+    }
+}
