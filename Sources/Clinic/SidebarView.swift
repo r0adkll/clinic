@@ -120,14 +120,12 @@ struct MarketplaceNavRow: View {
     var body: some View {
         Button { window.showingMarketplace = true } label: {
             HStack(spacing: 6) {
-                // Reserves the disclosure column a project header uses, so the icon lands in the same
-                // glyph column as a project's icon and the label under the same left edge (ADR-077).
-                Color.clear.frame(width: 12, height: 12)
-                // Keeps the header's 22 pt glyph *column* for alignment, but only the glyph's own
-                // height: a project header is 22 pt tall because its icon is, and this row is not.
+                // No phantom disclosure column and no 22 pt icon column: this row is not part of the
+                // project outline — it sits above the toolbar that separates it — so indenting it to
+                // match a chevron it does not have was all the horizontal padding was buying.
                 Image(systemName: "storefront.fill")
                     .font(.system(size: 13))
-                    .frame(width: 22, height: 16)
+                    .frame(width: 18, height: 16)
                 Text("Marketplace").font(.body.weight(.semibold)).lineLimit(1)
                 Spacer(minLength: 4)
             }
@@ -139,6 +137,8 @@ struct MarketplaceNavRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Find and install Claude Code plugins" + bindings.hint(.marketplace))
+        // The pill's box lines up with the search field above and the session rows' selection fills;
+        // what shrank is what is *inside* it.
         .padding(.horizontal, 10).padding(.top, 4)
     }
 
