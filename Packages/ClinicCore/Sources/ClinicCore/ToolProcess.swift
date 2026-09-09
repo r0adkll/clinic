@@ -87,19 +87,30 @@ enum ToolProcess {
         var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
     }
 
-    static func run(executable: String, arguments: [String], environment: [String: String]) async -> Result {
+    /// `currentDirectory` matters for tools that read the *project* out of their cwd rather than an
+    /// argument — `claude mcp add --scope local|project` writes into whichever project it is standing
+    /// in, so without this Clinic could only ever configure its own working directory (ADR-093).
+    static func run(executable: String, arguments: [String], environment: [String: String],
+                    currentDirectory: URL? = nil) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(executable: executable, arguments: arguments, environment: environment))
+                cont.resume(returning: runSync(executable: executable, arguments: arguments,
+                                               environment: environment, currentDirectory: currentDirectory))
             }
         }
     }
 
-    static func runSync(executable: String, arguments: [String], environment: [String: String]) -> Result {
+    static func runSync(executable: String, arguments: [String], environment: [String: String],
+                        currentDirectory: URL? = nil) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = [executable] + arguments
         p.environment = environment
+        // A directory that has since been deleted makes `Process.run` throw rather than fall back,
+        // so an unreachable cwd degrades to the app's own instead of failing the command.
+        if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
+            p.currentDirectoryURL = currentDirectory
+        }
 
         let out = Pipe(), err = Pipe()
         p.standardOutput = out

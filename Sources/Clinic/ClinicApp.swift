@@ -19,6 +19,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.bindings)
                 .environment(appDelegate.caffeine)
                 .environment(appDelegate.marketplace)
+                .environment(appDelegate.mcpServers)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let bindings = KeyBindings()
     let caffeine = CaffeineController()
     let marketplace = MarketplaceModel()
+    let mcpServers = MCPServersModel()
     var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
@@ -216,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let q = UserDefaults.standard.string(forKey: "ClinicMarketplaceQuery") { marketplace.query = q }
             Task {
                 try? await Task.sleep(for: .seconds(1))
-                tabs.activeWindow.showingMarketplace = true
+                tabs.activeWindow.screen = .marketplace
                 if let id = UserDefaults.standard.string(forKey: "ClinicMarketplaceSelect") {
                     // Wait for the catalogue the screen loads on appear before pointing at a row in it.
                     for _ in 0..<40 where self.marketplace.selectedId == nil {
@@ -343,7 +345,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.jumpToSession))
         }
         CommandGroup(after: .sidebar) {
-            Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
+            Button("MCP Servers") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
             Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
             Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
             Toggle("Caffeine Mode", isOn: Binding(get: { caffeine.isOn }, set: { caffeine.isOn = $0 })).keyboardShortcut(key(.caffeine))

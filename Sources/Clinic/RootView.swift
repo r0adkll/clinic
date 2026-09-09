@@ -16,7 +16,6 @@ struct RootView: View {
     @State private var showNewSession = false
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
-    @State private var showMCPServers = false
     @State private var iconProject: IconGenerationTarget?
     @State private var newSessionProject: String?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
@@ -41,10 +40,9 @@ struct RootView: View {
         .sheet(isPresented: $showNewSession) { NewSessionSheet(initialProject: newSessionProject) }
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
-        .sheet(isPresented: $showMCPServers) { MCPServersSheet() }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { showMCPServers = true } }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.showingMarketplace = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             guard isActive else { return }
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
@@ -82,9 +80,14 @@ struct RootView: View {
                 NotificationBell()
             }
         }
-        .navigationTitle(window.showingMarketplace ? "Marketplace"
-                         : window.editingDraft != nil ? "New session"
-                         : (tabs.selectedTab(in: window)?.title ?? "Clinic"))
+        .navigationTitle(title(for: window))
+    }
+
+    /// A screen names the window while it is up; otherwise the selected tab does.
+    private func title(for window: WindowState) -> String {
+        if let screen = window.screen { return screen.title }
+        if window.editingDraft != nil { return "New session" }
+        return tabs.selectedTab(in: window)?.title ?? "Clinic"
     }
 }
 
@@ -118,8 +121,11 @@ struct DetailView: View {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
-            } else if window.showingMarketplace {
+            } else if window.screen == .marketplace {
                 MarketplaceScreen()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if window.screen == .mcpServers {
+                MCPServersScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let draft = window.editingDraft {
                 NewSessionScreen(draft: draft)

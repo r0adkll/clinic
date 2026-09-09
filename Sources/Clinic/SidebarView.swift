@@ -15,7 +15,10 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MarketplaceNavRow()
+            ScreenNavRow(screen: .marketplace, icon: "storefront.fill", shortcut: .marketplace,
+                         help: "Find and install Claude Code plugins")
+            ScreenNavRow(screen: .mcpServers, icon: "server.rack", shortcut: .mcpServers,
+                         help: "Configure the MCP servers your sessions get")
             sidebarToolbar
             // The gap above the first project sits outside the scroll view on purpose: as
             // `contentMargins(for: .scrollContent)` it was applied on a later layout pass and popped
@@ -107,26 +110,30 @@ struct SidebarView: View {
     }
 }
 
-/// The Marketplace navigation row, pinned above the project list and its toolbar (ADR-084).
-/// It sits outside the `List` on purpose: it is a destination, not a session, so it takes no
-/// `SidebarItem` and never competes with the list's selection.
-struct MarketplaceNavRow: View {
+/// A navigation row for a screen, pinned above the project list and its toolbar (ADR-084, ADR-093).
+/// These sit outside the `List` on purpose: they are destinations, not sessions, so they take no
+/// `SidebarItem` and never compete with the list's selection.
+struct ScreenNavRow: View {
     @Environment(WindowState.self) private var window
     @Environment(KeyBindings.self) private var bindings
+    let screen: WindowState.Screen
+    let icon: String
+    let shortcut: ShortcutAction
+    let help: String
     @State private var hovering = false
 
-    private var active: Bool { window.showingMarketplace }
+    private var active: Bool { window.screen == screen }
 
     var body: some View {
-        Button { window.showingMarketplace = true } label: {
+        Button { window.screen = screen } label: {
             HStack(spacing: 6) {
-                // No phantom disclosure column and no 22 pt icon column: this row is not part of the
-                // project outline — it sits above the toolbar that separates it — so indenting it to
-                // match a chevron it does not have was all the horizontal padding was buying.
-                Image(systemName: "storefront.fill")
+                // No phantom disclosure column and no 22 pt icon column: these rows are not part of
+                // the project outline — they sit above the toolbar that separates them — so indenting
+                // them to match a chevron they do not have was all the horizontal padding was buying.
+                Image(systemName: icon)
                     .font(.system(size: 13))
                     .frame(width: 18, height: 16)
-                Text("Marketplace").font(.body.weight(.semibold)).lineLimit(1)
+                Text(screen.title).font(.body.weight(.semibold)).lineLimit(1)
                 Spacer(minLength: 4)
             }
             .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.primary))
@@ -136,7 +143,7 @@ struct MarketplaceNavRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Find and install Claude Code plugins" + bindings.hint(.marketplace))
+        .help(help + bindings.hint(shortcut))
         // The pill's box lines up with the search field above and the session rows' selection fills;
         // what shrank is what is *inside* it.
         .padding(.horizontal, 10).padding(.top, 4)
@@ -148,7 +155,6 @@ struct MarketplaceNavRow: View {
     }
 }
 
-/// Stable selection identity: sessions by id (open or not), shells by tab id.
 enum SidebarItem: Hashable {
     case session(SessionID)
     case tab(UUID)

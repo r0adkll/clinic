@@ -16,12 +16,29 @@ final class WindowState: Identifiable {
     @ObservationIgnored var lifecycle: WindowLifecycle?
     @ObservationIgnored var observers: [NSObjectProtocol] = []
 
+    /// A destination that fills the content area instead of a tab, because it owns no session.
+    ///
+    /// One optional rather than a boolean per screen (ADR-093): the mutual exclusion between content
+    /// modes is pairwise, so a third and fourth boolean would have cost twelve `didSet` assignments
+    /// to keep straight. Adding a screen is now a new case.
+    enum Screen: Hashable {
+        case marketplace   // ADR-084
+        case mcpServers    // ADR-093
+
+        var title: String {
+            switch self {
+            case .marketplace: "Marketplace"
+            case .mcpServers: "MCP Servers"
+            }
+        }
+    }
+
     var selectedTabId: UUID? {
         didSet {
             guard selectedTabId != oldValue else { return }
             if selectedTabId != nil {
                 if editingDraft != nil { editingDraft = nil }
-                showingMarketplace = false
+                screen = nil
             }
             store?.selectionChanged(in: self)
         }
@@ -31,14 +48,14 @@ final class WindowState: Identifiable {
         didSet {
             guard editingDraft != nil else { return }
             if selectedTabId != nil { selectedTabId = nil }
-            showingMarketplace = false
+            screen = nil
         }
     }
-    /// The Marketplace screen (ADR-084). Like the draft screen it fills the content area instead of a tab,
-    /// so the three are mutually exclusive; each one clears the other two as it comes up.
-    var showingMarketplace = false {
+    /// The Marketplace or MCP Servers screen. Like the draft screen it fills the content area instead
+    /// of a tab, so the three are mutually exclusive; showing one clears the other two.
+    var screen: Screen? {
         didSet {
-            guard showingMarketplace, showingMarketplace != oldValue else { return }
+            guard screen != nil, screen != oldValue else { return }
             selectedTabId = nil
             editingDraft = nil
         }
@@ -48,7 +65,7 @@ final class WindowState: Identifiable {
     var bulkSelection: Set<SidebarItem> = []
 
     /// True while the content area belongs to a screen rather than a tab: no tab bar, no footer, no terminals.
-    var isShowingScreen: Bool { showingMarketplace || editingDraft != nil }
+    var isShowingScreen: Bool { screen != nil || editingDraft != nil }
 
     init(id: UUID, isPrimary: Bool) { self.id = id; self.isPrimary = isPrimary }
 

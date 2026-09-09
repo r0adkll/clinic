@@ -31,7 +31,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .replaySession: "Replay Session…"
         case .jumpToSession: "Jump to Session…"
         case .moveTabToNewWindow: "Move Tab to New Window"
-        case .mcpServers: "MCP Servers…"
+        case .mcpServers: "MCP Servers"
         case .marketplace: "Marketplace"
         case .selectSessions: "Select Sessions"
         case .notifications: "Notifications"
