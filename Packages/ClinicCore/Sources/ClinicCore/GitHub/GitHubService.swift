@@ -130,28 +130,11 @@ public struct GitHubError: Error, CustomStringConvertible, Sendable {
     }
 }
 
-/// Runs `/usr/bin/env gh …` on a global queue with prompts, colour, and update nags disabled.
+/// Runs `/usr/bin/env gh …` with prompts, colour, and update nags disabled.
 enum GitHubProcess {
-    struct Result: Sendable {
-        var status: Int32
-        var stdout: Data
-        var stderr: String
-        var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
-        func error(_ args: [String]) -> GitHubError { GitHubError(command: args.joined(separator: " "), exitCode: status, stderr: stderr) }
-    }
+    typealias Result = ToolProcess.Result
 
     static func run(executable: String, _ args: [String]) async -> Result {
-        await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(executable: executable, args))
-            }
-        }
-    }
-
-    private static func runSync(executable: String, _ args: [String]) -> Result {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = [executable] + args
         var env = ProcessEnvironment.withToolPaths()
         env["GH_PROMPT_DISABLED"] = "1"
         env["GH_NO_UPDATE_NOTIFIER"] = "1"
@@ -160,39 +143,10 @@ enum GitHubProcess {
         env["LC_ALL"] = "C"
         env["GH_PAGER"] = "cat"
         env["PAGER"] = "cat"
-        p.environment = env
-
-        let out = Pipe(), err = Pipe()
-        p.standardOutput = out
-        p.standardError = err
-        p.standardInput = FileHandle.nullDevice
-
-        do { try p.run() } catch {
-            return Result(status: -1, stdout: Data(), stderr: "could not launch \(executable): \(error.localizedDescription)")
-        }
-
-        // Drain both pipes concurrently so a chatty stderr cannot deadlock stdout (and vice versa).
-        let group = DispatchGroup()
-        nonisolated(unsafe) var outData = Data()
-        nonisolated(unsafe) var errData = Data()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async { outData = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async { errData = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        group.wait()
-        p.waitUntilExit()
-        return Result(status: p.terminationStatus, stdout: outData, stderr: String(decoding: errData, as: UTF8.self))
+        return await ToolProcess.run(executable: executable, arguments: args, environment: env)
     }
 }
 
-/// Environment for tool subprocesses. GUI apps inherit a minimal PATH, so Homebrew and `/usr/local` are prepended.
-enum ProcessEnvironment {
-    static let toolPaths = ["/opt/homebrew/bin", "/usr/local/bin"]
-
-    static func withToolPaths(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var env = base
-        let existing = (env["PATH"] ?? "/usr/bin:/bin").split(separator: ":").map(String.init)
-        env["PATH"] = (toolPaths + existing.filter { !toolPaths.contains($0) }).joined(separator: ":")
-        return env
-    }
+extension ToolProcess.Result {
+    func error(_ args: [String]) -> GitHubError { GitHubError(command: args.joined(separator: " "), exitCode: status, stderr: stderr) }
 }

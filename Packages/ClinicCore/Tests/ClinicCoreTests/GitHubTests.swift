@@ -335,9 +335,12 @@ private let laterHumanComment = """
     }
 
     @Test func toolPathsArePrependedOnce() {
+        // `~/.local/bin` is where Claude Code's installer puts `claude`, so it joins the tool paths (ADR-084).
+        let local = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
+        #expect(ProcessEnvironment.toolPaths == ["/opt/homebrew/bin", "/usr/local/bin", local])
         let env = ProcessEnvironment.withToolPaths(base: ["PATH": "/usr/bin:/opt/homebrew/bin:/bin"])
-        #expect(env["PATH"] == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
-        #expect(ProcessEnvironment.withToolPaths(base: [:])["PATH"] == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+        #expect(env["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin")
+        #expect(ProcessEnvironment.withToolPaths(base: [:])["PATH"] == "/opt/homebrew/bin:/usr/local/bin:\(local):/usr/bin:/bin")
     }
 }
 

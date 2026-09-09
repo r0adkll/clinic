@@ -18,6 +18,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.backgroundAgents)
                 .environment(appDelegate.bindings)
                 .environment(appDelegate.caffeine)
+                .environment(appDelegate.marketplace)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updates = UpdateCheck()
     let bindings = KeyBindings()
     let caffeine = CaffeineController()
+    let marketplace = MarketplaceModel()
     var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
 
@@ -202,6 +204,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `-ClinicMoveToNewWindowAfterLaunch <seconds>`: move the selected tab to a new window (ADR-072 smoke test).
         let moveAfter = UserDefaults.standard.double(forKey: "ClinicMoveToNewWindowAfterLaunch")
         if moveAfter > 0 { Task { try? await Task.sleep(for: .seconds(moveAfter)); if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } } }
+        // `-ClinicMarketplaceOnLaunch YES [-ClinicMarketplaceSection discover|installed|marketplaces]`
+        // [-ClinicMarketplaceSelect <plugin@marketplace>] [-ClinicMarketplaceQuery <text>] (ADR-084 smoke test):
+        // the screen has states — a selected plugin's detail, a filtered list — no click-free run could reach.
+        if UserDefaults.standard.bool(forKey: "ClinicMarketplaceOnLaunch") {
+            if let raw = UserDefaults.standard.string(forKey: "ClinicMarketplaceSection"),
+               let section = MarketplaceModel.Section(rawValue: raw) { marketplace.section = section }
+            if let q = UserDefaults.standard.string(forKey: "ClinicMarketplaceQuery") { marketplace.query = q }
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                tabs.activeWindow.showingMarketplace = true
+                if let id = UserDefaults.standard.string(forKey: "ClinicMarketplaceSelect") {
+                    // Wait for the catalogue the screen loads on appear before pointing at a row in it.
+                    for _ in 0..<40 where self.marketplace.selectedId == nil {
+                        if self.marketplace.hasLoaded { self.marketplace.selectedId = id; break }
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
+                }
+            }
+        }
         // `-ClinicPreferencesOnLaunch <tab>`: open Preferences (ADR-073 smoke test).
         if UserDefaults.standard.bool(forKey: "ClinicPreferencesOnLaunch") {
             Task { try? await Task.sleep(for: .seconds(2)); NotificationCenter.default.post(name: .clinicOpenSettings, object: nil) }
@@ -320,6 +341,7 @@ struct ClinicCommands: Commands {
         }
         CommandGroup(after: .sidebar) {
             Button("MCP Servers…") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
+            Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
             Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
             Toggle("Caffeine Mode", isOn: Binding(get: { caffeine.isOn }, set: { caffeine.isOn = $0 })).keyboardShortcut(key(.caffeine))
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
@@ -368,6 +390,7 @@ extension Notification.Name {
     static let clinicQuickSwitch = Notification.Name("com.r0adkll.clinic.quickSwitch")
     static let clinicSessionDetails = Notification.Name("com.r0adkll.clinic.sessionDetails")
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
+    static let clinicMarketplace = Notification.Name("com.r0adkll.clinic.marketplace")
     static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")

@@ -44,6 +44,7 @@ struct RootView: View {
         .sheet(isPresented: $showMCPServers) { MCPServersSheet() }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { showMCPServers = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.showingMarketplace = true } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             guard isActive else { return }
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
@@ -81,7 +82,9 @@ struct RootView: View {
                 NotificationBell()
             }
         }
-        .navigationTitle(window.editingDraft != nil ? "New session" : (tabs.selectedTab(in: window)?.title ?? "Clinic"))
+        .navigationTitle(window.showingMarketplace ? "Marketplace"
+                         : window.editingDraft != nil ? "New session"
+                         : (tabs.selectedTab(in: window)?.title ?? "Clinic"))
     }
 }
 
@@ -94,15 +97,15 @@ struct DetailView: View {
         let mine = tabs.tabs(in: window)
         let selected = mine.first { $0.id == window.selectedTabId }
         VStack(spacing: 0) {
-            if showTabBar && !mine.isEmpty && window.editingDraft == nil { TabBarView(); Divider() }
+            if showTabBar && !mine.isEmpty && !window.isShowingScreen { TabBarView(); Divider() }
             terminalArea(mine: mine, selected: selected)
-            if window.editingDraft == nil, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
+            if !window.isShowingScreen, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
         }
     }
 
     private func terminalArea(mine: [Tab], selected: Tab?) -> some View {
         let live = mine.filter { $0.replay == nil }
-        let showTerminals = tabs.startupError == nil && window.editingDraft == nil && !mine.isEmpty && selected?.replay == nil
+        let showTerminals = tabs.startupError == nil && !window.isShowingScreen && !mine.isEmpty && selected?.replay == nil
         return ZStack {
             // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
             TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
@@ -115,6 +118,9 @@ struct DetailView: View {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            } else if window.showingMarketplace {
+                MarketplaceScreen()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let draft = window.editingDraft {
                 NewSessionScreen(draft: draft)
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))

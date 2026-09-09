@@ -19,17 +19,36 @@ final class WindowState: Identifiable {
     var selectedTabId: UUID? {
         didSet {
             guard selectedTabId != oldValue else { return }
-            if selectedTabId != nil, editingDraft != nil { editingDraft = nil }
+            if selectedTabId != nil {
+                if editingDraft != nil { editingDraft = nil }
+                showingMarketplace = false
+            }
             store?.selectionChanged(in: self)
         }
     }
     /// The new-session screen shown in the content area (ADR-071); selecting a tab dismisses it (text kept per project).
     var editingDraft: NewSessionDraft? {
-        didSet { if editingDraft != nil, selectedTabId != nil { selectedTabId = nil } }
+        didSet {
+            guard editingDraft != nil else { return }
+            if selectedTabId != nil { selectedTabId = nil }
+            showingMarketplace = false
+        }
+    }
+    /// The Marketplace screen (ADR-084). Like the draft screen it fills the content area instead of a tab,
+    /// so the three are mutually exclusive; each one clears the other two as it comes up.
+    var showingMarketplace = false {
+        didSet {
+            guard showingMarketplace, showingMarketplace != oldValue else { return }
+            selectedTabId = nil
+            editingDraft = nil
+        }
     }
     /// Sidebar select mode and the multi-selection (ADR-074).
     var selectMode = false { didSet { if !selectMode { bulkSelection = [] } } }
     var bulkSelection: Set<SidebarItem> = []
+
+    /// True while the content area belongs to a screen rather than a tab: no tab bar, no footer, no terminals.
+    var isShowingScreen: Bool { showingMarketplace || editingDraft != nil }
 
     init(id: UUID, isPrimary: Bool) { self.id = id; self.isPrimary = isPrimary }
 
