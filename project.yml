@@ -45,6 +45,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.r0adkll.clinic
         PRODUCT_NAME: Clinic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: Sources/Clinic/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/Clinic/Clinic.entitlements
         CODE_SIGN_STYLE: Automatic
@@ -64,6 +65,7 @@ targets:
         NSPrincipalClass: NSApplication
         NSHumanReadableCopyright: "© 2026 Drew Heavner. MIT."
         LSApplicationCategoryType: public.app-category.developer-tools
+        CFBundleIconName: AppIcon
   clinic-hook:
     type: tool
     platform: macOS
