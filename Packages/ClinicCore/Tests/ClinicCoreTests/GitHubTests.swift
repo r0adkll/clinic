@@ -268,7 +268,7 @@ private let laterHumanComment = """
 
         let plain = PullRequestMark(pr: try pr(handWritten(reviewDecision: "", checks: greenChecks, comments: answered, reviews: "")), viewerLogin: "octocat")
         #expect(plain.attention == .none)
-        #expect(plain.symbolName == "arrow.triangle.pull")
+        #expect(plain.symbolName == PullRequestMark.symbol)
         #expect(plain.summary == "Open")
     }
 

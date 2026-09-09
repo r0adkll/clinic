@@ -98,7 +98,7 @@ struct NewSessionScreen: View {
             Spacer(minLength: 8)
             if let branch {
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.branch").imageScale(.small)
+                    Image(systemName: "arrow.trianglehead.branch").imageScale(.small)
                     Text(branch)
                     if draft.worktree {
                         Image(systemName: "arrow.right").imageScale(.small).opacity(0.6)
@@ -220,7 +220,7 @@ struct NewSessionScreen: View {
             focus = draft.worktree ? .branch : .prompt
         } label: {
             chip(active: draft.worktree) {
-                Image(systemName: "arrow.triangle.branch").imageScale(.small)
+                Image(systemName: "arrow.trianglehead.branch").imageScale(.small)
                 Text("Worktree")
                 Image(systemName: draft.worktree ? "checkmark.circle.fill" : "circle")
                     .imageScale(.small).opacity(draft.worktree ? 1 : 0.5)
@@ -234,7 +234,7 @@ struct NewSessionScreen: View {
     /// name means — none of which fitted in a pill.
     private var worktreeRow: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Label("New branch from \(branch ?? "the current branch")", systemImage: "arrow.triangle.branch")
+            Label("New branch from \(branch ?? "the current branch")", systemImage: "arrow.trianglehead.branch")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 TextField("branch name", text: $draft.worktreeName)

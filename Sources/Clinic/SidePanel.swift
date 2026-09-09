@@ -21,7 +21,7 @@ final class PanelPane: Identifiable {
             case .diff: "plus.forwardslash.minus"
             case .files: "doc.text.magnifyingglass"
             case .attachments: "photo.on.rectangle"
-            case .pr: "arrow.triangle.pull"
+            case .pr: PullRequestMark.symbol
             }
         }
 

@@ -64,7 +64,7 @@ public struct PullRequestStatus: Equatable, Sendable {
         let ref = pr.ref
         guard pr.state == .open else {
             let merged = pr.state == .merged
-            lines = [Line(id: "state", tone: .neutral, symbol: merged ? "arrow.triangle.merge" : "xmark.circle",
+            lines = [Line(id: "state", tone: .neutral, symbol: merged ? "arrow.trianglehead.merge" : "xmark.circle",
                           text: merged ? "Merged into \(pr.baseRefName)" : "Closed without merging",
                           detail: pr.headRefName.isEmpty ? nil : "from \(pr.headRefName)")]
             action = nil
@@ -94,13 +94,13 @@ public struct PullRequestStatus: Equatable, Sendable {
                               text: "All " + Self.count(pr.checks.count, "check") + " passed"))
         }
         if conflicting {
-            lines.append(Line(id: "merge", tone: .blocking, symbol: "arrow.triangle.branch",
+            lines.append(Line(id: "merge", tone: .blocking, symbol: "arrow.trianglehead.branch",
                               text: "Conflicts with \(pr.baseRefName)", detail: "Rebase or merge \(pr.baseRefName) to resolve"))
         } else if pr.mergeStateStatus == "BEHIND" {
             lines.append(Line(id: "merge", tone: .waiting, symbol: "arrow.down.circle",
                               text: "Behind \(pr.baseRefName)", detail: "Update the branch before merging"))
         } else if pr.mergeable == "MERGEABLE" {
-            lines.append(Line(id: "merge", tone: .good, symbol: "arrow.triangle.merge",
+            lines.append(Line(id: "merge", tone: .good, symbol: "arrow.trianglehead.merge",
                               text: "No conflicts with \(pr.baseRefName)"))
         }
         switch pr.reviewDecision {
@@ -145,7 +145,7 @@ public struct PullRequestStatus: Equatable, Sendable {
             action = Action(title: "Fix the failing checks", symbol: "hammer",
                             prompt: "The CI checks on PR #\(ref.number) (\(ref.url)) are failing: \(Self.names(failing) ?? ""). Investigate the failures and fix them.")
         } else if conflicting {
-            action = Action(title: "Resolve the conflicts", symbol: "arrow.triangle.branch",
+            action = Action(title: "Resolve the conflicts", symbol: "arrow.trianglehead.branch",
                             prompt: "PR #\(ref.number) (\(ref.url)) has merge conflicts with \(pr.baseRefName). Rebase or merge \(pr.baseRefName) and resolve them.")
         } else if pr.reviewDecision == "CHANGES_REQUESTED" || unanswered > 0 {
             action = Action(title: "Address the review comments", symbol: "bubble.left.and.text.bubble.right",

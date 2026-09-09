@@ -253,6 +253,14 @@ public struct PullRequestMark: Hashable, Sendable {
         }
     }
 
+    /// The plain "this is a pull request" glyph, for every place with no state to show yet: the panel
+    /// tab, the footer chip before the PR loads, the sidebar placeholder, and `attention == .none`.
+    ///
+    /// GitHub's own idiom — two commits joined by a curve — rather than SF Symbols' `arrow.trianglehead.pull`
+    /// (ADR-088). Clinic draws this at 13 pt everywhere, and at that size the arrow variants are not
+    /// tellable from any other small arrow; the two-dot curve still reads as "a branch off a branch".
+    public static let symbol = "point.topleft.down.to.point.bottomright.curvepath"
+
     public var state: PullRequest.State
     public var isDraft: Bool
     public var attention: Attention
@@ -274,7 +282,7 @@ public struct PullRequestMark: Hashable, Sendable {
         let prefix = pr.state == .open ? (pr.isDraft ? "Draft" : "Open") : (pr.state == .merged ? "Merged" : "Closed")
         guard pr.state == .open else {
             attention = .none
-            symbolName = pr.state == .merged ? "arrow.triangle.merge" : "xmark.circle"
+            symbolName = pr.state == .merged ? "arrow.trianglehead.merge" : "xmark.circle"
             summary = prefix
             return
         }
@@ -301,7 +309,7 @@ public struct PullRequestMark: Hashable, Sendable {
             attention = .approved; symbolName = "checkmark.circle"
             summary = "\(prefix) · approved"
         } else {
-            attention = .none; symbolName = "arrow.triangle.pull"
+            attention = .none; symbolName = Self.symbol
             summary = prefix
         }
     }

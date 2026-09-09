@@ -28,7 +28,7 @@ final class DiffPanelModel {
             case .turn: "bubble.left.and.text.bubble.right"
             case .session: "clock.arrow.circlepath"
             case .workingTree: "pencil.line"
-            case .branch: "arrow.triangle.branch"
+            case .branch: "arrow.trianglehead.branch"
             }
         }
     }

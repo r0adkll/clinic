@@ -401,7 +401,7 @@ struct PRChip: View {
         let mark = prs.mark(for: ref)
         Button(action: onTap) {
             HStack(spacing: 4) {
-                Image(systemName: mark?.symbolName ?? "arrow.triangle.pull")
+                Image(systemName: mark?.symbolName ?? PullRequestMark.symbol)
                 Text("PR #" + String(ref.number)).monospacedDigit()
             }
             .font(.callout)
@@ -430,7 +430,7 @@ struct PRMarkView: View {
         if let mark = prs.aggregateMark(for: refs) {
             Image(systemName: mark.symbolName).font(.caption).foregroundStyle(PRStyle.color(mark)).help(mark.summary)
         } else if !refs.isEmpty {
-            Image(systemName: "arrow.triangle.pull").font(.caption).foregroundStyle(.tertiary).task { prs.ensureLoaded(refs) }
+            Image(systemName: PullRequestMark.symbol).font(.caption).foregroundStyle(.tertiary).task { prs.ensureLoaded(refs) }
         }
     }
 }
