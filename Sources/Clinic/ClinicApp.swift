@@ -211,10 +211,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                    let scope = DiffPanelModel.Scope(rawValue: raw) {
                     tabs.selectedTab?.panel.pane(.diff)?.diff?.scope = scope
                 }
-                if UserDefaults.standard.bool(forKey: "ClinicCollapseAllAfterLaunch") {
+                // `-ClinicDiffSelectFile <path>`: pick a file out of the tree, which is what a
+                // reader's click does now that the panel shows one file at a time (ADR-101).
+                if let path = UserDefaults.standard.string(forKey: "ClinicDiffSelectFile"), !path.isEmpty {
                     try? await Task.sleep(for: .seconds(6))
-                    tabs.selectedTab?.panel.pane(.diff)?.diff?.smokeCollapseAll()
+                    tabs.selectedTab?.panel.pane(.diff)?.diff?.smokeSelect(path: path)
                 }
+            }
+        }
+        // `-ClinicOpenPRPanelOnLaunch YES` opens the newest linked pull request's pane, which is
+        // otherwise reachable only by clicking the footer chip. Deferred like the diff panel's key,
+        // so it lands after the session it belongs to is open.
+        if UserDefaults.standard.bool(forKey: "ClinicOpenPRPanelOnLaunch") {
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                tabs.togglePRPage()
             }
         }
         // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.

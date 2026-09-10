@@ -16,7 +16,7 @@ struct PRPage: View {
     /// `-ClinicPRPaneOnLaunch conversation|checks|files` (ADR-038): a smoke run can open the panel on
     /// a given tab rather than driving a synthetic click into it.
     @State private var pane: Pane = Pane(rawValue: UserDefaults.standard.string(forKey: "ClinicPRPaneOnLaunch") ?? "") ?? .conversation
-    @State private var files = PRFilesModel()
+    @State private var files = DiffBrowser()
     @State private var confirm: PendingAction?
 
     enum Pane: String, CaseIterable, Identifiable {
@@ -59,7 +59,7 @@ struct PRPage: View {
             switch pane {
             case .conversation: conversation(pr)
             case .checks: checks(pr)
-            case .files: PRFilesView(ref: ref, model: files)
+            case .files: PRFilesView(ref: ref, browser: files)
             }
             if let error = prs.errors[ref.id] {
                 Divider()

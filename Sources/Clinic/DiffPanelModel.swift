@@ -62,35 +62,16 @@ final class DiffPanelModel {
     /// Newest first, as the turn menu lists them.
     private(set) var turns: [TurnSnapshot] = []
     private(set) var files: [UnifiedDiffFile] = []
-    /// Chip-sized descriptions for the rail, rebuilt only when the diff itself changes.
-    private(set) var fileSummaries: [DiffFileSummary] = []
-    /// The paged, flattened rows. The body renders `text` — the same page as one text document
-    /// (ADR-100) — but paging, collapsing and highlighting are all still stated in rows.
-    private(set) var page = DiffPage()
-    /// What the body renders, by reference: the document plus whatever highlighting has arrived.
-    let text = DiffTextSource()
-    /// Files the reader has collapsed by hand. Collapsing frees a file's whole line budget, so it
-    /// is also the way out of a diff too large to page through comfortably.
-    private(set) var collapsed: Set<String> = []
-    /// How many files the page renders. It grows only when the reader asks — collapsing a file
-    /// makes the page cheaper, it does not pull unrelated files onto the screen.
-    private(set) var pagedFileCount = 0
+    /// The tree, the selection and the file on screen (ADR-101). The panel decides *which* diff;
+    /// browsing it is the same job the pull request panel's Files tab does, so it is the same view.
+    let browser = DiffBrowser()
 
-    /// Rows, not files. Building them is cheap (72k rows in ~26 ms) — the cost that matters is
-    /// highlighting, which runs off the main actor after the text is already on screen.
-    static let lineBudget = 20_000
     private(set) var isLoading = false
     private(set) var isBound = false
     private(set) var error: String?
     /// `+n −n` for a turn, filled in lazily when the menu asks (a patch per turn would be wasteful).
     private(set) var turnStats: [String: DiffStat] = [:]
 
-    private let highlighter = DiffSyntaxHighlighter()
-    private let rowCache = DiffPage.RowCache()
-    private var highlightTask: Task<Void, Never>?
-    /// Files whose highlighting has already landed. Row ids are stable for the life of a diff, so
-    /// collapsing or paging never invalidates what is already coloured.
-    private var highlightedFiles: Set<String> = []
     private var sessionId: SessionID?
     private var snapshots: SnapshotService?
     private var watcher: FSEventsWatcher?
@@ -199,19 +180,11 @@ final class DiffPanelModel {
             let diff = try await currentDiff(repo)
             guard !Task.isCancelled else { return }
             files = diff?.files ?? []
-            fileSummaries = files.map(DiffFileSummary.init)
-            rowCache.reset()
-            text.clearTokens()
-            highlightedFiles = []
-            collapsed = []
-            pagedFileCount = DiffPage.fileLimit(for: files, budget: Self.lineBudget)
-            rebuildPage()
+            browser.show(files)
             error = nil
         } catch {
             files = []
-            fileSummaries = []
-            page = DiffPage()
-            text.replace(document: DiffDocument(), keepingTokens: false)
+            browser.show([])
             self.error = "\(error)"
             Self.log.error("diff panel load (\(self.scope.rawValue, privacy: .public)): \(error, privacy: .public)")
         }
@@ -246,66 +219,11 @@ final class DiffPanelModel {
         }
     }
 
-    /// Reflows the rows for the current budget and collapse state, then asks for highlighting.
-    /// The page is published first so the diff appears immediately and colours arrive after.
-    private func rebuildPage() {
-        page = DiffPage.build(files: files, collapsed: collapsed, limit: pagedFileCount, rowCache: rowCache)
-        // Row ids are stable for the life of a diff, so colours already fetched survive a collapse
-        // or a page extension — the document is rebuilt, the tokens are not.
-        text.replace(document: DiffDocument.build(page: page), keepingTokens: true)
-        highlightVisibleFiles()
-    }
-
-    /// Highlights only what has not been highlighted yet and merges the result in. Rebuilding the
-    /// whole dictionary on every collapse re-parsed files that were already coloured.
-    private func highlightVisibleFiles() {
-        let pending = page.files.filter { !highlightedFiles.contains($0.path) && !$0.rows.isEmpty }
-        guard !pending.isEmpty else { return }
-        highlightTask?.cancel()
-        let theme = DiffSyntaxTheme.current
-        highlightTask = Task { [weak self, highlighter] in
-            let result = await highlighter.highlights(for: pending, theme: theme)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self else { return }
-                self.text.merge(tokens: result)
-                self.highlightedFiles.formUnion(pending.map(\.path))
-            }
-        }
-    }
-
-    func showMoreFiles() {
-        guard page.hasMore else { return }
-        pagedFileCount += DiffPage.fileLimit(for: files, collapsed: collapsed, budget: Self.lineBudget, from: pagedFileCount)
-        rebuildPage()
-    }
-
-    /// Extends the page until `path` is rendered. The rail lists every changed file, so a chip for
-    /// a file still behind "Show more" has to bring it in rather than scroll to nothing.
-    func reveal(path: String) -> Bool {
-        guard let index = files.firstIndex(where: { $0.path == path }) else { return false }
-        if index >= pagedFileCount {
-            pagedFileCount = index + 1
-            rebuildPage()
-        }
-        return true
-    }
-
-    func toggleCollapsed(_ path: String) {
-        if collapsed.contains(path) { collapsed.remove(path) } else { collapsed.insert(path) }
-        rebuildPage()
-    }
-
-    func isCollapsed(_ path: String) -> Bool { collapsed.contains(path) }
-
-    /// `-ClinicCollapseAllAfterLaunch`: collapses every rendered file one at a time, the way a
-    /// reader would, and logs how long the whole run took. A click cannot be scripted; this is how
-    /// the collapse path gets measured.
-    func smokeCollapseAll() {
-        let started = Date()
-        let paths = page.files.map(\.path)
-        for path in paths { toggleCollapsed(path) }
-        Self.log.info("smokeCollapseAll: \(paths.count, privacy: .public) files in \(Date().timeIntervalSince(started) * 1000, privacy: .public) ms")
+    /// `-ClinicDiffSelectFile <path>`: what a click in the tree does, for a smoke run that cannot
+    /// synthesise one.
+    func smokeSelect(path: String) {
+        browser.select(path)
+        Self.log.info("smokeSelect: \(path, privacy: .public) of \(self.files.count, privacy: .public) files")
     }
 
     /// Fills `turnStats` for the turns the menu is about to show. Numstat only, never a patch.

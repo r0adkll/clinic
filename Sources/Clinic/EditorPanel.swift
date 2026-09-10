@@ -54,6 +54,12 @@ final class EditorModel {
     private var fileModified: Date?
     var recentlyOpened: [String] = []
     private(set) var tree: [FileTreeNode] = []
+    /// Every path the tree is built from, cached so the filter can rank without another index read.
+    private(set) var paths: [String] = []
+    /// A tree while browsing, a ranked flat list while filtering (ADR-102) — the same shape the diff
+    /// browsers use, and the same matcher Quick Open ranks with.
+    var filter = "" { didSet { guard filter != oldValue else { return }; rank() } }
+    private(set) var filtered: [String] = []
     /// Directories the user has opened. Held in the model rather than inside the outline view for two
     /// reasons (ADR-099): the tree is rebuilt from scratch on every FSEvents burst, and a save must
     /// not collapse the folders you were reading; and opening a file from anywhere reveals it by
@@ -85,6 +91,10 @@ final class EditorModel {
         guard buildsTree else { return }
         let files = await index.files()
         let hidden = showHidden
+        // The filter ranks over the same set the tree is built from, so a hidden file the tree does
+        // not show is not a hit the filter can offer either.
+        paths = hidden ? files : files.filter { !$0.split(separator: "/").contains { $0.hasPrefix(".") } }
+        rank()
         tree = await Task.detached(priority: .userInitiated) {
             FileTreeNode.build(from: files, showHidden: hidden)
         }.value
@@ -93,6 +103,10 @@ final class EditorModel {
     /// The flat rows the tree draws (ADR-099). Cheap on every redraw: it descends only into open
     /// directories, so a collapsed repo costs one pass over its top level.
     var visibleRows: [FileTreeRow] { FileTreeNode.rows(tree, expanded: expandedDirectories) }
+
+    private func rank() {
+        filtered = filter.isEmpty ? [] : FuzzyMatcher.rank(filter, candidates: paths, limit: 300).map(\.candidate)
+    }
 
     func toggle(directory path: String) {
         if expandedDirectories.contains(path) { expandedDirectories.remove(path) } else { expandedDirectories.insert(path) }
@@ -222,9 +236,12 @@ struct EditorPanel: View {
             HStack(spacing: 0) {
                 if prefs.showTree {
                     sidebar.frame(width: width)
-                    TreeResizeHandle(width: $treeWidth, base: width, available: geo.size.width)
+                    TreeSplitHandle(width: $treeWidth,
+                                    base: width,
+                                    clamp: { clamped($0, in: geo.size.width) },
+                                    commit: { EditorPrefs.shared.treeWidth = $0 })
                 }
-                FileEditorView(model: model, showsTreeToggle: true, showsPopOut: true)
+                FileEditorView(model: model, showsPopOut: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -239,16 +256,21 @@ struct EditorPanel: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Text((model.root as NSString).lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1).help(model.root)
-                Spacer(minLength: 4)
+            // The project's name is not here: the pane's chip and the window footer both name it
+            // already, and the room buys the filter (ADR-102).
+            PaneHeader {
+                TreeToggleButton(isOn: Binding(get: { EditorPrefs.shared.showTree },
+                                               set: { EditorPrefs.shared.showTree = $0 }),
+                                 shownHelp: "Hide the file tree (⌘⌃E)",
+                                 hiddenHelp: "Show the file tree (⌘⌃E)")
+                TreeFilterField(text: $model.filter, matches: model.filtered.count, total: model.paths.count)
                 Button { model.collapseAll() } label: { Image(systemName: "arrow.down.right.and.arrow.up.left") }
                     .buttonStyle(.borderless).help("Collapse all folders")
                     .disabled(model.expandedDirectories.isEmpty)
-                Toggle(isOn: $model.showHidden) { Image(systemName: "eye") }.toggleStyle(.button).buttonStyle(.borderless).help("Show hidden files")
+                Toggle(isOn: $model.showHidden) { Image(systemName: "eye") }
+                    .toggleStyle(.button).buttonStyle(.borderless).help("Show hidden files")
             }
             .controlSize(.small)
-            .padding(.horizontal, 8).padding(.vertical, 6)
             Divider()
             // A flat list of rows rather than an `OutlineGroup` (ADR-099): the outline hands its
             // content closure a view only as wide as the label, so the rest of the column was dead
@@ -256,13 +278,20 @@ struct EditorPanel: View {
             // "reveal the file I just opened".
             ScrollViewReader { proxy in
                 FileTreeScroll {
-                    agentFiles
-                    FileTreeSectionHeader("Files", top: agentFilesCount == 0 ? 2 : 12)
-                    if model.visibleRows.isEmpty {
-                        Text("No files").font(.caption).foregroundStyle(.secondary)
+                    if model.filter.isEmpty {
+                        agentFiles
+                        FileTreeSectionHeader("Files", top: agentFilesCount == 0 ? 2 : 12)
+                        if model.visibleRows.isEmpty {
+                            Text("No files").font(.caption).foregroundStyle(.secondary)
+                                .padding(.leading, 6).frame(height: FileTreeMetrics.rowHeight)
+                        }
+                        ForEach(model.visibleRows) { row in treeRow(row) }
+                    } else if model.filtered.isEmpty {
+                        Text("No matching files").font(.caption).foregroundStyle(.secondary)
                             .padding(.leading, 6).frame(height: FileTreeMetrics.rowHeight)
+                    } else {
+                        ForEach(model.filtered, id: \.self) { path in filterRow(path) }
                     }
-                    ForEach(model.visibleRows) { row in treeRow(row) }
                 }
                 // `open` expands the folders above the file; this is the other half of revealing it.
                 .onChange(of: model.openPath) {
@@ -293,6 +322,16 @@ struct EditorPanel: View {
         }
     }
 
+    /// A filter hit: the name over its directory, the row Quick Open uses for the same job.
+    private func filterRow(_ path: String) -> some View {
+        FileTreeRowView(name: (path as NSString).lastPathComponent,
+                        subtitle: (path as NSString).deletingLastPathComponent,
+                        symbol: FileGlyph.symbol(for: path),
+                        isSelected: model.relativeOpenPath == path,
+                        help: path) { model.open(relative: path) }
+            .contextMenu { FileRowMenu(path: (model.root as NSString).appendingPathComponent(path), root: model.root) }
+    }
+
     /// A tap anywhere on the row acts: a folder opens or closes, a file opens. The chevron is a
     /// state indicator, not the only way in.
     private func treeRow(_ row: FileTreeRow) -> some View {
@@ -306,41 +345,6 @@ struct EditorPanel: View {
         }
         .id(row.path)
         .contextMenu { FileRowMenu(path: (model.root as NSString).appendingPathComponent(row.path), root: model.root) }
-    }
-}
-
-/// The draggable seam between the tree and the code view (ADR-081).
-///
-/// The gesture measures in **global** space. The handle moves as it is dragged, so a `.local`
-/// translation is taken against an origin that has just moved and the column chases the pointer —
-/// which is exactly how the first version of this behaved.
-private struct TreeResizeHandle: View {
-    @Binding var width: CGFloat
-    /// The width actually on screen when the drag starts (the stored width may be clamped smaller).
-    let base: CGFloat
-    let available: CGFloat
-    @State private var start: CGFloat?
-
-    var body: some View {
-        ZStack {
-            Color.clear
-            Divider()
-        }
-        .frame(width: 9)
-        .contentShape(Rectangle())
-        .pointerStyle(.columnResize)
-        .gesture(
-            DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                .onChanged { value in
-                    let from = start ?? base
-                    if start == nil { start = from }
-                    width = EditorPrefs.clamp(from + value.translation.width, available: available)
-                }
-                .onEnded { _ in
-                    start = nil
-                    EditorPrefs.shared.treeWidth = width.rounded()
-                }
-        )
     }
 }
 
@@ -360,8 +364,8 @@ struct FileRowMenu: View {
 /// (ADR-081). Quick open and the external-change prompt live here, so both hosts get them.
 struct FileEditorView: View {
     @Bindable var model: EditorModel
-    /// The panel shows the tree toggle and the pop-out; a file window is already popped out and has no tree.
-    var showsTreeToggle = false
+    /// A file window is already popped out and has no tree, so it shows neither the toggle nor the
+    /// pop-out button.
     var showsPopOut = false
     @State private var quickOpen = false
 
@@ -386,41 +390,41 @@ struct FileEditorView: View {
         } message: { Text("You have unsaved edits to \((model.openPath as NSString?)?.lastPathComponent ?? "this file").") }
     }
 
-    /// The header is on screen in both tree states, so the tree toggle can never hide itself.
+    /// The detail column's header (ADR-102): the same 28 pt band the tree's header is, carrying the
+    /// tree toggle only while the tree is hidden — open, the toggle sits in the tree's own header so
+    /// it never moves off the pane's top-left corner.
     private var header: some View {
-        HStack(spacing: 8) {
-            if showsTreeToggle {
-                Button { EditorPrefs.shared.showTree.toggle() } label: {
-                    Image(systemName: EditorPrefs.shared.showTree ? "sidebar.left" : "sidebar.leading")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(EditorPrefs.shared.showTree ? Color.accentColor : Color.secondary)
-                .help(EditorPrefs.shared.showTree ? "Hide the file tree (⌘⌃E)" : "Show the file tree (⌘⌃E)")
+        PaneHeader {
+            if showsPopOut, !EditorPrefs.shared.showTree {
+                TreeToggleButton(isOn: Binding(get: { EditorPrefs.shared.showTree },
+                                               set: { EditorPrefs.shared.showTree = $0 }),
+                                 shownHelp: "Hide the file tree (⌘⌃E)",
+                                 hiddenHelp: "Show the file tree (⌘⌃E)")
             }
+            if let rel = model.relativeOpenPath {
+                Text(rel).font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.head).help(rel)
+                if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
+                Text(model.language.tsName).font(.caption2).foregroundStyle(.tertiary)
+            } else {
+                Text("No file open").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
             Button { quickOpen = true } label: { Image(systemName: "magnifyingglass") }
                 .buttonStyle(.borderless).help("Quick open (⌘⇧O)").keyboardShortcut("o", modifiers: [.command, .shift])
-            if let rel = model.relativeOpenPath {
-                Text(rel).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.head)
-                if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
-                Text(model.language.tsName).font(.caption).foregroundStyle(.tertiary)
-            } else {
-                Text("No file open").foregroundStyle(.secondary)
-            }
-            Spacer()
             if let path = model.openPath {
-                Button("Revert") { model.revert() }.disabled(!model.isDirty)
-                Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command).disabled(!model.isDirty)
+                if model.isDirty {
+                    Button("Revert") { model.revert() }
+                    Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command)
+                }
                 if showsPopOut {
                     Button { FileWindowController.show(path: path, root: model.root) } label: { Image(systemName: "macwindow") }
-                        .help("Open this file in its own window")
+                        .buttonStyle(.borderless).help("Open this file in its own window")
                 }
                 Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: { Image(systemName: "folder") }
-                    .help("Reveal in Finder")
+                    .buttonStyle(.borderless).help("Reveal in Finder")
             }
         }
         .controlSize(.small)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.bar)
     }
 }
 
