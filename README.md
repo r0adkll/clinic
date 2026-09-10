@@ -20,6 +20,12 @@ make build      # builds the app
 make test       # runs the test suites
 ```
 
+## Documentation
+
+`docs/` is an Obsidian vault holding the design: an ADR per decision in `docs/Decisions/`, a one-page
+summary in `docs/Design/Design Tree.md`, architecture and research notes, and a running log. It reads
+fine as plain Markdown; open `docs/` as a vault if you want the wikilinks and graph.
+
 ## License
 
 MIT. Ghostty is MIT; its shell-integration scripts are GPLv3 and are not bundled.

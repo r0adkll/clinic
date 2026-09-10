@@ -22,3 +22,6 @@ Fixtures/local/
 
 # Local signing config (see Local.xcconfig.example)
 Local.xcconfig
+
+# Obsidian per-machine config for the docs vault (ADR-105)
+docs/.obsidian/

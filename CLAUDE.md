@@ -3,11 +3,12 @@
 Native macOS Claude Code session manager (a clean-room Collins reimplementation on libghostty).
 
 ## Before changing anything
-- Design decisions are ADRs in the Obsidian vault `~/SoftwareProjects/vaults/clinic/Decisions/`. Read `Design/Design Tree.md` there first; it links every decision.
-- Append a dated entry to `~/SoftwareProjects/vaults/clinic/Memory/Log.md` at the end of every working session.
+- Design decisions are ADRs in `docs/Decisions/` (the repo's Obsidian vault, ADR-105). Read `docs/Design/Design Tree.md` first; it links every decision.
+- Append a dated entry to `docs/Memory/Log.md` at the end of every working session.
 - Any deviation from an ADR needs a new ADR (superseding the old one), not a silent change.
 
 ## Layout
+- `docs/` — the Obsidian vault: ADRs, design tree, architecture notes, research, log, backlog. Open `docs/` as the vault root.
 - `project.yml` — XcodeGen spec. Run `make project` to regenerate `Clinic.xcodeproj` (gitignored).
 - `Packages/ClinicCore` — models, JSONL reader, state machine, persistence. No AppKit/SwiftUI.
 - `Packages/GhosttyBridge` — the only place `ghostty.h`/`GhosttyKit` is imported.
