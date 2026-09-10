@@ -18,13 +18,14 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func post(sessionId: SessionID, title: String, body: String) {
+    /// `silent` when Clinic has already played the sound itself, or sound is off (ADR-097).
+    func post(sessionId: SessionID, title: String, body: String, silent: Bool) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.userInfo = ["sessionId": sessionId.rawValue]
         content.interruptionLevel = .timeSensitive
-        if UserDefaults.standard.bool(forKey: Prefs.notificationSound) { content.sound = .default }
+        if !silent { content.sound = .default }
         let request = UNNotificationRequest(identifier: "\(sessionId.rawValue)-\(Date().timeIntervalSince1970)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { Self.log.error("notification post: \(error, privacy: .public)") }

@@ -99,4 +99,15 @@ import Testing
         #expect(entry.first?["async"] as? Bool == true)
         #expect((entry.first?["command"] as? String)?.contains("clinic-hook '/Users/me/Library/Application Support/Clinic/hook.sock'") == true)
     }
+
+    /// A registered `WorktreeCreate` command hook replaces the CLI's own `git worktree add` and must
+    /// print the new path; Clinic's helper only forwards, so registering it aborted every `-w`
+    /// launch with "hook succeeded but returned no worktree path" (ADR-098).
+    @Test func hookSettingsNeverRegistersWorktreeCreate() throws {
+        #expect(!HookSettings.events.contains("WorktreeCreate"))
+        let data = try HookSettings.json(helperPath: "/Applications/Clinic.app/Contents/MacOS/clinic-hook", socketPath: "/tmp/hook.sock")
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = try #require(root["hooks"] as? [String: Any])
+        #expect(hooks["WorktreeCreate"] == nil)
+    }
 }

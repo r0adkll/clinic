@@ -25,7 +25,13 @@ struct ClinicApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
         .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine) }
-        Settings { PreferencesView().environment(appDelegate.usage).environment(appDelegate.bindings).environment(appDelegate.tabs.snapshots) }
+        Settings {
+            PreferencesView(tabs: appDelegate.tabs)
+                .environment(appDelegate.usage)
+                .environment(appDelegate.bindings)
+                .environment(appDelegate.tabs.snapshots)
+                .environment(appDelegate.tabs.sounds)
+        }
     }
 }
 

@@ -191,6 +191,8 @@ final class TabStore {
     let hooks: HookService
     let notifications: NotificationService
     let history: NotificationStore
+    /// Which file a notification sounds with, and the rotation over them (ADR-097).
+    let sounds = NotificationSoundPlayer()
     /// Turn snapshots for the diff panel (ADR-080).
     let snapshots = SnapshotService()
     /// Set by the app after construction (ADR-056, ADR-061).
@@ -214,11 +216,10 @@ final class TabStore {
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
             history.showCard(entry)
-            if UserDefaults.standard.bool(forKey: Prefs.notificationSound) { NSSound(named: "Ping")?.play() }
-        } else if let sessionId {
-            notifications.post(sessionId: sessionId, title: title, body: body)
+            sounds.playForCard()
         } else {
-            notifications.post(sessionId: SessionID(UUID().uuidString), title: title, body: body)
+            let silent = sounds.playForSystemNotification()
+            notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body, silent: silent)
         }
         tab?.unread = true
         updateBadge()
@@ -799,10 +800,10 @@ final class TabStore {
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
-        if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" { snapshots.forget(session: event.sessionId) }
+        if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
             Task { await sessions.refresh(transcriptPath: path); self.refreshFooter(tab) }
-        } else if event.hookEventName == "CwdChanged" || event.hookEventName == "WorktreeCreate" {
+        } else if event.hookEventName == "CwdChanged" {
             refreshFooter(tab)
         }
         guard let old = tab.state, let new = SessionStateMachine.reduce(old, event: event) else { return }

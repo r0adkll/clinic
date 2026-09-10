@@ -92,9 +92,12 @@ public struct ClaudeLaunch: Sendable, Hashable {
 
 /// Generates the `--settings` JSON that registers Clinic's hooks (ADR-027).
 public enum HookSettings {
+    /// Notification events only. `WorktreeCreate` is deliberately absent: registering it *replaces*
+    /// the CLI's own `git worktree add` and the hook is then expected to print the new path, so a
+    /// forwarding helper that prints nothing aborts every `-w` launch (ADR-098).
     public static let events: [String] = [
         "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PermissionDenied", "Notification",
-        "Stop", "StopFailure", "PostModelSwitch", "CwdChanged", "WorktreeCreate", "SessionEnd",
+        "Stop", "StopFailure", "PostModelSwitch", "CwdChanged", "SessionEnd",
     ]
 
     /// - Parameters:

@@ -344,7 +344,7 @@ import Testing
     }
 
     @Test func everythingElseIsIgnored() {
-        for name in ["PreToolUse", "PermissionRequest", "PermissionDenied", "Notification", "PostModelSwitch", "CwdChanged", "WorktreeCreate"] {
+        for name in ["PreToolUse", "PermissionRequest", "PermissionDenied", "Notification", "PostModelSwitch", "CwdChanged"] {
             #expect(SnapshotTrigger(event: Self.hook(name)) == nil)
         }
     }

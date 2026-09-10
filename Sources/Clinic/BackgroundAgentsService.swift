@@ -74,7 +74,10 @@ final class BackgroundAgentsService {
         if let router { router(sid, title, body, kind) }
         else {
             history?.record(sessionId: sid, title: title, body: body, kind: kind)
-            if !(sessions?.state.mutedSessions.contains(sid) ?? false) { notifications?.post(sessionId: sid, title: title, body: body) }
+            // No router means no TabStore, so no rotation either (ADR-097); the pref alone decides.
+            if !(sessions?.state.mutedSessions.contains(sid) ?? false) {
+                notifications?.post(sessionId: sid, title: title, body: body, silent: !UserDefaults.standard.bool(forKey: Prefs.notificationSound))
+            }
         }
     }
 
