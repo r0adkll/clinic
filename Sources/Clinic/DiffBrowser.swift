@@ -177,16 +177,16 @@ struct DiffBrowserView: View {
             if !showTree { TreeToggleButton(isOn: $showTree) }
             if let file = browser.selectedFile {
                 Text(file.path)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(size: PaneMetrics.label, design: .monospaced))
                     .lineLimit(1).truncationMode(.head)
                     .help(file.path)
                 if let status = DiffFileStatus(file) { status.label }
                 Spacer(minLength: 8)
-                Text("+\(file.additions)").foregroundStyle(.green).font(.caption.monospacedDigit())
-                Text("−\(file.deletions)").foregroundStyle(.red).font(.caption.monospacedDigit())
+                Text("+\(file.additions)").foregroundStyle(.green).font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
+                Text("−\(file.deletions)").foregroundStyle(.red).font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
             } else {
                 Text(browser.isEmpty ? "No changes" : "Select a file")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
         }
@@ -209,7 +209,7 @@ struct DiffBrowserView: View {
             tree
         } else if browser.filtered.isEmpty {
             VStack {
-                Text("No matching files").font(.caption).foregroundStyle(.secondary)
+                Text("No matching files").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                 Spacer()
             }
             .padding(.top, 20)
@@ -298,10 +298,11 @@ enum DiffFileStatus {
 
     var label: some View {
         Text(title)
-            .font(.caption2)
+            .font(.system(size: 11, weight: .medium))
             .foregroundStyle(colour)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(colour.opacity(0.12), in: Capsule())
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(colour.opacity(0.14), in: Capsule())
+            .fixedSize()
     }
 }
 
@@ -313,12 +314,12 @@ struct DiffFileStat: View {
     var body: some View {
         if let file {
             if file.isNew {
-                Text("A").font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                Text("A").font(.system(size: 11, weight: .bold)).foregroundStyle(.green)
             } else if file.isDeleted {
-                Text("D").font(.caption2.weight(.semibold)).foregroundStyle(.red)
+                Text("D").font(.system(size: 11, weight: .bold)).foregroundStyle(.red)
             } else {
                 Text("\(file.additions + file.deletions)")
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
             }
         }
     }

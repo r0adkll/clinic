@@ -45,20 +45,22 @@ struct DiffPanel: View {
 
     // MARK: Header
 
+    /// `PaneHeader`, so the scope band and the two headers of the browser under it are one chrome
+    /// rather than three bars of three heights (ADR-102, sized by ADR-103).
     private var header: some View {
-        HStack(spacing: 6) {
+        PaneHeader {
             scopeMenu
             secondaryControl
             Spacer(minLength: 4)
             if model.isLoading {
                 ProgressView().controlSize(.small)
             } else if !model.files.isEmpty {
-                Text("+\(model.totals.additions)").foregroundStyle(.green).font(.caption.monospacedDigit())
-                Text("−\(model.totals.deletions)").foregroundStyle(.red).font(.caption.monospacedDigit())
+                Text("+\(model.totals.additions)").foregroundStyle(.green)
+                    .font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
+                Text("−\(model.totals.deletions)").foregroundStyle(.red)
+                    .font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(.bar)
     }
 
     private var scopeMenu: some View {

@@ -624,8 +624,10 @@ enum PRStyle {
         static let header: CGFloat = 15
         /// Leading glyph on a status line, beside 11 pt `.subheadline`.
         static let statusLine: CGFloat = 13
-        /// Panel tab strip, beside the other pane glyphs at 10 pt.
-        static let tab: CGFloat = 12
+        /// Panel tab strip, beside the other pane glyphs at 11 pt.
+        static let tab: CGFloat = 13
+        /// The compact panel tab strip, where the glyph is the whole chip (ADR-104).
+        static let tabCompact: CGFloat = 15
     }
 
     static func color(_ mark: PullRequestMark) -> Color {

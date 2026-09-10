@@ -5,19 +5,26 @@ import ClinicCore
 /// request panel's changed-file tree and its filter results, and Quick Open. One place, so the four
 /// of them indent, size and highlight identically.
 enum FileTreeMetrics {
-    /// AppKit's source-list row height. Every row is a hit target this tall and the *full* width of
-    /// its column — the trees this replaced hit-tested only the label, so clicking to the right of a
-    /// short file name did nothing at all.
-    static let rowHeight: CGFloat = 24
+    /// Every row is a hit target this tall and the *full* width of its column — the trees this
+    /// replaced hit-tested only the label, so clicking to the right of a short file name did nothing
+    /// at all. ADR-099 took AppKit's 24 pt source-list height; ADR-103 gives the 13 pt name the
+    /// leading it wants, at the cost of about one row per 340 pt of column.
+    static let rowHeight: CGFloat = 26
     /// A two-line row (a filter hit: name over its directory) needs the second line's leading.
-    static let twoLineRowHeight: CGFloat = 36
-    static let indent: CGFloat = 13
-    static let chevron: CGFloat = 12
-    static let icon: CGFloat = 16
+    static let twoLineRowHeight: CGFloat = 40
+    static let indent: CGFloat = 14
+    /// Wide enough that the chevron is a shape and not a tick. It is a state indicator — the row is
+    /// the control (ADR-099) — but an indicator still has to be readable at a glance.
+    static let chevron: CGFloat = 14
+    static let icon: CGFloat = 18
     /// Horizontal breathing room around the list, so the row's rounded fill is inset from the edges
     /// the way a macOS source list's is.
     static let listInset: CGFloat = 6
     static let radius: CGFloat = 5
+    /// The name's point size: macOS's own source lists use 13, and this column had been drawing 12.
+    static let nameSize: CGFloat = 13
+    static let subtitleSize: CGFloat = 11
+    static let glyphSize: CGFloat = 12.5
 }
 
 /// One row of a file list: a full-width control carrying an optional disclosure chevron, a glyph,
@@ -65,8 +72,8 @@ struct FileTreeRowView<Accessory: View>: View {
     private var isDirectory: Bool { isExpanded != nil }
 
     private var fill: Color {
-        if isSelected { return Color.accentColor.opacity(0.18) }
-        if hovering { return Color.primary.opacity(0.07) }
+        if isSelected { return Color.accentColor.opacity(hovering ? 0.26 : 0.20) }
+        if hovering { return Color.primary.opacity(0.09) }
         return .clear
     }
 
@@ -75,12 +82,12 @@ struct FileTreeRowView<Accessory: View>: View {
             HStack(spacing: 4) {
                 chevron
                 Image(systemName: symbol)
-                    .font(.system(size: 11))
+                    .font(.system(size: FileTreeMetrics.glyphSize))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .frame(width: FileTreeMetrics.icon)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(name)
-                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .font(.system(size: FileTreeMetrics.nameSize, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(isDirectory && !isSelected ? Color.secondary : Color.primary)
                         .lineLimit(1)
                         // A folded chain (`api/src/commonMain/kotlin`, ADR-091) is read from its
@@ -88,7 +95,7 @@ struct FileTreeRowView<Accessory: View>: View {
                         .truncationMode(name.contains("/") ? .head : .middle)
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: 10))
+                            .font(.system(size: FileTreeMetrics.subtitleSize))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.head)
@@ -117,7 +124,7 @@ struct FileTreeRowView<Accessory: View>: View {
         Group {
             if let isExpanded {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .animation(.easeOut(duration: 0.12), value: isExpanded)
@@ -171,7 +178,7 @@ struct FileTreeSectionHeader: View {
 
     var body: some View {
         Text(title)
-            .font(.caption.weight(.semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.leading, 6)
             .padding(.top, top)

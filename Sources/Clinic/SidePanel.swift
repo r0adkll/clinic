@@ -25,11 +25,14 @@ final class PanelPane: Identifiable {
             }
         }
 
-        /// Point size for `symbol` in the tab strip. Everything is 10 pt (`.caption`) except the PR
-        /// glyph: `arrow.trianglehead.pull` is tall and narrow, so at 10 pt it reads smaller than the
-        /// boxy glyphs beside it and its arrowhead does not resolve at all (ADR-089).
-        var glyphSize: CGFloat {
-            if case .pr = self { PRStyle.glyphSize.tab } else { 10 }
+        /// Point size for `symbol` in the tab strip. Larger in the compact strip, where the glyph is
+        /// the whole chip and has to carry the tab's identity on its own (ADR-104). The PR glyph runs
+        /// ~2 pt over the boxy ones either way: `arrow.trianglehead.pull` is tall and narrow, so at a
+        /// shared size it reads smaller than its neighbours and its arrowhead does not resolve at all
+        /// (ADR-089).
+        func glyphSize(compact: Bool) -> CGFloat {
+            if case .pr = self { return compact ? PRStyle.glyphSize.tabCompact : PRStyle.glyphSize.tab }
+            return compact ? 13 : 11
         }
 
         var defaultTitle: String {
@@ -156,68 +159,144 @@ private extension Array {
 
 // MARK: - Chrome
 
-/// Tab strip above the panel content: one chip per pane and an add menu (ADR-079). The panel's
-/// show/hide lives in the session tab bar, not here. Chip metrics match `TabChip` so both strips read alike.
+/// Tab strip above the panel content: one chip per pane and a menu of everything else (ADR-079,
+/// sized and made adaptive by ADR-104). The panel's show/hide lives in the session tab bar, not here.
 struct SidePanelTabBar: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
 
     var body: some View {
-        HStack(spacing: 4) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(tab.panel.panes) { pane in
-                        SidePanelTabChip(tab: tab, pane: pane, selected: pane.id == tab.panel.selectedId)
+        HStack(spacing: 6) {
+            // Labelled chips while they fit, icon-only when they do not, scrolling only when even
+            // those do not. The strip this replaced always drew `TabChip`'s full metrics — sized for
+            // a window-wide bar — into a 380 pt column, so a fourth tab scrolled out of sight behind
+            // a hidden scroll bar (ADR-104). `ViewThatFits` falls through to its last candidate when
+            // none fit, which is what makes the scrolling one the backstop rather than the default.
+            ViewThatFits(in: .horizontal) {
+                chips(compact: false)
+                chips(compact: true)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        chips(compact: true)
+                    }
+                    // ⌘⌃] and the footer quick actions change the selection from outside the strip;
+                    // without this the tab they select can be off the end of a scrolled strip.
+                    .onChange(of: tab.panel.selectedId) {
+                        guard let id = tab.panel.selectedId else { return }
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
-                .padding(.vertical, 5)
             }
-            Menu {
-                ForEach(tabs.availablePanes(for: tab), id: \.self) { kind in
-                    Button {
-                        tabs.showPane(kind, in: tab)
-                    } label: {
-                        Label(kind.defaultTitle, systemImage: kind.symbol)
-                    }
-                }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .disabled(tabs.availablePanes(for: tab).isEmpty)
-            .help("Add a panel tab")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            addMenu
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, PaneMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(.bar)
     }
+
+    private func chips(compact: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(tab.panel.panes) { pane in
+                SidePanelTabChip(tab: tab, pane: pane,
+                                 selected: pane.id == tab.panel.selectedId, compact: compact)
+                    .id(pane.id)
+            }
+        }
+        // A chip's `maxWidth` is a cap on a long title, not a width to grow into. Without this the
+        // row is handed the strip's whole width and every chip stretches to 200 pt — three tabs then
+        // measure 340 pt to `ViewThatFits` and draw 600, overflowing the panel they are sized for.
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Add a view, or jump to one that is already open.
+    ///
+    /// It lists the open panes as well as the addable kinds, which makes it the strip's overflow
+    /// list: in the compact form the chips are glyphs, and this is where their names are. It is
+    /// therefore never disabled — the old menu emptied itself once all five kinds were open and sat
+    /// there greyed out, explaining nothing (ADR-104).
+    private var addMenu: some View {
+        PaneIconMenu(symbol: "plus", help: "Open a view in this panel") {
+            let available = tabs.availablePanes(for: tab)
+            if !available.isEmpty {
+                Section("Add") {
+                    ForEach(available, id: \.self) { kind in
+                        Button { tabs.showPane(kind, in: tab) } label: {
+                            Label(tabs.paneTitle(kind, in: tab), systemImage: kind.symbol)
+                        }
+                    }
+                }
+            }
+            if !tab.panel.panes.isEmpty {
+                Section("Open") {
+                    ForEach(tab.panel.panes) { pane in
+                        Button { tabs.selectPane(pane, in: tab) } label: {
+                            Label(tabs.paneTitle(pane.kind, in: tab), systemImage: pane.kind.symbol)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
+/// One tab in the strip. Two forms of the same chip: labelled, and glyph-only for a narrow panel.
+///
+/// Every chip carries a resting fill, not only the selected one. In the compact form a chip without
+/// one is indistinguishable from a toolbar glyph, and the strip stops reading as a row of tabs at all
+/// (ADR-104).
 struct SidePanelTabChip: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
     let pane: PanelPane
     let selected: Bool
+    var compact = false
     @State private var hovering = false
 
+    private var title: String { tabs.paneTitle(pane.kind, in: tab) }
+
+    private var fill: Color {
+        if selected { return Color.accentColor.opacity(hovering ? 0.26 : 0.20) }
+        if hovering { return Color.primary.opacity(0.11) }
+        return Color.primary.opacity(0.05)
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: pane.kind.symbol).font(.system(size: pane.kind.glyphSize))
-            Text(tabs.paneTitle(pane.kind, in: tab)).font(.callout).lineLimit(1)
-            Button { tabs.closePane(pane, in: tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
-                .buttonStyle(.borderless)
+        HStack(spacing: 5) {
+            Image(systemName: pane.kind.symbol)
+                .font(.system(size: pane.kind.glyphSize(compact: compact)))
+                .frame(width: 16)
+            if !compact {
+                Text(title).font(.callout).lineLimit(1)
+                // Always laid out, only faded in: a close button that appears on hover must not
+                // reflow the chip it belongs to.
+                Button { tabs.closePane(pane, in: tab) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                        .background(hovering ? Color.primary.opacity(0.10) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
                 .opacity(hovering || selected ? 1 : 0)
                 .help("Close this panel tab" + (selected ? " (⌘⌃W)" : ""))
+            }
         }
-        .padding(.horizontal, 10).padding(.vertical, 4)
-        .frame(maxWidth: 220)
-        .background(selected ? Color.accentColor.opacity(0.18) : (hovering ? Color.primary.opacity(0.06) : .clear),
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? Color.accentColor.opacity(0.5) : .clear))
+        .padding(.leading, compact ? 6 : 8)
+        .padding(.trailing, compact ? 6 : 4)
+        .frame(height: 24)
+        .frame(maxWidth: compact ? nil : 200)
+        .background(fill, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
+            .strokeBorder(selected ? Color.accentColor.opacity(0.55) : .clear))
         .foregroundStyle(selected ? Color.accentColor : Color.primary)
         .contentShape(Rectangle())
         .onTapGesture { tabs.selectPane(pane, in: tab) }
         .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.1), value: hovering)
+        // The compact chip has no room for its name, so the tooltip is where the name lives.
+        .help(compact ? title : "")
         .contextMenu {
             Button("Close") { tabs.closePane(pane, in: tab) }
             Button("Close Others") { tab.panel.closeAll(except: pane) }

@@ -264,13 +264,13 @@ struct EditorPanel: View {
                                  shownHelp: "Hide the file tree (⌘⌃E)",
                                  hiddenHelp: "Show the file tree (⌘⌃E)")
                 TreeFilterField(text: $model.filter, matches: model.filtered.count, total: model.paths.count)
-                Button { model.collapseAll() } label: { Image(systemName: "arrow.down.right.and.arrow.up.left") }
-                    .buttonStyle(.borderless).help("Collapse all folders")
+                PaneIconButton(symbol: "arrow.down.right.and.arrow.up.left",
+                               help: "Collapse all folders") { model.collapseAll() }
                     .disabled(model.expandedDirectories.isEmpty)
-                Toggle(isOn: $model.showHidden) { Image(systemName: "eye") }
-                    .toggleStyle(.button).buttonStyle(.borderless).help("Show hidden files")
+                PaneIconButton(symbol: model.showHidden ? "eye" : "eye.slash",
+                               help: model.showHidden ? "Hide dotfiles" : "Show hidden files",
+                               isOn: model.showHidden) { model.showHidden.toggle() }
             }
-            .controlSize(.small)
             Divider()
             // A flat list of rows rather than an `OutlineGroup` (ADR-099): the outline hands its
             // content closure a view only as wide as the label, so the rest of the column was dead
@@ -282,12 +282,12 @@ struct EditorPanel: View {
                         agentFiles
                         FileTreeSectionHeader("Files", top: agentFilesCount == 0 ? 2 : 12)
                         if model.visibleRows.isEmpty {
-                            Text("No files").font(.caption).foregroundStyle(.secondary)
+                            Text("No files").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                                 .padding(.leading, 6).frame(height: FileTreeMetrics.rowHeight)
                         }
                         ForEach(model.visibleRows) { row in treeRow(row) }
                     } else if model.filtered.isEmpty {
-                        Text("No matching files").font(.caption).foregroundStyle(.secondary)
+                        Text("No matching files").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                             .padding(.leading, 6).frame(height: FileTreeMetrics.rowHeight)
                     } else {
                         ForEach(model.filtered, id: \.self) { path in filterRow(path) }
@@ -390,7 +390,7 @@ struct FileEditorView: View {
         } message: { Text("You have unsaved edits to \((model.openPath as NSString?)?.lastPathComponent ?? "this file").") }
     }
 
-    /// The detail column's header (ADR-102): the same 28 pt band the tree's header is, carrying the
+    /// The detail column's header (ADR-102): the same band the tree's header is, carrying the
     /// tree toggle only while the tree is hidden — open, the toggle sits in the tree's own header so
     /// it never moves off the pane's top-left corner.
     private var header: some View {
@@ -402,29 +402,31 @@ struct FileEditorView: View {
                                  hiddenHelp: "Show the file tree (⌘⌃E)")
             }
             if let rel = model.relativeOpenPath {
-                Text(rel).font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.head).help(rel)
+                Text(rel).font(.system(size: PaneMetrics.label, design: .monospaced))
+                    .lineLimit(1).truncationMode(.head).help(rel)
                 if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
-                Text(model.language.tsName).font(.caption2).foregroundStyle(.tertiary)
+                Text(model.language.tsName).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
             } else {
-                Text("No file open").font(.caption).foregroundStyle(.secondary)
+                Text("No file open").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Button { quickOpen = true } label: { Image(systemName: "magnifyingglass") }
-                .buttonStyle(.borderless).help("Quick open (⌘⇧O)").keyboardShortcut("o", modifiers: [.command, .shift])
             if let path = model.openPath {
                 if model.isDirty {
                     Button("Revert") { model.revert() }
                     Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command)
                 }
                 if showsPopOut {
-                    Button { FileWindowController.show(path: path, root: model.root) } label: { Image(systemName: "macwindow") }
-                        .buttonStyle(.borderless).help("Open this file in its own window")
+                    PaneIconButton(symbol: "macwindow", help: "Open this file in its own window") {
+                        FileWindowController.show(path: path, root: model.root)
+                    }
                 }
-                Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: { Image(systemName: "folder") }
-                    .buttonStyle(.borderless).help("Reveal in Finder")
+                PaneIconButton(symbol: "folder", help: "Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
             }
+            PaneIconButton(symbol: "magnifyingglass", help: "Quick open (⌘⇧O)") { quickOpen = true }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
         }
-        .controlSize(.small)
     }
 }
 
