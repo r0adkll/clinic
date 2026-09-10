@@ -15,19 +15,53 @@ final class PRFilesModel {
     private(set) var rows: [DiffRow] = []
     private(set) var columns = 0
 
+    /// The tree, its per-path stats and the ranked filter all live here rather than being rebuilt in
+    /// `body` (ADR-099). The view's body runs on every selection and every keystroke, and it was
+    /// re-walking the whole diff and re-ranking 300 paths each time.
+    private(set) var nodes: [FileTreeNode] = []
+    private(set) var stats: [String: UnifiedDiffFile] = [:]
+    /// Every directory, until the reader closes one: see `sync`.
+    private(set) var expanded: Set<String> = []
+    private(set) var filtered: [String] = []
+    private var paths: [String] = []
+
     private let highlighter = DiffSyntaxHighlighter()
     private var highlightTask: Task<Void, Never>?
     private var highlightedPath: String?
+
+    var filter = "" { didSet { guard filter != oldValue else { return }; rank() } }
+
+    var visibleRows: [FileTreeRow] { FileTreeNode.rows(nodes, expanded: expanded) }
+
+    func toggle(directory path: String) {
+        if expanded.contains(path) { expanded.remove(path) } else { expanded.insert(path) }
+    }
 
     /// Picks up the first file when a diff arrives, and re-selects if the chosen file disappears.
     func sync(with diff: UnifiedDiff?) {
         guard let diff, !diff.files.isEmpty else {
             selected = nil; rows = []; highlights = [:]; highlightedPath = nil
+            nodes = []; stats = [:]; expanded = []; paths = []; filtered = []
             return
         }
+        paths = diff.files.map(\.path)
+        stats = Dictionary(diff.files.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        // `showHidden: true` — a PR that touches `.github/workflows` must not hide those files.
+        nodes = FileTreeNode.compress(FileTreeNode.build(from: paths, showHidden: true))
+        // Fully open on arrival: the tree holds only the touched paths, so "everything" is a dozen
+        // or two rows, and a Files tab that opens onto three collapsed folders makes the reader
+        // click their way to the change they came to read (ADR-099).
+        expanded = FileTreeNode.directories(nodes)
+        rank()
         if selected == nil || !diff.files.contains(where: { $0.path == selected }) {
             select(diff.files[0].path, in: diff)
         }
+    }
+
+    /// Fuzzy rather than substring, and the same matcher Quick Open uses, so "pbt" finds
+    /// `PlaybackTimer.kt` here exactly as it does there (ADR-092).
+    private func rank() {
+        filtered = filter.isEmpty ? [] : FuzzyMatcher.rank(filter, candidates: paths, limit: 300).map(\.candidate)
     }
 
     func select(_ path: String, in diff: UnifiedDiff) {
@@ -67,7 +101,6 @@ struct PRFilesView: View {
     /// Separate from the editor panel's `ClinicEditorShowTree`: these are different surfaces and a
     /// reader who wants the repo tree open does not necessarily want a PR's file list open too.
     @AppStorage("ClinicPRShowTree") private var showTree = true
-    @State private var filter = ""
     @State private var viewport: CGSize = .zero
     @FocusState private var filterFocused: Bool
 
@@ -121,16 +154,16 @@ struct PRFilesView: View {
             if showTree {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass").font(.caption2).foregroundStyle(.tertiary)
-                    TextField("Filter files", text: $filter)
+                    TextField("Filter files", text: $model.filter)
                         .textFieldStyle(.plain)
                         .font(.caption)
                         .focused($filterFocused)
                         .onKeyPress(.escape) {
-                            if filter.isEmpty { return .ignored }
-                            filter = ""; return .handled
+                            if model.filter.isEmpty { return .ignored }
+                            model.filter = ""; return .handled
                         }
-                    if !filter.isEmpty {
-                        Button { filter = "" } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
+                    if !model.filter.isEmpty {
+                        Button { model.filter = "" } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
                             .buttonStyle(.borderless).foregroundStyle(.tertiary)
                     }
                 }
@@ -142,18 +175,12 @@ struct PRFilesView: View {
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             }
             Spacer(minLength: 0)
-            if showTree, !filter.isEmpty {
-                Text("\(matches(diff).count) of \(diff.files.count)")
+            if showTree, !model.filter.isEmpty {
+                Text("\(model.filtered.count) of \(diff.files.count)")
                     .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-    }
-
-    /// Ranked paths for the current filter. Fuzzy rather than substring, and the same matcher Quick
-    /// Open uses, so "pbt" finds `PlaybackTimer.kt` here exactly as it does there (ADR-092).
-    private func matches(_ diff: UnifiedDiff) -> [String] {
-        FuzzyMatcher.rank(filter, candidates: diff.files.map(\.path), limit: 300).map(\.candidate)
     }
 
     /// A tree while browsing, a ranked flat list while filtering. Searching is a different act from
@@ -161,47 +188,52 @@ struct PRFilesView: View {
     /// you are typing one.
     @ViewBuilder
     private func sidebar(_ diff: UnifiedDiff) -> some View {
-        if filter.isEmpty {
+        if model.filter.isEmpty {
             tree(diff)
+        } else if model.filtered.isEmpty {
+            VStack {
+                Text("No matching files").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.top, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            let paths = matches(diff)
-            let stats = Dictionary(uniqueKeysWithValues: diff.files.map { ($0.path, $0) })
-            if paths.isEmpty {
-                VStack {
-                    Text("No matching files").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
+            FileTreeScroll {
+                ForEach(model.filtered, id: \.self) { path in
+                    FileTreeRowView(name: (path as NSString).lastPathComponent,
+                                    subtitle: (path as NSString).deletingLastPathComponent,
+                                    symbol: FileGlyph.symbol(for: path),
+                                    isSelected: model.selected == path,
+                                    help: path,
+                                    accessory: { PRFileStat(file: model.stats[path]) }) { model.select(path, in: diff) }
                 }
-                .padding(.top, 20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(paths, id: \.self) { path in
-                    PRFilterResultRow(path: path, file: stats[path], selected: model.selected == path)
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.select(path, in: diff) }
-                }
-                .listStyle(.sidebar)
-                .environment(\.defaultMinListRowHeight, 30)
             }
         }
     }
 
+    /// The same flat rows the Files panel draws (ADR-099): full-width targets, and a tap on a folder
+    /// row anywhere opens or closes it.
     private func tree(_ diff: UnifiedDiff) -> some View {
-        // `showHidden: true` — a PR that touches `.github/workflows` must not hide those files.
-        let nodes = PRFileTree.compress(FileTreeNode.build(from: diff.files.map(\.path), showHidden: true))
-        let stats = Dictionary(uniqueKeysWithValues: diff.files.map { ($0.path, $0) })
-        return List {
-            OutlineGroup(nodes, children: \.children) { node in
-                if node.isDirectory {
-                    Label(node.name, systemImage: "folder").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    PRFileRow(node: node, file: stats[node.relativePath], selected: model.selected == node.relativePath)
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.select(node.relativePath, in: diff) }
+        ScrollViewReader { proxy in
+            FileTreeScroll {
+                ForEach(model.visibleRows) { row in
+                    FileTreeRowView(name: row.name,
+                                    depth: row.depth,
+                                    symbol: row.isDirectory ? (row.isExpanded ? "folder.fill" : "folder") : FileGlyph.symbol(for: row.name),
+                                    isExpanded: row.isDirectory ? row.isExpanded : nil,
+                                    isSelected: !row.isDirectory && model.selected == row.path,
+                                    help: row.path,
+                                    accessory: { if !row.isDirectory { PRFileStat(file: model.stats[row.path]) } }) {
+                        if row.isDirectory { model.toggle(directory: row.path) } else { model.select(row.path, in: diff) }
+                    }
+                    .id(row.path)
                 }
             }
+            .onChange(of: model.selected) {
+                guard let path = model.selected else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(path, anchor: .center) }
+            }
         }
-        .listStyle(.sidebar)
-        .environment(\.defaultMinListRowHeight, 22)
     }
 
     @ViewBuilder
@@ -237,87 +269,22 @@ struct PRFilesView: View {
     }
 }
 
-/// Folds runs of single-child directories into one row (ADR-091).
-///
-/// A PR tree is not a repo tree: it contains only the touched paths, so a Kotlin or Java project
-/// produces chains like `infra/audioplayer/api/src/commonMain/kotlin/com/…` where every level has
-/// exactly one child. Expanded one level at a time that is six clicks to reach a file and a tree
-/// mostly made of indentation. GitHub and VS Code both collapse these; so does this.
-enum PRFileTree {
-    static func compress(_ nodes: [FileTreeNode]) -> [FileTreeNode] {
-        nodes.map { node in
-            guard node.isDirectory, var children = node.children else { return node }
-            var name = node.name
-            var path = node.relativePath
-            // Only fold when the single child is itself a directory: a folder holding one file still
-            // shows that file as its own row.
-            while children.count == 1, let only = children.first, only.isDirectory, let next = only.children {
-                name += "/" + only.name
-                path = only.relativePath
-                children = next
-            }
-            return FileTreeNode(relativePath: path, name: name, isDirectory: true, children: compress(children))
-        }
-    }
-}
-
-/// One file in the PR tree: glyph, name, and its own +/− so the tree carries the change's shape.
-private struct PRFileRow: View {
-    let node: FileTreeNode
+/// A changed file's own +/− count, or its A/D badge — so the list carries the shape of the change
+/// and not just its paths (ADR-091). The trailing accessory of a shared file-tree row (ADR-099).
+private struct PRFileStat: View {
     let file: UnifiedDiffFile?
-    let selected: Bool
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: FileGlyph.symbol(for: node.name)).font(.caption2).foregroundStyle(.secondary).frame(width: 13)
-            Text(node.name).font(.caption).lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 4)
-            if let file {
-                if file.isNew {
-                    Text("A").font(.caption2.weight(.semibold)).foregroundStyle(.green)
-                } else if file.isDeleted {
-                    Text("D").font(.caption2.weight(.semibold)).foregroundStyle(.red)
-                } else {
-                    Text("\(file.additions + file.deletions)")
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
-                }
+        if let file {
+            if file.isNew {
+                Text("A").font(.caption2.weight(.semibold)).foregroundStyle(.green)
+            } else if file.isDeleted {
+                Text("D").font(.caption2.weight(.semibold)).foregroundStyle(.red)
+            } else {
+                Text("\(file.additions + file.deletions)")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 4).padding(.vertical, 2)
-        .background(selected ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 4))
-    }
-}
-
-/// A filter hit: file name, then its directory dimmed behind it — the Quick Open row, narrower.
-private struct PRFilterResultRow: View {
-    let path: String
-    let file: UnifiedDiffFile?
-    let selected: Bool
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: FileGlyph.symbol(for: path)).font(.caption2).foregroundStyle(.secondary).frame(width: 13)
-            VStack(alignment: .leading, spacing: 0) {
-                Text((path as NSString).lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
-                let dir = (path as NSString).deletingLastPathComponent
-                if !dir.isEmpty {
-                    Text(dir).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
-                }
-            }
-            Spacer(minLength: 4)
-            if let file {
-                if file.isNew {
-                    Text("A").font(.caption2.weight(.semibold)).foregroundStyle(.green)
-                } else if file.isDeleted {
-                    Text("D").font(.caption2.weight(.semibold)).foregroundStyle(.red)
-                } else {
-                    Text("\(file.additions + file.deletions)")
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .padding(.horizontal, 4).padding(.vertical, 2)
-        .background(selected ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 4))
     }
 }
 
