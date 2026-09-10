@@ -13,7 +13,9 @@ struct PRPage: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
     let ref: PullRequestRef
-    @State private var pane: Pane = .conversation
+    /// `-ClinicPRPaneOnLaunch conversation|checks|files` (ADR-038): a smoke run can open the panel on
+    /// a given tab rather than driving a synthetic click into it.
+    @State private var pane: Pane = Pane(rawValue: UserDefaults.standard.string(forKey: "ClinicPRPaneOnLaunch") ?? "") ?? .conversation
     @State private var files = PRFilesModel()
     @State private var confirm: PendingAction?
 

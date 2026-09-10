@@ -54,6 +54,11 @@ final class EditorModel {
     private var fileModified: Date?
     var recentlyOpened: [String] = []
     private(set) var tree: [FileTreeNode] = []
+    /// Directories the user has opened. Held in the model rather than inside the outline view for two
+    /// reasons (ADR-099): the tree is rebuilt from scratch on every FSEvents burst, and a save must
+    /// not collapse the folders you were reading; and opening a file from anywhere reveals it by
+    /// expanding its ancestors, which needs somewhere to write that down.
+    private(set) var expandedDirectories: Set<String> = []
     /// False for a file window, which shows one file and never a tree.
     private let buildsTree: Bool
     /// Told when a different file is opened, so a file window can re-title itself (ADR-081).
@@ -72,10 +77,34 @@ final class EditorModel {
     }
 
     /// Rebuilds the tree from the flat index (hidden entries filtered per `showHidden`).
+    ///
+    /// Built off the main actor: this runs on every debounced FSEvents burst, and a 50 000-entry
+    /// index is a real pass over a real amount of memory to do while the terminal next door is
+    /// drawing.
     func reloadTree() async {
         guard buildsTree else { return }
         let files = await index.files()
-        tree = FileTreeNode.build(from: files, showHidden: showHidden)
+        let hidden = showHidden
+        tree = await Task.detached(priority: .userInitiated) {
+            FileTreeNode.build(from: files, showHidden: hidden)
+        }.value
+    }
+
+    /// The flat rows the tree draws (ADR-099). Cheap on every redraw: it descends only into open
+    /// directories, so a collapsed repo costs one pass over its top level.
+    var visibleRows: [FileTreeRow] { FileTreeNode.rows(tree, expanded: expandedDirectories) }
+
+    func toggle(directory path: String) {
+        if expandedDirectories.contains(path) { expandedDirectories.remove(path) } else { expandedDirectories.insert(path) }
+    }
+
+    func collapseAll() { expandedDirectories.removeAll() }
+
+    /// Opens every folder above `path`, so a file opened from Quick Open, the agent's list or another
+    /// pane is where the reader can see it in the tree.
+    private func reveal(_ path: String) {
+        guard path.hasPrefix(root + "/") else { return }
+        expandedDirectories.formUnion(FileTreeNode.ancestors(of: String(path.dropFirst(root.count + 1))))
     }
 
     func rebind(root newRoot: String) {
@@ -113,6 +142,7 @@ final class EditorModel {
             guard let s = String(data: data, encoding: .utf8) else { error = "Not a UTF-8 text file"; return }
             text = s; savedText = s
             openPath = path
+            reveal(path)
             language = FileLanguage.detect(path: path, text: s)
             fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
             externalChangePending = false
@@ -209,39 +239,73 @@ struct EditorPanel: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Text((model.root as NSString).lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1).help(model.root)
-                Spacer()
+                Spacer(minLength: 4)
+                Button { model.collapseAll() } label: { Image(systemName: "arrow.down.right.and.arrow.up.left") }
+                    .buttonStyle(.borderless).help("Collapse all folders")
+                    .disabled(model.expandedDirectories.isEmpty)
                 Toggle(isOn: $model.showHidden) { Image(systemName: "eye") }.toggleStyle(.button).buttonStyle(.borderless).help("Show hidden files")
             }
+            .controlSize(.small)
             .padding(.horizontal, 8).padding(.vertical, 6)
             Divider()
-            List {
-                if let id = tab.sessionId, let files = sessions.sessions[id]?.recentFiles, !files.isEmpty {
-                    Section("Agent files") {
-                        ForEach(files.reversed(), id: \.self) { path in
-                            Label((path as NSString).lastPathComponent, systemImage: "pencil.line").lineLimit(1).help(path)
-                                .contentShape(Rectangle()).onTapGesture { model.open(absolute: path) }
-                                .contextMenu { FileRowMenu(path: path, root: model.root) }
-                        }
+            // A flat list of rows rather than an `OutlineGroup` (ADR-099): the outline hands its
+            // content closure a view only as wide as the label, so the rest of the column was dead
+            // space, and its expansion state was out of reach of both the FSEvents rebuild and
+            // "reveal the file I just opened".
+            ScrollViewReader { proxy in
+                FileTreeScroll {
+                    agentFiles
+                    FileTreeSectionHeader("Files", top: agentFilesCount == 0 ? 2 : 12)
+                    if model.visibleRows.isEmpty {
+                        Text("No files").font(.caption).foregroundStyle(.secondary)
+                            .padding(.leading, 6).frame(height: FileTreeMetrics.rowHeight)
                     }
+                    ForEach(model.visibleRows) { row in treeRow(row) }
                 }
-                Section("Files") {
-                    OutlineGroup(model.tree, children: \.children) { node in
-                        if node.isDirectory {
-                            Label(node.name, systemImage: "folder").lineLimit(1)
-                        } else {
-                            Label(node.name, systemImage: FileGlyph.symbol(for: node.name)).lineLimit(1)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.open(relative: node.relativePath) }
-                                .listRowBackground(model.relativeOpenPath == node.relativePath ? Color.accentColor.opacity(0.15) : Color.clear)
-                                .contextMenu { FileRowMenu(path: (model.root as NSString).appendingPathComponent(node.relativePath), root: model.root) }
-                        }
-                    }
+                // `open` expands the folders above the file; this is the other half of revealing it.
+                .onChange(of: model.openPath) {
+                    guard let rel = model.relativeOpenPath else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(rel, anchor: .center) }
                 }
             }
-            .listStyle(.sidebar)
         }
+    }
+
+    private var agentFilesCount: Int {
+        guard let id = tab.sessionId else { return 0 }
+        return sessions.sessions[id]?.recentFiles.count ?? 0
+    }
+
+    /// The files this session's agent has touched, above the tree (ADR-057).
+    @ViewBuilder
+    private var agentFiles: some View {
+        if let id = tab.sessionId, let files = sessions.sessions[id]?.recentFiles, !files.isEmpty {
+            FileTreeSectionHeader("Agent files", top: 2)
+            ForEach(files.reversed(), id: \.self) { path in
+                FileTreeRowView(name: (path as NSString).lastPathComponent,
+                                symbol: "pencil.line",
+                                isSelected: model.openPath == path,
+                                help: path) { model.open(absolute: path) }
+                    .contextMenu { FileRowMenu(path: path, root: model.root) }
+            }
+        }
+    }
+
+    /// A tap anywhere on the row acts: a folder opens or closes, a file opens. The chevron is a
+    /// state indicator, not the only way in.
+    private func treeRow(_ row: FileTreeRow) -> some View {
+        FileTreeRowView(name: row.name,
+                        depth: row.depth,
+                        symbol: row.isDirectory ? (row.isExpanded ? "folder.fill" : "folder") : FileGlyph.symbol(for: row.name),
+                        isExpanded: row.isDirectory ? row.isExpanded : nil,
+                        isSelected: !row.isDirectory && model.relativeOpenPath == row.path,
+                        help: row.path) {
+            if row.isDirectory { model.toggle(directory: row.path) } else { model.open(relative: row.path) }
+        }
+        .id(row.path)
+        .contextMenu { FileRowMenu(path: (model.root as NSString).appendingPathComponent(row.path), root: model.root) }
     }
 }
 
@@ -386,49 +450,6 @@ private struct CodeView: View {
     }
 }
 
-/// Nested file tree built once from the flat index; directories first, name-sorted.
-struct FileTreeNode: Identifiable, Hashable {
-    let relativePath: String
-    let name: String
-    let isDirectory: Bool
-    var children: [FileTreeNode]?
-    var id: String { relativePath }
-
-    static func build(from files: [String], showHidden: Bool) -> [FileTreeNode] {
-        final class Dir { var dirs: [String: Dir] = [:]; var files: [String] = [] }
-        let root = Dir()
-        for f in files {
-            let parts = f.split(separator: "/").map(String.init)
-            guard !parts.isEmpty else { continue }
-            if !showHidden && parts.contains(where: { $0.hasPrefix(".") }) { continue }
-            var cur = root
-            for p in parts.dropLast() { if cur.dirs[p] == nil { cur.dirs[p] = Dir() }; cur = cur.dirs[p]! }
-            cur.files.append(parts.last!)
-        }
-        func nodes(_ d: Dir, prefix: String) -> [FileTreeNode] {
-            let dirs = d.dirs.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { name in
-                FileTreeNode(relativePath: prefix + name, name: name, isDirectory: true, children: nodes(d.dirs[name]!, prefix: prefix + name + "/"))
-            }
-            let files = d.files.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { FileTreeNode(relativePath: prefix + $0, name: $0, isDirectory: false, children: nil) }
-            return dirs + files
-        }
-        return nodes(root, prefix: "")
-    }
-}
-
-enum FileGlyph {
-    static func symbol(for name: String) -> String {
-        switch (name as NSString).pathExtension.lowercased() {
-        case "swift": return "swift"
-        case "md", "txt": return "doc.text"
-        case "json", "yml", "yaml", "toml", "plist": return "curlybraces"
-        case "png", "jpg", "jpeg", "gif", "svg", "webp": return "photo"
-        case "sh", "fish", "zsh", "bash": return "terminal"
-        default: return "doc"
-        }
-    }
-}
-
 /// ⌘⇧O: fuzzy file search over the index.
 struct QuickOpenSheet: View {
     let model: EditorModel
@@ -448,18 +469,21 @@ struct QuickOpenSheet: View {
                 .onKeyPress(.upArrow) { highlighted = max(highlighted - 1, 0); return .handled }
                 .onKeyPress(.escape) { dismiss(); return .handled }
             Divider()
-            List(Array(results.enumerated()), id: \.offset) { i, path in
-                HStack {
-                    Image(systemName: FileGlyph.symbol(for: path)).foregroundStyle(.secondary)
-                    Text((path as NSString).lastPathComponent)
-                    Text((path as NSString).deletingLastPathComponent).font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
-                    Spacer()
+            // Same row as the tree and the pull request list (ADR-099), so a result is a full-width
+            // target here too — and the arrow keys now scroll their pick into view.
+            ScrollViewReader { proxy in
+                FileTreeScroll {
+                    ForEach(Array(results.enumerated()), id: \.offset) { i, path in
+                        FileTreeRowView(name: (path as NSString).lastPathComponent,
+                                        subtitle: (path as NSString).deletingLastPathComponent,
+                                        symbol: FileGlyph.symbol(for: path),
+                                        isSelected: i == highlighted,
+                                        help: path) { highlighted = i; openHighlighted() }
+                            .id(i)
+                    }
                 }
-                .listRowBackground(i == highlighted ? Color.accentColor.opacity(0.2) : Color.clear)
-                .contentShape(Rectangle())
-                .onTapGesture { highlighted = i; openHighlighted() }
+                .onChange(of: highlighted) { proxy.scrollTo(highlighted, anchor: .center) }
             }
-            .listStyle(.plain)
         }
         .frame(width: 560, height: 400)
         .task { files = await model.index.files(); rank(); focused = true }
