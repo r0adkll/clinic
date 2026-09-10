@@ -51,7 +51,9 @@ final class PanelPane: Identifiable {
             switch self {
             case .terminal: 400
             case .diff, .pr: 380
-            case .attachments: 320
+            // A viewer needs room to be a viewer, and the thumbnail list charges for its column
+            // the way the file tree does (ADR-106).
+            case .attachments: ImagePrefs.shared.showList ? 400 : 280
             // A hidden tree buys the panel back the width the tree was charging for (ADR-081). This
             // stays a constant deliberately: a minimum that tracked the live tree width would move the
             // panel's own divider while the tree divider was being dragged, and the two would fight.
@@ -65,6 +67,7 @@ final class PanelPane: Identifiable {
     var diff: DiffPanelModel?
     var editor: EditorModel?
     var terminal: GhosttySurfaceView?
+    var images: ImageGallery?
 
     init(kind: Kind) { self.kind = kind }
 
@@ -149,7 +152,7 @@ final class SidePanel {
     /// The tree toggle is in here because it changes the Files pane's minimum width, which only the
     /// host knows what to do with (ADR-081).
     var renderKey: String {
-        "\(isVisible)|\(isZoomed)|\(EditorPrefs.shared.showTree)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
+        "\(isVisible)|\(isZoomed)|\(EditorPrefs.shared.showTree)|\(ImagePrefs.shared.showList)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
     }
 }
 

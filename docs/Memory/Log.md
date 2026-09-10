@@ -2022,3 +2022,92 @@ no history; now a commit can carry its own reasoning.
 - Path updates: `CLAUDE.md` (both "before changing anything" lines, plus `docs/` in Layout),
   `README.md` (a Documentation section, since the repo is public), [[Repo Layout]]'s tree.
 - `project.yml` lists explicit source paths, so no target picks `docs/` up.
+
+## 2026-09-10 (cont.) — The Images panel became a viewer (ADR-106)
+User: *"The image/attachments side panel needs some UX help. When viewing images its impossible to
+resize/zoom/or otherwise adjust the viewer making it difficult to inspect images"*
+
+[[ADR-056 Session MCP Tools]] had specified the panel in one sentence ("a gallery and a lightbox")
+and that is what existed: a 160 pt thumbnail grid over a fixed `.sheet` with `scaledToFit`. No zoom,
+no pan, nothing resizable, no 1:1 — and `NSImage(contentsOfFile:)` called inside the view body for
+every attachment on every render. Wrote [[ADR-106 The Images Panel Is A Viewer]] and implemented it:
+
+- **List-then-detail in the shared chrome** (`PaneHeader`, `TreeToggleButton`, `TreeFilterField`,
+  `TreeSplitHandle`), assembled the way `DiffBrowserView` assembles it — the fourth browser to get
+  its chrome by *using* ADR-102's pieces rather than copying a header. `ImagePrefs`
+  (`ClinicImagesShowList` / `ClinicImagesListWidth`), pane minimum 400 with the list and 280 without,
+  `renderKey` carries the flag. ⌘⌃E generalised to "the front browser's list" (`toggleBrowserList`),
+  binding identifier unchanged.
+- **Zoom in device pixels per image pixel**: 100% = one file pixel on one display pixel, document
+  view sized in *pixels*, `magnification = zoom / backingScale`. Fit never exceeds 100%, and re-fits
+  on every `layout()` so the image follows the divider and the window. `−`/`+`/percentage menu/fit in
+  a footer bar, `+ - 0 1`, double-click, ⌘/⌥-scroll about the pointer, pinch, drag-to-pan, arrows,
+  ⌥↑/⌥↓ through the gallery. Nearest-neighbour past 150%.
+- **Image windows** (`ImageWindowController`), one per path, opened at the image's own size — the
+  ADR-081 pattern, and the actual answer to "resize the viewer".
+
+**Four things that rendered perfectly and were wrong**, all caught in a harness built from the real
+source (the [[clinic-smoke-instances]] trick), then confirmed in the app:
+1. `NSScrollView.minMagnification` **defaults to 0.25**, so a fit computed at 32% was silently
+   clamped to a 50%-on-Retina magnification: the image came up cropped on both axes while the readout
+   said 32%. Set the limits, and *read the magnification back* instead of trusting the write.
+2. `NSImage.draw` in a flipped view draws upside down — every screenshot arrived inverted.
+3. **`clipsToBounds` is false by default** on a current SDK. The checkerboard painted over the matte,
+   then the matte painted over the pane's headers and list — the whole panel went dark.
+4. **A SwiftUI overlay over an `NSViewRepresentable` is not clickable**: the representable is a real
+   `NSView` subview and AppKit's `hitTest` gives it the mouse, so the floating zoom capsule drew and
+   did nothing (four clicks, no change, while a sibling list row clicked fine). It became a footer
+   band — which also gives an image window the controls for free.
+- **And the image moved into a `CALayer`'s contents.** Drawing it meant a 3600 × 2338 pt document
+  view inside SwiftUI's layer-backed host — ~134 MB of backing store — and magnification scaled that
+  rasterisation, so `imageInterpolation` could never make a zoomed screenshot crisp. Matte,
+  checkerboard and outline are painted by the *scroll view* in unmagnified coordinates, so the
+  squares stay a constant size on screen at any zoom.
+
+**Verified** with a 4 × 4 hand-written PNG (hard edges prove nearest-neighbour), a 24 px icon with
+transparency, a 96 px icon and a 3600 × 2338 Retina screenshot: fit, 126%, 1131%, drag-pan, the
+preset menu, the pop-out window, the panel at its 400 pt and 280 pt floors, and the footer's
+`ViewThatFits` dropping the file size at ~210 pt of detail column. `swift test --package-path
+Packages/ClinicCore` — 265 pass. The smoke run wrote `ClinicImagesShowList` into the real defaults
+domain; deleted, and `~/Library/Caches/clinic-smoke` removed.
+
+## 2026-09-10 (cont.) — Finder's keyboard over the Images pane (ADR-107)
+User: *"Can we add some keyboard shortcuts that make this more powerful, like tapping 'space bar' when
+focused on an image opens a Preview style window (like finder). Enter maybe opens it into a separate
+window. Cmd + C to quickly copy the image, etc"*
+
+[[ADR-107 The Images Pane Has A Finder Keyboard]]: space → `QLPreviewPanel` (the system's own panel,
+so ‹ › between images, the index sheet, Open with Preview and Escape all come free), return → the
+image window, ⌘C → copy, ⌘⌫ → remove, arrows → walk the gallery, ⌘Y → Quick Look from the menu bar.
+
+- **Quick Look is installed from `AppDelegate.beginPreviewPanelControl`** — the panel finds its
+  controller by walking the responder chain, and the app delegate is the only link that is in the
+  chain whichever half of the pane has focus.
+- **`.onKeyPress` never delivers a command chord.** A focusable thumbnail list handled ↑↓/space/return
+  and silently dropped ⌘C and ⌘⌫ — measured, by leaving a sentinel string on the clipboard and
+  watching it survive. So the viewer's `NSView` is the pane's *one* keyboard (its `copy(_:)` also
+  lights up Edit ▸ Copy), and clicking a row hands the keyboard to it. Arrows consequently walk the
+  gallery instead of panning, superseding that half of ADR-106.
+- **Focus is never taken**, since `show_image` can open the pane mid-sentence; space with the terminal
+  focused still types a space (verified). ⌘Y exists precisely because ⌘⇧I → space would otherwise need
+  a click in between.
+
+**Three bugs walked into, two older than this work:**
+1. `WindowState.updateNSView` re-asserts the agent surface as first responder on every re-render of
+   the terminal stack (ADR-081, so focus never lands in a hidden surface) — and adding or removing an
+   attachment re-renders it, so ⌘⌫ worked once and the next keystroke went to the session behind the
+   panel. `TabContentView.panelHoldsKeyboard` now stops the surface taking the keyboard *out of the
+   panel*. The same latent bug applied to the editor and to every browser's filter field.
+2. **⌘W with an image (or file) window key closed the session tab**, putting up "Close this session?
+   Claude Code is still running" — from a keystroke meant for the picture in front of you.
+   `TabStore.closeFront` closes the key auxiliary window first; this is what ADR-081 already claimed.
+3. Image windows shared one autosaved frame, so ADR-106's "opens at the image's own size" held for the
+   first window and then handed a 96 pt icon a 1579 × 1082 frame. They cascade now.
+
+**Verified** in a smoke instance by synthetic events (guarded on frontmost pid): row click → ↓ moves
+the selection and the viewer follows → ⌘C turns a sentinel clipboard into TIFF/PNG (the agent's own
+terminal footer then read "Image in clipboard") → ⌘⌫ takes the list 4 → 3 and keeps the keyboard →
+space opens Quick Look with Finder's chrome → space closes it → return opens a 380 × 312 window for a
+4 × 4 image → ⌘W closes just that window → space with the terminal focused opens nothing → ⌘Y opens
+Quick Look with no click at all. Clipboard saved and restored around the run; smoke support dir removed;
+no new defaults keys written.

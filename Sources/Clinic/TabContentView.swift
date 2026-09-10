@@ -29,6 +29,16 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     /// The panel is pinned over this whole view and the split view is hidden (ADR-081).
     private(set) var isZoomed = false
 
+    /// True when the keyboard is somewhere inside the panel — the image viewer, a code view, a
+    /// filter field. The agent surface reclaims the keyboard whenever the terminal stack re-renders
+    /// (ADR-081); that must not include taking it out of the panel, where the reader put it with a
+    /// click. Adding an image re-renders the stack, so before this every `show_image` and every ⌘⌫
+    /// moved the keyboard back to the terminal mid-use (found 2026-09-10, ADR-107).
+    var panelHoldsKeyboard: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder === panel || responder.isDescendant(of: panel)
+    }
+
     /// The width the user last settled the panel at: shared by every tab and window, kept across launches.
     /// Hiding the panel takes it out of the split view, so its own autosave cannot do this for us.
     private static let widthKey = "ClinicPanelWidth"

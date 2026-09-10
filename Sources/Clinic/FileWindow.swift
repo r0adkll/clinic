@@ -29,6 +29,9 @@ final class FileWindowController: NSObject, NSWindowDelegate {
         controller.window.makeKeyAndOrderFront(nil)
     }
 
+    /// True for a window this controller opened (see `TabStore.closeFront`).
+    static func owns(_ window: NSWindow) -> Bool { controllers.contains { $0.window === window } }
+
     /// Closes every file window; the app is going away and their watchers must stop.
     static func closeAll() {
         for c in controllers { c.window.close() }

@@ -1,5 +1,6 @@
 import SwiftUI
 import ClinicCore
+import QuickLookUI
 import GhosttyBridge
 
 @main
@@ -206,6 +207,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 FileWindowController.show(path: file, root: root)
             }
         }
+        // `-ClinicOpenImagesOnLaunch <path>[,<path>…]` (ADR-106): records the images as attachments on
+        // the front session and opens the Images pane, which otherwise needs an agent to call
+        // `show_image`. `-ClinicHideImageList YES` opens it with the thumbnail list collapsed.
+        if let raw = UserDefaults.standard.string(forKey: "ClinicOpenImagesOnLaunch"), !raw.isEmpty {
+            Task {
+                // Long enough to land after `-ClinicOpenSessionOnLaunch` has a tab, the way the PR
+                // panel's key waits for the session it belongs to.
+                try? await Task.sleep(for: .seconds(4))
+                guard let tab = tabs.selectedTab, let id = tab.sessionId else { return }
+                let paths = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                sessions.update { state in
+                    for path in paths where !path.isEmpty {
+                        state.attachments[id, default: []].append(
+                            ClinicState.Attachment(path: path, caption: (path as NSString).lastPathComponent))
+                    }
+                }
+                if UserDefaults.standard.bool(forKey: "ClinicHideImageList") { ImagePrefs.shared.showList = false }
+                tabs.showPane(.attachments, in: tab)
+            }
+        }
+        // `-ClinicOpenImageWindowOnLaunch <path>` (ADR-106): pop an image straight out into its own window.
+        if let path = UserDefaults.standard.string(forKey: "ClinicOpenImageWindowOnLaunch"), !path.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                ImageWindowController.show(path: path, caption: (path as NSString).lastPathComponent)
+            }
+        }
         // `-ClinicOpenDiffPanelOnLaunch YES [-ClinicDiffScope turn|session|workingTree|branch]`
         // (ADR-080). Deferred so it lands on whichever tab the other launch keys opened, and because
         // the scope picker is a menu no smoke test can open.
@@ -353,6 +381,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    // MARK: Quick Look (ADR-107)
+
+    // The system's preview panel finds its controller by walking the responder chain from the first
+    // responder up to here. The app delegate is the last link, and therefore the only one that is in
+    // the chain whichever half of the Images pane has focus — a thumbnail row is SwiftUI's, the
+    // viewer is an `NSView`, and neither is a reliable place to answer for the panel.
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { ImageQuickLook.shared.take(panel) }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { ImageQuickLook.shared.release(panel) }
+
     func applicationWillTerminate(_ notification: Notification) {
         // An explicit quit switches the wake agent off until the next login (ADR-095).
         AutomationWake.suppressUntilNextLogin()
@@ -384,6 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishTermination() {
         FileWindowController.closeAll()
+        ImageWindowController.closeAll()
         for tab in tabs.tabs { tab.surface.free(); tab.panelSurface?.free() }
         hooks.stop()
         mcp.stop()
@@ -412,7 +451,7 @@ struct ClinicCommands: Commands {
             Button("New Shell") { tabs.newShell() }.keyboardShortcut(key(.newShell))
             Button("New Window") { tabs.openNewWindow() }.keyboardShortcut(key(.newWindow))
             Divider()
-            Button("Close Tab") { if tabs.editingDraft != nil { tabs.closeDraftScreen() } else { tabs.closeSelected() } }.keyboardShortcut(key(.closeTab)).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
+            Button("Close Tab") { tabs.closeFront() }.keyboardShortcut(key(.closeTab)).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
         }
         CommandMenu("Session") {
             Button("Rename…") { if let s = selectedSession { SessionActions.rename(s, sessions: sessions) } }
@@ -458,8 +497,11 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
             Button(tabs.selectedTab?.panel.isZoomed == true ? "Unzoom Panel" : "Zoom Panel") { tabs.togglePanelZoom() }
                 .keyboardShortcut(key(.zoomPanel)).disabled(tabs.selectedTab == nil)
-            Toggle("Show File Tree", isOn: Binding(get: { EditorPrefs.shared.showTree }, set: { EditorPrefs.shared.showTree = $0 }))
-                .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.isFilesPaneFront)
+            Toggle(tabs.isImagesPaneFront ? "Show Image List" : "Show File Tree",
+                   isOn: Binding(get: { tabs.browserListShown }, set: { _ in tabs.toggleBrowserList() }))
+                .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.canToggleBrowserList)
+            Button("Quick Look Image") { tabs.quickLookFrontImage() }
+                .keyboardShortcut(key(.quickLookImage)).disabled(!tabs.isImagesPaneFront)
             Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)

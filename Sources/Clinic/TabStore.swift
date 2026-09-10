@@ -616,11 +616,39 @@ final class TabStore {
         focusPanel(tab)
     }
 
-    /// ⌘⌃E: the Files pane's tree, a preference every pane shares (ADR-081).
-    func toggleFileTree() { EditorPrefs.shared.showTree.toggle() }
+    /// ⌘⌃E: the front browser's list column — the Files pane's tree or the Images pane's thumbnails.
+    /// One key rather than one per pane, because ADR-102 made it one control; each pane keeps its own
+    /// preference, for the reason ADR-091 gives (wanting one list open is not wanting them all open).
+    func toggleBrowserList() {
+        if isImagesPaneFront { ImagePrefs.shared.showList.toggle() } else { EditorPrefs.shared.showTree.toggle() }
+    }
+
+    /// ⌘W. Clinic's own auxiliary windows — a file window (ADR-081), an image window (ADR-107) — are
+    /// not tabs, and while one of them is key it is what ⌘W should close. Without this the command
+    /// fell straight through to the session tab behind it and asked whether to close a *running
+    /// session*, from a keystroke the reader meant for the picture in front of them (found 2026-09-10).
+    func closeFront() {
+        if let key = NSApp.keyWindow, FileWindowController.owns(key) || ImageWindowController.owns(key) {
+            key.performClose(nil)
+            return
+        }
+        if editingDraft != nil { closeDraftScreen() } else { closeSelected() }
+    }
+
+    /// ⌘Y: Quick Look whatever the front Images pane has selected. The pane's own space bar needs
+    /// the pane to have the keyboard; this is the path from the menu bar, which never does (ADR-107).
+    func quickLookFrontImage() {
+        guard let tab = selectedTab, let gallery = tab.panel.pane(.attachments)?.images,
+              let id = tab.sessionId else { return }
+        let rows = gallery.rows(Array((sessions.state.attachments[id] ?? []).reversed()))
+        ImageQuickLook.shared.toggle(paths: rows.map(\.path), showing: gallery.selection(in: rows)?.path)
+    }
 
     /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
     var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
+    var isImagesPaneFront: Bool { selectedTab?.panel.isFront(.attachments) ?? false }
+    var canToggleBrowserList: Bool { isFilesPaneFront || isImagesPaneFront }
+    var browserListShown: Bool { isImagesPaneFront ? ImagePrefs.shared.showList : EditorPrefs.shared.showTree }
 
     func selectPane(_ pane: PanelPane, in tab: Tab) {
         tab.panel.select(pane)
@@ -688,6 +716,7 @@ final class TabStore {
             pane.editor = EditorModel(root: tab.pwd ?? tab.projectPath)
         case .attachments:
             guard tab.sessionId != nil else { return nil }
+            pane.images = ImageGallery()
         case .pr:
             break
         }

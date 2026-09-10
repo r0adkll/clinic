@@ -147,7 +147,8 @@ struct TerminalStack: NSViewRepresentable {
             DispatchQueue.main.async {
                 // A zoomed panel hides the agent surface: focus must not fall back into it (ADR-081).
                 guard let w = tab.surface.window, w.firstResponder !== tab.surface,
-                      !tab.panel.isFront(.terminal), !tab.panel.isZoomed else { return }
+                      !tab.panel.isFront(.terminal), !tab.panel.isZoomed,
+                      !tab.contentView.panelHoldsKeyboard else { return }
                 w.makeFirstResponder(tab.surface)
             }
         }
@@ -176,7 +177,7 @@ struct TerminalStack: NSViewRepresentable {
         case .terminal: terminal = pane.terminal
         case .diff: page = pane.diff.map { self.page(DiffPanel(tab: tab, model: $0)) }
         case .files: page = pane.editor.map { self.page(EditorPanel(tab: tab, model: $0)) }
-        case .attachments: page = self.page(AttachmentsPanel(tab: tab))
+        case .attachments: page = pane.images.map { self.page(AttachmentsPanel(tab: tab, gallery: $0)) }
         case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))
         }
         return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)), page: page,
