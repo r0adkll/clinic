@@ -10,10 +10,8 @@ import ClinicCore
 @Observable
 final class PRFilesModel {
     private(set) var selected: String?
-    private(set) var highlights: [String: AttributedString] = [:]
-    /// Rows for the selected file only; a PR diff can be thousands of lines and only one file shows.
-    private(set) var rows: [DiffRow] = []
-    private(set) var columns = 0
+    /// The selected file only; a PR diff can be thousands of lines and only one file shows.
+    let text = DiffTextSource()
 
     private let highlighter = DiffSyntaxHighlighter()
     private var highlightTask: Task<Void, Never>?
@@ -22,7 +20,9 @@ final class PRFilesModel {
     /// Picks up the first file when a diff arrives, and re-selects if the chosen file disappears.
     func sync(with diff: UnifiedDiff?) {
         guard let diff, !diff.files.isEmpty else {
-            selected = nil; rows = []; highlights = [:]; highlightedPath = nil
+            selected = nil
+            text.replace(document: DiffDocument(), keepingTokens: false)
+            highlightedPath = nil
             return
         }
         if selected == nil || !diff.files.contains(where: { $0.path == selected }) {
@@ -36,16 +36,14 @@ final class PRFilesModel {
         // `DiffFileRows` has no public initialiser, so the one-file page is built through DiffPage —
         // which is also what gives the highlighter the exact type it wants.
         let page = DiffPage.build(files: [file], limit: 1)
-        rows = page.files.first?.rows ?? []
-        columns = page.columns
+        text.replace(document: DiffDocument.build(page: page), keepingTokens: false)
         highlight(page)
     }
 
     private func highlight(_ page: DiffPage) {
-        guard let fileRows = page.files.first, !fileRows.rows.isEmpty else { highlights = [:]; return }
+        guard let fileRows = page.files.first, !fileRows.rows.isEmpty else { return }
         guard highlightedPath != fileRows.path else { return }
         highlightTask?.cancel()
-        highlights = [:]
         highlightedPath = fileRows.path
         let theme = DiffSyntaxTheme.current
         highlightTask = Task { [weak self, highlighter] in
@@ -53,7 +51,7 @@ final class PRFilesModel {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.highlightedPath == fileRows.path else { return }
-                self.highlights = result
+                self.text.merge(tokens: result)
             }
         }
     }
@@ -68,14 +66,8 @@ struct PRFilesView: View {
     /// reader who wants the repo tree open does not necessarily want a PR's file list open too.
     @AppStorage("ClinicPRShowTree") private var showTree = true
     @State private var filter = ""
-    @State private var viewport: CGSize = .zero
+    @State private var scrollTarget: String?
     @FocusState private var filterFocused: Bool
-
-    /// Gutter is two line-number columns plus the +/− marker, matching `DiffScrollView`.
-    private static let gutter: CGFloat = 42 + 42 + 16 + 10
-    private var contentWidth: CGFloat {
-        max(viewport.width, CGFloat(model.columns) * DiffMetrics.advance + Self.gutter)
-    }
 
     var body: some View {
         Group {
@@ -208,27 +200,13 @@ struct PRFilesView: View {
     private func viewer(_ diff: UnifiedDiff) -> some View {
         if let path = model.selected, let file = diff.files.first(where: { $0.path == path }) {
             VStack(spacing: 0) {
-                DiffFileHeader(file: file, collapsed: false) {}.allowsHitTesting(false)
-                Divider()
+                DiffFileHeader(file: file)
                 if file.isBinary {
                     ContentUnavailableView("Binary file", systemImage: "doc.badge.gearshape",
                                            description: Text("\(file.additions + file.deletions) bytes changed"))
                 } else {
-                    ScrollView([.vertical, .horizontal]) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(model.rows) { row in
-                                DiffRowView(row: row, attributed: model.highlights[row.id])
-                            }
-                        }
-                        // Same two rules the diff panel needs (ADR-080). Width: the font is
-                        // monospaced, so the widest line is arithmetic — without it rows wrap instead
-                        // of extending. Height: a two-axis ScrollView centres content shorter than its
-                        // viewport, which left a short diff floating in the middle of the pane.
-                        .frame(width: contentWidth, alignment: .topLeading)
-                        .frame(minHeight: viewport.height, alignment: .topLeading)
-                    }
-                    .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
-                    .background(Color(nsColor: .textBackgroundColor))
+                    // The same body the diff panel renders (ADR-100), fed a one-file document.
+                    DiffTextBody(source: model.text, scrollTarget: $scrollTarget)
                 }
             }
         } else {

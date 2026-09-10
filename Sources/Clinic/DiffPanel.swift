@@ -41,8 +41,33 @@ struct DiffPanel: View {
         } else if let error = model.error, model.files.isEmpty {
             ContentUnavailableView("Could not read the diff", systemImage: "exclamationmark.triangle", description: Text(error))
         } else {
-            DiffScrollView(model: model, onVisibleFileChanged: { visibleFile = $0 }, scrollTarget: $scrollTarget)
+            VStack(spacing: 0) {
+                DiffTextBody(source: model.text,
+                             onVisibleFileChanged: { visibleFile = $0 },
+                             onToggleCollapse: { model.toggleCollapsed($0) },
+                             scrollTarget: $scrollTarget)
+                if model.page.hasMore { showMore }
+            }
         }
+    }
+
+    /// A footer rather than a row at the end of the body (ADR-100): a text view holds text, not
+    /// buttons, and a pinned footer is reachable without scrolling to the end of the page.
+    private var showMore: some View {
+        Button { model.showMoreFiles() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down.circle")
+                Text("Show \(model.page.remainingFiles) more file\(model.page.remainingFiles == 1 ? "" : "s")")
+                Text("of \(model.page.totalFiles)").foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 
     // MARK: Header

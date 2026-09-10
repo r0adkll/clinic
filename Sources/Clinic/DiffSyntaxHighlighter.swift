@@ -76,14 +76,17 @@ actor DiffSyntaxHighlighter {
     private var queries: [String: Query] = [:]
     private var unsupported: Set<String> = []
 
-    /// Attributed text for the line rows of `files`, keyed by row id. Rows with no language, or no
-    /// captures, are simply absent and render as plain text.
+    /// Coloured ranges for the line rows of `files`, keyed by row id, in each row's own
+    /// coordinates. Rows with no language, or no captures, are simply absent and render plain.
+    ///
+    /// Ranges rather than `AttributedString`s (ADR-100): the body is a text view, so what it needs
+    /// is something to apply to its storage, and ranges cross the actor boundary far more cheaply.
     ///
     /// Cancellation is checked per file, not just on return: a superseded pass that runs to
     /// completion still holds this actor, and a dozen of them queued behind each other turned a
     /// 1.5 s highlight into 15 s of pegged CPU.
-    func highlights(for files: [DiffFileRows], theme: DiffSyntaxTheme) async -> [String: AttributedString] {
-        var out: [String: AttributedString] = [:]
+    func highlights(for files: [DiffFileRows], theme: DiffSyntaxTheme) async -> [String: [DiffToken]] {
+        var out: [String: [DiffToken]] = [:]
         for file in files {
             if Task.isCancelled { return out }
             guard let grammar = grammar(for: file.file.path) else { continue }
@@ -111,7 +114,7 @@ actor DiffSyntaxHighlighter {
         return [("new", newSide), ("old", oldSide)]
     }
 
-    private func merge(_ out: inout [String: AttributedString], snippet rows: [(String, String)],
+    private func merge(_ out: inout [String: [DiffToken]], snippet rows: [(String, String)],
                        query: Query, language: Language, theme: DiffSyntaxTheme) {
         // One text for the whole side, remembering where each row starts so captures map back.
         var text = ""
@@ -152,19 +155,18 @@ actor DiffSyntaxHighlighter {
             }
         }
 
-        let ns = text as NSString
         for (index, span) in spans.enumerated() {
             let overlapping = buckets[index]
             guard !overlapping.isEmpty else { continue }
-            let lineText = ns.substring(with: span.range)
-            let attributed = NSMutableAttributedString(string: lineText)
+            var tokens: [DiffToken] = []
+            tokens.reserveCapacity(overlapping.count)
             for (clipped, colour) in overlapping {
                 let local = NSRange(location: clipped.location - span.range.location, length: clipped.length)
-                guard local.location >= 0, NSMaxRange(local) <= attributed.length else { continue }
-                attributed.addAttribute(.foregroundColor, value: colour.nsColor, range: local)
+                guard local.location >= 0, NSMaxRange(local) <= span.range.length else { continue }
+                tokens.append(DiffToken(range: local, colour: colour))
             }
             // Context lines are in both snippets; whichever ran last wins, and they agree.
-            out[span.id] = AttributedString(attributed)
+            if !tokens.isEmpty { out[span.id] = tokens }
         }
     }
 

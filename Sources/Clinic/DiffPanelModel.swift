@@ -64,9 +64,11 @@ final class DiffPanelModel {
     private(set) var files: [UnifiedDiffFile] = []
     /// Chip-sized descriptions for the rail, rebuilt only when the diff itself changes.
     private(set) var fileSummaries: [DiffFileSummary] = []
-    /// What the view renders: the paged, flattened rows plus whatever highlighting has arrived.
+    /// The paged, flattened rows. The body renders `text` — the same page as one text document
+    /// (ADR-100) — but paging, collapsing and highlighting are all still stated in rows.
     private(set) var page = DiffPage()
-    private(set) var highlights: [String: AttributedString] = [:]
+    /// What the body renders, by reference: the document plus whatever highlighting has arrived.
+    let text = DiffTextSource()
     /// Files the reader has collapsed by hand. Collapsing frees a file's whole line budget, so it
     /// is also the way out of a diff too large to page through comfortably.
     private(set) var collapsed: Set<String> = []
@@ -199,7 +201,7 @@ final class DiffPanelModel {
             files = diff?.files ?? []
             fileSummaries = files.map(DiffFileSummary.init)
             rowCache.reset()
-            highlights = [:]
+            text.clearTokens()
             highlightedFiles = []
             collapsed = []
             pagedFileCount = DiffPage.fileLimit(for: files, budget: Self.lineBudget)
@@ -209,7 +211,7 @@ final class DiffPanelModel {
             files = []
             fileSummaries = []
             page = DiffPage()
-            highlights = [:]
+            text.replace(document: DiffDocument(), keepingTokens: false)
             self.error = "\(error)"
             Self.log.error("diff panel load (\(self.scope.rawValue, privacy: .public)): \(error, privacy: .public)")
         }
@@ -248,6 +250,9 @@ final class DiffPanelModel {
     /// The page is published first so the diff appears immediately and colours arrive after.
     private func rebuildPage() {
         page = DiffPage.build(files: files, collapsed: collapsed, limit: pagedFileCount, rowCache: rowCache)
+        // Row ids are stable for the life of a diff, so colours already fetched survive a collapse
+        // or a page extension — the document is rebuilt, the tokens are not.
+        text.replace(document: DiffDocument.build(page: page), keepingTokens: true)
         highlightVisibleFiles()
     }
 
@@ -263,7 +268,7 @@ final class DiffPanelModel {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self else { return }
-                self.highlights.merge(result) { _, new in new }
+                self.text.merge(tokens: result)
                 self.highlightedFiles.formUnion(pending.map(\.path))
             }
         }
