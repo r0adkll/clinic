@@ -78,23 +78,6 @@ final class WindowState: Identifiable {
     var title: String { nsWindow?.title ?? "Clinic" }
 }
 
-/// Keeps the Mac awake while on (ADR-075). Not persisted; the assertion dies with the process.
-@MainActor
-@Observable
-final class CaffeineController {
-    var isOn = false { didSet { apply() } }
-    @ObservationIgnored private var activity: NSObjectProtocol?
-
-    private func apply() {
-        if isOn, activity == nil {
-            activity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled], reason: "Clinic caffeine mode")
-        } else if !isOn, let activity {
-            ProcessInfo.processInfo.endActivity(activity)
-            self.activity = nil
-        }
-    }
-}
-
 /// Reports the NSWindow a SwiftUI hierarchy landed in.
 struct WindowAccessor: NSViewRepresentable {
     let onWindow: @MainActor (NSWindow) -> Void

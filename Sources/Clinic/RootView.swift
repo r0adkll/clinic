@@ -70,11 +70,7 @@ struct RootView: View {
             ToolbarItemGroup {
                 Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session" + bindings.hint(.newSession))
                 Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab" + bindings.hint(.newShell))
-                Button { caffeine.isOn.toggle() } label: {
-                    Label("Caffeine", systemImage: caffeine.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
-                        .foregroundStyle(caffeine.isOn ? Color.accentColor : Color.primary)
-                }
-                .help(caffeine.isOn ? "Caffeine mode is on: the Mac will not sleep" + bindings.hint(.caffeine) : "Caffeine mode: keep the Mac awake" + bindings.hint(.caffeine))
+                CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine))
                 if let tab = tabs.selectedTab(in: window), tab.replay == nil {
                     OpenInToolbarMenu(path: tab.pwd ?? tab.projectPath)
                 }

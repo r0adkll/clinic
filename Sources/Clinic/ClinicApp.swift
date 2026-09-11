@@ -96,6 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.onRefresh = { [weak self] agents in self?.automations.reconcile(agents: agents) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
+        // What caffeine's *while agents work* scope waits on (ADR-119): a session counts once whether
+        // its tab, its detached agent, or both say it is working.
+        caffeine.start { [weak self] in
+            guard let self else { return 0 }
+            let agents = backgroundAgents.background.filter(\.isWorking)
+            var ids = Set(agents.compactMap(\.sessionId))
+            ids.formUnion(tabs.tabs.filter { $0.state == .working }.compactMap(\.sessionId))
+            return ids.count + agents.filter { $0.sessionId == nil }.count
+        }
         automations.router = { [weak self] sid, title, body, kind in
             self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind)
         }
@@ -520,7 +529,11 @@ struct ClinicCommands: Commands {
             Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
             Button("Automations") { NotificationCenter.default.post(name: .clinicAutomations, object: nil) }.keyboardShortcut(key(.automations))
             Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
-            Toggle("Caffeine Mode", isOn: Binding(get: { caffeine.isOn }, set: { caffeine.isOn = $0 })).keyboardShortcut(key(.caffeine))
+            Menu("Caffeine") {
+                CaffeineModeItems(caffeine: caffeine)
+                Divider()
+                Button(caffeine.toggleTitle) { caffeine.toggle() }.keyboardShortcut(key(.caffeine))
+            }
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
             Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))

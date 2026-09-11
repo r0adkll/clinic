@@ -37,7 +37,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .automations: "Automations"
         case .selectSessions: "Select Sessions"
         case .notifications: "Notifications"
-        case .caffeine: "Caffeine Mode"
+        case .caffeine: "Turn Caffeine On or Off"
         case .togglePanel: "Terminal Panel Tab"
         case .toggleDiffPage: "Diff Panel Tab"
         case .toggleEditor: "Files Panel Tab"
