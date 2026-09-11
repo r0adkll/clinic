@@ -32,7 +32,7 @@ public protocol WorkItemProvider: Sendable {
     func sessionPrompt(for item: WorkItem) -> String
 }
 
-public enum WorkItemSourceResolution: Hashable, Sendable {
+public enum WorkItemSourceResolution: Hashable, Codable, Sendable {
     case resolved([WorkItemSource])
     /// Short and human: "No GitHub remote", "Not a git repository".
     case unresolved(reason: String)

@@ -307,6 +307,17 @@ final class TabStore {
         window.editingDraft = d
     }
 
+    /// The composer pre-filled from a task (ADR-114). Replaces the project's unsent draft: this is an
+    /// explicit request for a new one.
+    func startNewSession(projectPath: String, prompt: String, worktreeName: String?, workItem: WorkItemRef?) {
+        let d = NewSessionDraft(projectPath: projectPath, model: sessions.state.lastModelByProject[projectPath], worktree: worktreeName != nil)
+        d.prompt = prompt
+        d.worktreeName = worktreeName ?? ""
+        d.workItem = workItem
+        drafts[projectPath] = d
+        activeWindow.editingDraft = d
+    }
+
     private func window(showing d: NewSessionDraft) -> WindowState? { windows.first { $0.editingDraft?.id == d.id } }
 
     func discardDraft(_ d: NewSessionDraft) {
@@ -327,11 +338,13 @@ final class TabStore {
         window.editingDraft = nil
         if activeWindowId != window.id { activeWindowId = window.id }
         newSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: d.worktree, worktreeName: d.worktree ? d.worktreeName : nil,
-                   effort: d.resolvedEffort, prompt: (prompt?.isEmpty ?? true) ? nil : prompt)
+                   effort: d.resolvedEffort, prompt: (prompt?.isEmpty ?? true) ? nil : prompt, workItem: d.workItem)
     }
 
     /// New session with a pre-assigned id (ADR-017). `prompt` becomes the first turn (ADR-071).
-    func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, effort: String? = nil, prompt: String? = nil) {
+    /// `workItem` records the task it was started from (ADR-114).
+    func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, effort: String? = nil, prompt: String? = nil,
+                    workItem: WorkItemRef? = nil) {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
         launch.worktreeName = worktreeName
@@ -343,6 +356,7 @@ final class TabStore {
         tab.model = model
         tab.effort = effort
         sessions.registerPending(id: id, cwd: projectPath)
+        if let workItem { sessions.linkWorkItem(workItem, to: id) }
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
             s.lastWorktreeByProject[projectPath] = worktree

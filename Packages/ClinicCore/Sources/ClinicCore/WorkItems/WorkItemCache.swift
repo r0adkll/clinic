@@ -52,3 +52,20 @@ public struct WorkItemCache: Sendable {
         try e.encode(cached).write(to: url(for: cached.source), options: .atomic)
     }
 }
+
+extension WorkItemCache {
+    private var resolutionsURL: URL { directory.appendingPathComponent("resolutions.json") }
+
+    /// What each project resolved to last time, so the screen can draw from the cache at launch
+    /// before a single `gh repo view` has run (ADR-113).
+    public func loadResolutions() -> [String: WorkItemSourceResolution] {
+        guard let data = try? Data(contentsOf: resolutionsURL) else { return [:] }
+        return (try? JSONDecoder().decode([String: WorkItemSourceResolution].self, from: data)) ?? [:]
+    }
+
+    public func saveResolutions(_ resolutions: [String: WorkItemSourceResolution]) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]
+        try e.encode(resolutions).write(to: resolutionsURL, options: .atomic)
+    }
+}

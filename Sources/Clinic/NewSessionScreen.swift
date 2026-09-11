@@ -13,6 +13,8 @@ final class NewSessionDraft: Identifiable {
     var effort = "default"
     var worktree = false
     var worktreeName = ""
+    /// The task this draft was started from (ADR-114); Send links the new session to it.
+    var workItem: WorkItemRef?
 
     init(projectPath: String, model: String?, worktree: Bool) {
         self.projectPath = projectPath

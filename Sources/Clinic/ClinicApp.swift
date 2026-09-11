@@ -22,6 +22,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.marketplace)
                 .environment(appDelegate.mcpServers)
                 .environment(appDelegate.automations)
+                .environment(appDelegate.tasks)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -62,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let automations = AutomationsModel()
     var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
+    /// Shares the PR store's `GitHubService`, so `gh` stays one actor with one availability cache (ADR-113).
+    lazy var tasks = TasksStore(sessions: sessions, provider: GitHubWorkItemProvider(service: prs.service))
 
     /// ADR-042/ADR-072: open tabs are never restored, the primary window keeps its frame through an autosave name,
     /// and AppKit state restoration is opted out — saved state from a build with another scene shape would otherwise
