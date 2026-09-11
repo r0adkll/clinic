@@ -84,6 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }
         sessions.start()
         tabs.start()
+        // The project menu's *Run ▸* reads each project's run.json, and a context menu cannot load one
+        // on open (ADR-122); files only, detection waits until a project is actually looked at.
+        Task {
+            await sessions.initialScan?.value
+            tabs.runs.preload(projectPaths: sessions.projects.map(\.path))
+        }
         if UserDefaults.standard.bool(forKey: "ClinicShowUsage") { usage.start() }
         prs.openRefsProvider = { [weak self] in
             guard let self else { return [] }
@@ -235,6 +241,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: second)
                     }
                 }
+            }
+        }
+        // `-ClinicRunOnLaunch <id>[,<id>…]` (ADR-122): once the launch tab exists, run these configurations
+        // in its checkout, a second apart. `-ClinicRunSheetOnLaunch edit|import|choose` opens a Run sheet
+        // instead of (or after) them. Both stand in for clicks a smoke run cannot make.
+        let runIds = UserDefaults.standard.string(forKey: "ClinicRunOnLaunch") ?? ""
+        let runSheet = UserDefaults.standard.string(forKey: "ClinicRunSheetOnLaunch") ?? ""
+        let selectIds = UserDefaults.standard.string(forKey: "ClinicSelectRunAfterLaunch") ?? ""
+        if !runIds.isEmpty || !runSheet.isEmpty || !selectIds.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                guard let first = tabs.runContext() else { return }
+                tabs.runs.ensureLoaded(checkout: first.checkout, projectPath: first.projectPath)
+                guard let ctx = tabs.runContext() else { return }
+                for id in runIds.split(separator: ",") {
+                    if let config = ctx.file?.configuration(String(id)) { tabs.run(config, in: ctx) }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+                let mode: RunSheetRequest.Mode? = switch runSheet { case "edit": .edit; case "import": .importIDE; case "choose": .choose; default: nil }
+                if let mode { try? await Task.sleep(for: .seconds(1)); tabs.showRunSheet(mode, context: tabs.runContext() ?? ctx) }
+                // `-ClinicSelectRunAfterLaunch <id>[,<id>…]` (ADR-124): switch what ⌘R runs every few
+                // seconds, so one smoke run can be photographed with and without a device capsule.
+                for id in selectIds.split(separator: ",") {
+                    try? await Task.sleep(for: .seconds(6))
+                    tabs.runs.select(String(id), projectPath: ctx.projectPath)
+                }
+                // `-ClinicStopRunAfterLaunch <seconds>`: then ⌃⌘. — the stop path, Ctrl-C first.
+                let stopAfter = UserDefaults.standard.double(forKey: "ClinicStopRunAfterLaunch")
+                if stopAfter > 0 { try? await Task.sleep(for: .seconds(stopAfter)); tabs.stopSelectedRun() }
             }
         }
         // `-ClinicZoomPanelAfterLaunch <seconds>` (ADR-081): let the panel settle, then zoom it over the tab.
@@ -447,8 +482,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let running = tabs.runningCount
+        if running == 0, tabs.runs.runningCount > 0, !WindowLifecycle.confirmQuit(runningRuns: tabs.runs.runningCount) {
+            return .terminateCancel
+        }
         if running > 0 {
-            switch WindowLifecycle.quitChoice(runningCount: running) {
+            switch WindowLifecycle.quitChoice(runningCount: running, runningRuns: tabs.runs.runningCount) {
             case .cancel: return .terminateCancel
             case .hide: NSApp.windows.forEach { if $0.canBecomeMain { $0.orderOut(nil) } }; return .terminateCancel
             case .backgroundAll:
@@ -473,6 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FileWindowController.closeAll()
         ImageWindowController.closeAll()
         for tab in tabs.tabs { tab.surface.free(); tab.panelSurface?.free() }
+        tabs.runs.tearDown()
         hooks.stop()
         mcp.stop()
         Task { await sessions.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
@@ -530,6 +569,9 @@ struct ClinicCommands: Commands {
             Divider()
             Button("Jump to Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: nil) }
                 .keyboardShortcut(key(.jumpToSession))
+        }
+        CommandMenu("Run") {
+            RunCommandItems(tabs: tabs, key: key)
         }
         CommandGroup(after: .sidebar) {
             Button("Tasks") { NotificationCenter.default.post(name: .clinicTasks, object: nil) }.keyboardShortcut(key(.tasks))

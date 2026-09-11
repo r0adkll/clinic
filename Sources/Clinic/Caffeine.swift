@@ -146,27 +146,28 @@ struct CaffeineModeItems: View {
     }
 }
 
-/// The toolbar's cup (ADR-119): a click toggles caffeine, the menu picks its mode.
+/// The toolbar's cup (ADR-119): a click toggles caffeine; the chevron's popover picks its mode (ADR-123).
 struct CaffeineToolbarMenu: View {
     let caffeine: CaffeineController
     let hint: String
 
     var body: some View {
-        Menu {
-            CaffeineModeItems(caffeine: caffeine)
+        ToolbarSplitButton(help: caffeine.help + hint, choicesHelp: "Choose Always On or Agent Based", smokeId: "caffeine") {
+            caffeine.toggle()
         } label: {
             Image(nsImage: Self.glyph(caffeine.symbol, accent: caffeine.isOn))
                 .renderingMode(caffeine.isOn ? .original : .template)
                 .accessibilityLabel("Caffeine")
-        } primaryAction: {
-            caffeine.toggle()
+                .frame(width: 34, height: 28)
+        } choices: {
+            PopoverMenu(width: 300) {
+                PopoverMenuHeader(title: caffeine.statusLine)
+                ForEach(CaffeineController.Mode.allCases, id: \.self) { m in
+                    // Choosing the checked mode turns caffeine off, as unticking it in a menu did.
+                    PopoverMenuRow(title: m.title, checked: caffeine.mode == m) { caffeine.mode = caffeine.mode == m ? nil : m }
+                }
+            }
         }
-        .menuIndicator(.visible)
-        .help(caffeine.help + hint)
-        // The toolbar builds this menu once per item and never refreshes it — new inputs included —
-        // so a mode chosen from it was not checked the next time it opened. A new identity whenever
-        // the header would change makes a new item, and with it a current menu.
-        .id(caffeine.statusLine)
     }
 
     /// A toolbar menu draws its label as a template, dropping `foregroundStyle`; only an image that

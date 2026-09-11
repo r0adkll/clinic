@@ -195,6 +195,8 @@ final class TabStore {
     let sounds = NotificationSoundPlayer()
     /// Turn snapshots for the diff panel (ADR-080).
     let snapshots = SnapshotService()
+    /// Run configurations and their runs (ADR-122).
+    let runs: RunStore
     /// Set by the app after construction (ADR-056, ADR-061).
     var mcp: MCPToolService?
     var backgroundAgents: BackgroundAgentsService?
@@ -203,9 +205,11 @@ final class TabStore {
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
+        self.runs = RunStore(sessions: sessions)
         let primary = WindowState(id: Self.primaryWindowId, isPrimary: true)
         primary.store = self
         windows = [primary]
+        runs.tabs = self
     }
 
     /// Single router for attention (ADR-066): history always; then by focus — looking at it: nothing more;
@@ -582,6 +586,8 @@ final class TabStore {
             t.surface.isOccluded = hidden || t.panel.isZoomed
             t.panelSurface?.isOccluded = hidden || !t.panel.isFront(.terminal)
         }
+        if let tab = selectedTab(in: window) { runs.claim(for: tab) }
+        runs.syncOcclusion()
         if let tab = selectedTab(in: window) {
             tab.unread = false
             if let id = tab.sessionId { history.markRead(sessionId: id) }
@@ -623,6 +629,7 @@ final class TabStore {
             }
         }
         let w = window(of: tab)
+        runs.tabClosed(tab)
         tabs.removeAll { $0.id == tab.id }
         if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
@@ -757,7 +764,25 @@ final class TabStore {
 
     func closePane(_ pane: PanelPane, in tab: Tab) {
         tab.panel.close(pane)
+        if case .run(let key) = pane.kind { runs.paneClosed(key, in: tab) }
         focusPanel(tab)
+    }
+
+    /// The strip's *Close Others*: through `closePane`, so a run pane gives its surface back (ADR-122).
+    func closeOtherPanes(_ keep: PanelPane, in tab: Tab) {
+        for pane in tab.panel.panes where pane.id != keep.id { closePane(pane, in: tab) }
+    }
+
+    /// Opens a run's pane in a tab — fronted, or added behind the pane on screen (a re-run after a turn
+    /// never fronts anything, ADR-122).
+    func openRunPane(_ key: RunKey, in tab: Tab, front: Bool) {
+        if !front {
+            // Never shows the panel or moves the keyboard: Claude started this, or a turn ended, and
+            // the user may be typing into the session. The toolbar pill and the chip carry the news.
+            if !tab.panel.isOpen(.run(key)) { tab.panel.append(PanelPane(kind: .run(key)), select: tab.panel.isEmpty) }
+            return
+        }
+        if front { showPane(.run(key), in: tab) }
     }
 
     /// ⌘⌃] / ⌘⌃[: move through the panel's tabs.
@@ -778,6 +803,9 @@ final class TabStore {
         var kinds: [PanelPane.Kind] = [.terminal, .diff, .files]
         if tab.sessionId != nil { kinds.append(.attachments) }
         kinds += pullRequests(for: tab).map { PanelPane.Kind.pr($0) }
+        if let checkout = runs.checkout(for: tab) {
+            kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
+        }
         return kinds.filter { !tab.panel.isOpen($0) }
     }
 
@@ -788,6 +816,7 @@ final class TabStore {
         case .attachments:
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Images (\(count))" : "Images"
+        case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
         default: return kind.defaultTitle
         }
     }
@@ -817,7 +846,7 @@ final class TabStore {
         case .attachments:
             guard tab.sessionId != nil else { return nil }
             pane.images = ImageGallery()
-        case .pr:
+        case .pr, .run:
             break
         }
         return pane
@@ -829,7 +858,15 @@ final class TabStore {
         let unselected = window(of: tab).selectedTabId != tab.id
         tab.panelSurface?.isOccluded = unselected || !tab.panel.isFront(.terminal)
         tab.surface.isOccluded = unselected || tab.panel.isZoomed
+        runs.claim(for: tab)
+        runs.syncOcclusion()
+        let frontRun: GhosttySurfaceView? = {
+            guard tab.panel.isVisible, case .run(let key)? = tab.panel.selected?.kind, let run = runs.run(forKey: key),
+                  run.hostTabId == tab.id else { return nil }
+            return run.surface
+        }()
         let target: GhosttySurfaceView? = if tab.panel.isFront(.terminal) { tab.panelSurface }
+                                          else if let frontRun { frontRun }
                                           else if tab.panel.isZoomed { nil }
                                           else { tab.surface }
         let window = tab.surface.window
@@ -927,6 +964,7 @@ final class TabStore {
         // ADR-080: turn boundaries become snapshots. Before any early return below, and before the
         // SessionEnd close path so a closing session still gets its last turn sealed.
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
+        if event.hookEventName == "Stop" { runs.turnEnded(in: tab, snapshots: snapshots) }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }

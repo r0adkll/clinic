@@ -14,6 +14,8 @@ final class PanelPane: Identifiable {
     enum Kind: Hashable {
         case terminal, diff, files, attachments
         case pr(PullRequestRef)
+        /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
+        case run(RunKey)
 
         var symbol: String {
             switch self {
@@ -22,6 +24,7 @@ final class PanelPane: Identifiable {
             case .files: "doc.text.magnifyingglass"
             case .attachments: "photo.on.rectangle"
             case .pr: PullRequestMark.symbol
+            case .run: "play.fill"
             }
         }
 
@@ -47,6 +50,7 @@ final class PanelPane: Identifiable {
             case .files: "Files"
             case .attachments: "Images"
             case .pr(let ref): ref.codeHost.reference(ref.number)
+            case .run(let key): key.configId
             }
         }
 
@@ -54,7 +58,7 @@ final class PanelPane: Identifiable {
         /// answer depends on the shared tree preference (ADR-081).
         @MainActor var minWidth: CGFloat {
             switch self {
-            case .terminal: 400
+            case .terminal, .run: 400
             case .diff, .pr: 380
             // A viewer needs room to be a viewer, and the thumbnail list charges for its column
             // the way the file tree does (ADR-106).
@@ -106,9 +110,9 @@ final class SidePanel {
     func isOpen(_ kind: PanelPane.Kind) -> Bool { pane(kind) != nil }
 
     @discardableResult
-    func append(_ pane: PanelPane) -> PanelPane {
+    func append(_ pane: PanelPane, select: Bool = true) -> PanelPane {
         panes.append(pane)
-        selectedId = pane.id
+        if select { selectedId = pane.id }
         return pane
     }
 
@@ -274,6 +278,8 @@ struct SidePanelTabChip: View {
             Group {
                 if case .pr(let ref) = pane.kind {
                     PRTabGlyph(ref: ref, size: pane.kind.glyphSize(compact: compact))
+                } else if case .run(let key) = pane.kind {
+                    RunStatusGlyph(run: tabs.runs.run(forKey: key), idleSymbol: "play.fill", size: pane.kind.glyphSize(compact: compact) + 1)
                 } else {
                     Image(systemName: pane.kind.symbol)
                         .font(.system(size: pane.kind.glyphSize(compact: compact)))
@@ -313,7 +319,7 @@ struct SidePanelTabChip: View {
         .help(compact ? title : "")
         .contextMenu {
             Button("Close") { tabs.closePane(pane, in: tab) }
-            Button("Close Others") { tab.panel.closeAll(except: pane) }
+            Button("Close Others") { tabs.closeOtherPanes(pane, in: tab) }
                 .disabled(tab.panel.panes.count < 2)
         }
     }

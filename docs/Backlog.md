@@ -128,3 +128,23 @@ Issues from every project's GitHub repository, in one screen that starts session
   ignore the worktree base setting ([[ADR-118 Where A Worktree Branches From]]). Give an automation
   a base, or make it follow its project's.
 - ~~Found on the way: the PR panel's link policy (ADR-090) never ran.~~ Fixed 2026-09-10 → [[ADR-115 GitHub HTML Navigation Is Enforced]].
+
+## Milestone 9 — run configurations — **built 2026-09-11** (steps 1–7, uncommitted on `main`)
+Run a project's targets from Clinic → [[ADR-122 Projects Have Run Configurations]].
+1. ~~**`ClinicCore/Run`**: model, file, checkout rules, launch wrapper, trust, prompts; importer and
+   detector; `RunTests`.~~
+2. ~~**`RunStore` + surfaces**, stop escalation, restart, exit codes via the wrapper's status file.~~
+3. ~~**Run pane** owned by the checkout, re-parented between hosts; header band and failure bar.~~
+4. ~~**Controls**: the option-A toolbar pill, Run menu, ⌘R / ⌃⌘. / ⌃⌘R, project menu *Run ▸*,
+   notifications, quit prompt.~~
+5. ~~**Editor sheet**, **Set Up with Claude…**~~
+6. ~~**Import** and **detection**.~~
+7. ~~**Sessions**: *Fix with Claude*, the four MCP tools behind the trust rule, re-run after a turn.~~
+- Not verified on screen: the toolbar's own menu and the menu bar's Run menu (no smoke run can open
+  a menu), *Fix with Claude* (needs a live session), the MCP tools, re-run after a turn, a run shown
+  in two windows, the project menu's *Run ▸*, and the notification when a run ends off screen.
+- Known: every run's output starts with `login`'s *Last login:* line unless `~/.hushlogin` exists.
+  Livewire's `hotRunJvm` is not detected, because Compose now bundles hot reload without a plugin line.
+- ~~Destination picker~~ built → [[ADR-124 Runs Get A Device Ready]] (Android devices and emulators, iOS simulators). Not yet seen in the app: the display was asleep during the check.
+- Deferred: physical iOS devices; re-run on file change; history; ⌘K and
+  status item entries; sidebar running mark; output links; sequential compounds.

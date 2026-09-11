@@ -160,15 +160,27 @@ struct TerminalStack: NSViewRepresentable {
         }
         var page: AnyView?
         var terminal: GhosttySurfaceView?
+        var header: AnyView?
+        var footer: AnyView?
         switch pane.kind {
         case .terminal: terminal = pane.terminal
         case .diff: page = pane.diff.map { self.page(DiffPanel(tab: tab, model: $0)) }
         case .files: page = pane.editor.map { self.page(EditorPanel(tab: tab, model: $0)) }
         case .attachments: page = pane.images.map { self.page(AttachmentsPanel(tab: tab, gallery: $0)) }
         case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))
+        case .run(let key):
+            // Only the tab holding the run shows its surface; any other shows why not (ADR-122).
+            if let run = tabs.runs.run(forKey: key), let surface = run.surface, run.hostTabId == tab.id {
+                terminal = surface
+                header = inject(RunPaneHeader(run: run, tab: tab))
+                if run.status.isFailure { footer = inject(RunFailureBar(run: run, tab: tab)) }
+            } else {
+                page = self.page(RunPanePlaceholder(runKey: key, tab: tab))
+            }
         }
         return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)), page: page,
-                                           terminal: terminal, minWidth: pane.kind.minWidth, zoomed: tab.panel.isZoomed)
+                                           terminal: terminal, terminalHeader: header, terminalFooter: footer,
+                                           minWidth: pane.kind.minWidth, zoomed: tab.panel.isZoomed)
     }
 }
 

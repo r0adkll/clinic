@@ -2669,3 +2669,323 @@ are shared from `HomeScreen.swift`. There is a new smoke key, `-ClinicNewSession
 
 A second round of synthetic keystrokes lost focus partway through: the smoke window was not key
 when "ca" was typed, so I stopped driving input.
+
+## 2026-09-11 (cont.) — Run configurations, designed (ADR-122)
+
+User: *"It would be nice to have an action to "run" a project. For example, in my Campfire project
+its a Kotlin multiplatform setup on Gradle that can run the android app, the desktop app (or hot
+reload desktop app), or execute its iOS app. For clinic, its a macOS xcode app, etc. Can we explore
+a design/feature that would allow us to run (or setup run configurations) for projects?"*
+
+**Surveyed first.**
+- **Run targets.** In Campfire and every repo under `main/`, run targets are Gradle tasks, Make
+  targets, `cargo run`, npm scripts and shell scripts.
+- **Checked-in run configs.** The only ones are JetBrains XML (livewire, SwatchBuckler, Campfire's
+  `.idea/runConfigurations`) and one VS Code `tasks.json` (shopkeep). Livewire and shopkeep both
+  have compound (two-process) runs.
+- **Campfire corrections:**
+  - no Compose Hot Reload plugin today;
+  - Android flavors `alpha`/`beta`, so `installAlphaDebug`;
+  - its iOS config is project + scheme + configuration for `app/ios/iosApp.xcodeproj`.
+- **Code checks.** The bridge's `show_child_exited` carries the exit code, and
+  `$SHELL -l -i -c '…; exit 3'` returned 3 under zsh and fish. `GHOSTTY_POINT_SCREEN` reaches the
+  scrollback, which `visibleText` doesn't.
+
+**Settled with the user** (four questions):
+- output is a right-panel pane;
+- configurations live in `.clinic/run.json`;
+- all four setup paths: Claude, editor sheet, IDE import, detection;
+- all three session hooks: *Fix with Claude*, MCP run tools, re-run after a turn.
+
+**Settled by me** (in the ADR):
+- runs belong to the checkout and are re-parented between panel hosts;
+- ⌘R / ⌃⌘. / ⌃⌘R, because ⌘. is Stop Session;
+- the trust rule: an MCP `run` only executes a command the user has run or saved from the UI;
+- `run` returns at once, because of the 15 s relay timeout;
+- iOS destinations are deferred to their own ADR.
+
+No code yet; Backlog gains Milestone 9.
+
+**Design pass, same day.** User: *"Yes, lets do a design pass now"*. A design canvas (Clinic Run
+Configurations, https://claude.ai/code/artifact/e0e28790-db14-46fd-86df-41540f06164e) has eight
+artboards:
+- Desktop running in the Run pane;
+- the Run menu;
+- a failed Android build with *Fix with Claude*;
+- ditto with nothing configured;
+- the *Set Up with Claude* composer;
+- importing livewire's six real `.run` files;
+- the editor sheet;
+- a states sheet.
+
+**How it was drawn.** It reuses ADR-120's measured chrome. Metrics come from source: `PaneMetrics`
+34/24, `SidePanelTabChip`, `TabChip`, `FooterToggle`, the automation sheet. I checked each artboard
+as a headless-Chrome render before saving.
+
+**ADR-122 corrected on the way:**
+- Run marks now follow [[ADR-096 Session Status Indicators]]: the spinning arc for running, never
+  the accent. The ADR had said "accent dot".
+- ■ shows only while the *selected* configuration runs.
+- The pane's status lives in the ADR-102 header band, with a failure bar under the output.
+
+**Open:** the toolbar control, A (a named pill) or B (glyph only, like Open In).
+
+## 2026-09-11 (cont.) — Run configurations, built (ADR-122)
+
+User: *"I like option A, lets implement it"*. Option A is the named pill. The ADR records the
+choice.
+
+**Built:**
+- **ClinicCore `Run/`:**
+  - the model: `RunConfiguration` and `RunConfigurationFile`, with unknown keys round-tripped and a
+    readable decode error;
+  - `RunCheckout`, `RunLaunch`, `RunStatus`, `RunTrust` and `RunPrompts`;
+  - a background agent wrote `RunImporter` (JetBrains XML, VS Code JSONC) and `RunDetector`
+    (Make, npm, Cargo, SwiftPM, Gradle plugins, Xcode macOS schemes), plus `RunTests`.
+- **App:**
+  - `RunStore`, `RunViews` (the pill, the pane header, the failure bar, the placeholder and the
+    shared menu items) and `RunSheets` (the editor, import and the ⌃⌘R picker);
+  - the Run menu and its three chords, and *Run ▸* in the project menu;
+  - four MCP tools, and the quit prompt;
+  - `PanelPane.Kind.run`, the host view's header and footer around the surface, and
+    `GhosttySurfaceView.screenText`.
+
+**Found on the way:**
+- **Exit codes.** On macOS libghostty runs every surface command under `/usr/bin/login`, which
+  exits 0 whatever its child did, so `show_child_exited` can't report a failure. The first smoke
+  run showed a failing build as *Succeeded in 1 s*. Runs now go through a `/bin/sh` wrapper that
+  writes the code to a status file before it exits, trapping SIGINT with a no-op handler (not an
+  ignore, which the command would inherit). The ADR's Context and Decision are corrected, and the
+  bridge's `surfaceChildExited` docs now warn about this.
+- **Status glyphs.** They follow ADR-096, as corrected in the design pass.
+- **Background runs.** A run started by Claude, or re-run after a turn, now adds its pane without
+  showing the panel or taking the keyboard.
+
+**Verified:**
+- `make build`; ClinicCore passes 375 tests (58 in `RunTests`), and GhosttyBridge's tests pass.
+- Smoke instances (`CLINIC_APP_SUPPORT`, new `-ClinicRunOnLaunch`, `-ClinicRunSheetOnLaunch`,
+  `-ClinicStopRunAfterLaunch`), with a throwaway demo project:
+  - the pill ran, showing the arc, the clock and ■, and the pane showed its branch tag and live
+    output;
+  - the failing build showed ✗ *Exit 1* with the failure bar;
+  - Stop left the hollow ring;
+  - the editor sheet loaded the real file, and the import sheet loaded livewire's six real `.run`
+    files, writing nothing;
+  - the picker listed ditto's detected targets.
+- No orphaned processes after quitting, and the defaults domain was unchanged. The smoke dirs are
+  deleted.
+
+**Not verified:**
+- Menus opened from the toolbar or the menu bar.
+- *Fix with Claude*, the MCP tools, re-run after a turn.
+- Two-window hosting, the project menu's *Run ▸*, and the off-screen notification.
+
+## 2026-09-11 (cont.) — Toolbar choices open in popovers (ADR-123)
+
+User: *"the popup window for the run configurations when clicking the arrow in the menu bar (and
+also for the caffeine and open with popups) are floating misaligned, vs having a proper caret as
+part of the popup window like the notifications one. Can we fix / align these popups?"*
+
+**Built:**
+- `ToolbarSplitButton`: a button, a divider, and a chevron that opens a `.popover(arrowEdge:
+  .bottom)`, which is the bell's construction.
+- `PopoverMenu` rows (check column, icon, title, subtitle, trailing fact, accent highlight under
+  the pointer). Caffeine, Open In and the Run pill use them.
+- The Run menu is now one `runMenuEntries` list, rendered by both the popover and the menu bar's
+  native Run menu.
+- The `OpenInPickerRow` and the caffeine `.id` workaround are removed.
+
+**Found on the way.** Once the controls were plain buttons, macOS 26 drew New Session through Run
+as one glass capsule. Things tried:
+- `ToolbarSpacer(.fixed)` did nothing, both inside `if #available` and in a macOS-26-typed toolbar
+  block.
+- A throwaway toolbar harness app never got a window from the sandbox, so I tested in the app
+  itself.
+- What worked: `.sharedBackgroundVisibility(.hidden)` and a 36 pt `.glassEffect` capsule drawn
+  inside each control. That gives five separate capsules, and none empty when no tab is selected.
+
+**Verified** in `CLINIC_APP_SUPPORT` smoke instances, using the new
+`-ClinicToolbarPopoverOnLaunch run|caffeine|openIn`:
+- All three popovers opened with the caret on their own chevron: Run showed its state and a
+  detected `make build`, caffeine its status line and a check, Open In its app icons in colour.
+- The full toolbar had five capsules with a tab open, and three on the home screen.
+- `make build` passed, and the defaults domain was unchanged.
+
+**Not verified:** clicking rows in the popovers, and hover highlights. Nothing can drive a click
+here without risking the live app.
+
+## 2026-09-11 (cont.) — Runs get a device ready (ADR-124)
+
+User: *"one thing I noticed with AI configured Android run configurations is that it doesn't take
+into consideration active device or emulator setups. If we are trying to replicate the environment
+from Android Studio (for example) then it needs to boot an emulator if no device is connected to be
+effective"*
+
+**Settled with the user:** a device capsule in the toolbar, as in Android Studio, covering Android
+and the iOS Simulator.
+
+**Built:**
+- **`device` field.** `"device": "android" | "ios"` on a configuration. Detection and import infer
+  it from the command; the editor has a picker; the set-up prompt tells Claude to use it and not
+  to boot emulators in the command.
+- **ClinicCore `RunDevices.swift`.** It locates the SDK (`local.properties`, then `ANDROID_HOME`,
+  then `~/Library/Android/sdk`). It parses `adb devices -l`, `-list-avds`, `emu avd name` and
+  `simctl list -j`. It picks a default device, and prepares one: a detached `emulator -avd`, then
+  polling for the AVD's serial and `sys.boot_completed`, or `simctl bootstatus -b` and
+  `open -a Simulator`.
+- **App.** `RunDeviceStore` keeps a choice per project and platform in `state.json`, and shares
+  one boot between runs that need it. `Run` gains a preparing step (spinner, message, Cancel), a
+  `problem` with Try Again, and a device chip in the pane header.
+- **Toolbar and tools.** The device capsule and its popover sit between Run and Open In. The MCP
+  tools report devices and preparing steps.
+
+**Verified:**
+- ClinicCore passes 383 tests (8 new in `RunDeviceTests`), and `make build` passed.
+- On real hardware, through a throwaway opt-in test (deleted afterwards): *Pixel 10 Pro Fold* booted
+  in 12 s with `ANDROID_SERIAL=emulator-5554`, and was listed as running. An iOS simulator booted
+  and returned its UDID. Both were shut down after.
+- That check caught the default simulator being *iPhone 16e*, because names sorted alphabetically.
+  Simulators now sort newest model first.
+
+**Not verified:** the app end to end. The display went to sleep mid-session: `screencapture`
+returned black, and libghostty cannot create a surface without a display (`ghostty_surface_new
+failed`), so the smoke instance never got a tab. The defaults domain was unchanged, and the smoke
+dirs are deleted.
+
+**Follow-up, same day.** User: *"Looks like there is a persistent space in the bar when a device is
+configured / removed from a run configuration. There was also a space when no device was configured
+initially"*.
+
+**The rule, learned twice.** SwiftUI settles a toolbar's *items* on the first build.
+- An item whose content became empty kept its width, which is the gap the user saw.
+- Moving the condition up, so the item itself was conditional, was worse: an item that did not
+  exist on the first build never appeared at all — the device capsule stayed missing even with an
+  Android configuration selected.
+- What works: **one item for everything that comes and goes** (caffeine, Run, the device capsules,
+  Open In) as an `HStack`, with the glass drawn per control inside it. Items: start buttons, that
+  row, the bell.
+
+**Verified** in a smoke instance, switching the selected configuration with a new
+`-ClinicSelectRunAfterLaunch <id>[,<id>…]` key:
+- Android selected: the capsule reads *Pixel 10 Pro Fold*.
+- Switched to Desktop: the capsule goes and the row closes up, no gap.
+- Switched back: it returns.
+- The home screen shows new/shell, caffeine and the bell, with nothing between them.
+- `make build` passed and the defaults domain was unchanged.
+
+## 2026-09-11 (cont.) — The icon picker browses every symbol (ADR-125)
+
+User, after Claude wrote Campfire's configurations: *"some added icons that are not available (or
+were not linked to existing) icons in the configuration editor. Can we add more options there (or
+some kind of glyph browser for options that can't all fit in the UI)"*
+
+**Two faults, one cause — Claude writes `run.json`, so the icon is whatever it reached for:**
+- a real symbol outside the editor's fifteen showed as nothing selected, and picking any icon would
+  have thrown it away;
+- a name that is not a symbol (`android.robot`) drew an empty square in the toolbar, the menus and
+  the pane.
+
+**Built:**
+- **A fallback.** `RunConfiguration.uiSymbol` draws the play glyph for a name this Mac lacks,
+  everywhere an icon appears.
+- **The editor** leads with the configuration's own icon, then 23 quick picks, then *Browse
+  Symbols…*, and names an unknown symbol in a warning below.
+- **A browser** over the system's own catalogue (`CoreGlyphs.bundle`, which Clinic can read because
+  it is not sandboxed): search across names and the system's search terms (so *debug* finds
+  `ladybug`), a category menu, the SF Symbols app's own order, and a field for an exact name that
+  says when the name is not a symbol. 7,266 of 9,184 symbols, after dropping Apple's 605 restricted
+  marks and the localized and right-to-left variants.
+- **The set-up prompt** now tells Claude that `icon` must be a real SF Symbol name.
+
+**Found on the way.** Sorting alphabetically opened the browser on a wall of digit glyphs
+(`0.circle`…). `symbol_order.plist` is the order the SF Symbols app shows, and it starts with
+sharing.
+
+**Where it lives.** `SymbolCatalog` (ClinicCore) holds the parsing, ordering and search, so it is
+testable; only `exists`/`resolved` (`NSImage(systemSymbolName:)`) and the browser view are in the
+app. If a future macOS moves the bundle, the suggested names stand in and typing still works.
+
+**Verified** in a smoke instance with a configuration whose icon is `android.robot`:
+- the editor showed the play glyph, the quick picks and the full warning;
+- the browser opened on *Search 7,266 symbols* in the system's order, with the name field showing
+  `android.robot` and *This Mac has no symbol by that name*, and *Choose* refused;
+- ClinicCore passes 388 tests (5 new in `SymbolCatalogTests`, one of which reads the real catalogue
+  and skips itself where the bundle is absent); `make build` passed.
+- The defaults domain was unchanged and the smoke dirs are deleted.
+
+**Not verified:** typing in the search field or clicking a symbol (no synthetic input this session).
+New smoke key: `-ClinicBrowseIconOnLaunch YES`.
+
+**Follow-up, same day.** User: *"should we add a toggle (or dropdown if more than 2 options) for
+filled vs. outlined?"* Yes: `SymbolCatalog.variants(of:)` builds a symbol's family — plain, filled,
+and the same in a circle or a square — and `SymbolVariantControl` shows a *Filled* checkbox for two
+ways, a menu for more, and nothing for one. It sits beside the icon in the editor and in the
+browser's footer.
+
+- The fill pairs come from the system's `nofill_to_fill.strings`, since a filled name is not always
+  `name + ".fill"` (`video.badge.checkmark` → `video.fill.badge.checkmark`).
+- `.slash` stays part of the subject, so `wifi.slash` never offers plain `wifi`.
+
+**Verified**: `hammer` showed the menu reading *Plain* (four ways), `globe` the *Filled* checkbox,
+and the browser's footer carried the same control beside the name field. ClinicCore passes 389
+tests; `make build` passed; defaults unchanged and the smoke dir deleted.
+
+**Second follow-up, same day.** User: *"the grid of symbols display all styles which feels like more
+than it needs to be (my original supposition with the toggle was to change the styles displayed
+here)… Now the cancel/confirm buttons are squished, so we may need to expand this dialog (or make
+resizable)"*
+
+- **The grid lists subjects now**, one cell per family: 7,266 drawings collapse to 4,184. The style
+  control in the footer decides how they are all drawn and what *Choose* returns, which is what the
+  toggle was for in the first place. A subject this Mac cannot draw in the chosen style keeps its
+  plain form.
+- **The sheet is 820 pt and resizable** (`minWidth`/`idealWidth`/`maxWidth`), so the buttons have
+  room. Sheets ignore the ideal size, so the minimum is what opens.
+- **Caught in the screenshot:** two identical play glyphs in the grid. `family(of:)` stripped the
+  trailing `.square` from `square.and.arrow.up.on.square`, inventing a name nothing draws, so those
+  cells fell back to the play glyph. An enclosure is only an enclosure when what is left is itself a
+  symbol. A test over the real catalogue now asserts every family is a symbol in its own right.
+
+**Verified**: the grid shows no fill/outline duplicates and no fallback glyphs; the footer fits the
+name field, the style menu and both buttons. ClinicCore passes 390 tests; `make build` passed;
+defaults unchanged and the smoke dir deleted.
+
+**Third follow-up, same day.** User: *"Lets use a run config's symbol in the menu bar pill instead
+of the run icon when its set"*
+
+- The toolbar pill now draws the selected configuration's icon at rest, through the same `uiSymbol`
+  fallback, so an unknown or absent name still shows `▶`. It is one call: `RunStatusGlyph(run:
+  idleSymbol: config.uiSymbol)` — status keeps priority, so a running run is still the spinning arc
+  and a finished one ✓ / ✗ / a hollow ring (ADR-096). Recorded as an amendment in ADR-125, with
+  ADR-122's toolbar button pointing at it.
+
+**Verified** in a smoke instance over a throwaway `.clinic/run.json`: the pill read `🔨 Clinic` for
+a configuration with `"icon": "hammer"`, `▶ No Icon` for one without, and while the iconed one ran
+it showed the arc, `0:26` and the stop button. `make build` passed; the temporary `run.json` and the
+smoke dir are deleted and `com.r0adkll.clinic` is byte-identical to before the run.
+
+**Fourth follow-up, same day.** User: *"Let's set the run placeholder text to just "Run..." and when
+the user clicks on it it should just open the edit configuration dialog instead of the quick search
+panel. The "setup with claude" button could use some pizzaz with an icon too"*
+
+- The empty pill reads *▶ Run…*, and its click opens the editor sheet instead of the picker — a
+  chooser with nothing to choose was the wrong answer to *I want to set this up*. The chevron still
+  opens the popover, so detection, import and Claude are unchanged, and ⌃⌘R still picks.
+- The editor's empty state now leads with a prominent `✨ Set Up with Claude…`; it was the one place
+  the action was a plain text button with no sparkles.
+- Recorded as [[ADR-126 An Unconfigured Run Pill Opens The Editor]], linked from the design tree,
+  with ADR-122's toolbar line pointing at it.
+
+**Verified** in a smoke instance over a project with no `run.json`: the pill read *▶ Run…* and the
+editor sheet opened on *No configurations yet* with the sparkles button. `make build` passed; the
+smoke dir is deleted and `com.r0adkll.clinic` is byte-identical to before the run.
+
+- **Follow-up:** the empty pill is now only as wide as *Run…* reads (no fixed width; the configured
+  one keeps its 196 pt so a name and clock never shuffle the toolbar). A first attempt at a fixed
+  74 pt truncated it to *Ru…* in the screenshot. Recorded in ADR-126.
+
+**Verified** live, with the smoke instance activated so its two-second `run.json` poll runs
+(`pollFiles` is guarded by `NSApp.isActive`, which is why a backgrounded smoke instance never sees
+the file appear): writing `.clinic/run.json` grew the pill to *🔨 Clinic* and deleting it shrank it
+back, with the capsules either side re-flowing and no leftover gap — the failure mode from the
+device capsule on 2026-09-11. Defaults unchanged, smoke dir and temporary `run.json` deleted.

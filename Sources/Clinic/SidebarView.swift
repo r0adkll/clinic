@@ -605,7 +605,7 @@ struct StateGlyph: View {
 
 /// The `working` glyph: an open arc turning once a second. Reduce Motion freezes it — the gap in the
 /// ring still tells it apart from every solid dot.
-private struct SpinningArc: View {
+struct SpinningArc: View {
     let tint: AnyShapeStyle
     let size: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

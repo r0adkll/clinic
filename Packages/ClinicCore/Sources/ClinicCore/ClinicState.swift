@@ -34,6 +34,13 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// Sessions started from a task, and the task (ADR-114). Clinic's own record, so it lives here
     /// rather than on the transcript-derived `SessionSummary` a rescan rebuilds.
     public var workItemLinks: [SessionID: [WorkItemRef]] = [:]
+    /// The run configuration ⌘R starts, per project (ADR-122). Never written into the repo's run.json.
+    public var runSelectionByProject: [String: String] = [:]
+    /// Fingerprints (`RunTrust`) of commands the user has run from the UI or saved in the editor: the
+    /// only ones Claude's `run` tool may execute (ADR-122).
+    public var trustedRunCommands: Set<String> = []
+    /// The device each project's runs target, per platform (ADR-124): project → platform → `RunDevice.id`.
+    public var runDeviceByProject: [String: [String: String]] = [:]
 
     public init() {}
 
@@ -67,7 +74,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -94,6 +101,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
         automations = ((try? c.decodeIfPresent([FailableAutomation].self, forKey: .automations)) ?? [])?.compactMap(\.value) ?? []
         taskSources = (try? c.decodeIfPresent([String: [WorkItemSource]].self, forKey: .taskSources)) ?? [:]
         workItemLinks = (try? c.decodeIfPresent([SessionID: [WorkItemRef]].self, forKey: .workItemLinks)) ?? [:]
+        runSelectionByProject = (try? c.decodeIfPresent([String: String].self, forKey: .runSelectionByProject)) ?? [:]
+        trustedRunCommands = (try? c.decodeIfPresent(Set<String>.self, forKey: .trustedRunCommands)) ?? []
+        runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 

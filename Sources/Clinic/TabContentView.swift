@@ -13,6 +13,9 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         let chrome: AnyView
         let page: AnyView?
         let terminal: GhosttySurfaceView?
+        /// A band above the terminal and a bar below it: the Run pane's header and failure bar (ADR-122).
+        var terminalHeader: AnyView? = nil
+        var terminalFooter: AnyView? = nil
         let minWidth: CGFloat
         /// The panel fills the tab, hiding the split view whole (ADR-081).
         let zoomed: Bool
@@ -203,16 +206,26 @@ final class SidePanelHostView: NSView {
     private let content = NSView()
     private var pageHost: NSHostingView<AnyView>?
     private let terminalHost = SurfaceHostView()
+    /// The Run pane's header band and failure bar, around the surface (ADR-122). Zero height when unused.
+    private let terminalHeaderHost = NSHostingView<AnyView>(rootView: AnyView(EmptyView()))
+    private let terminalFooterHost = NSHostingView<AnyView>(rootView: AnyView(EmptyView()))
+    private lazy var headerHeight = terminalHeaderHost.heightAnchor.constraint(equalToConstant: 0)
+    private lazy var footerHeight = terminalFooterHost.heightAnchor.constraint(equalToConstant: 0)
+    private static let footerBarHeight: CGFloat = 44
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         chromeHost.sizingOptions = []
-        for v in [chromeHost, content, terminalHost] as [NSView] {
+        terminalHeaderHost.sizingOptions = []
+        terminalFooterHost.sizingOptions = []
+        for v in [chromeHost, content, terminalHost, terminalHeaderHost, terminalFooterHost] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
         }
         addSubview(chromeHost)
         addSubview(content)
+        content.addSubview(terminalHeaderHost)
         content.addSubview(terminalHost)
+        content.addSubview(terminalFooterHost)
         terminalHost.isHidden = true
         NSLayoutConstraint.activate([
             chromeHost.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -223,7 +236,19 @@ final class SidePanelHostView: NSView {
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.topAnchor.constraint(equalTo: chromeHost.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ] + Self.pin(terminalHost, to: content))
+            terminalHeaderHost.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            terminalHeaderHost.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            terminalHeaderHost.topAnchor.constraint(equalTo: content.topAnchor),
+            headerHeight,
+            terminalFooterHost.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            terminalFooterHost.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            terminalFooterHost.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            footerHeight,
+            terminalHost.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            terminalHost.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            terminalHost.topAnchor.constraint(equalTo: terminalHeaderHost.bottomAnchor),
+            terminalHost.bottomAnchor.constraint(equalTo: terminalFooterHost.topAnchor),
+        ])
     }
 
     required init?(coder: NSCoder) { nil }
@@ -254,6 +279,14 @@ final class SidePanelHostView: NSView {
         }
         terminalHost.show(c.terminal)
         terminalHost.isHidden = c.terminal == nil
+        let header = c.terminal == nil ? nil : c.terminalHeader
+        let footer = c.terminal == nil ? nil : c.terminalFooter
+        terminalHeaderHost.rootView = header ?? AnyView(EmptyView())
+        terminalFooterHost.rootView = footer ?? AnyView(EmptyView())
+        headerHeight.constant = header == nil ? 0 : PaneMetrics.headerHeight
+        footerHeight.constant = footer == nil ? 0 : Self.footerBarHeight
+        terminalHeaderHost.isHidden = header == nil
+        terminalFooterHost.isHidden = footer == nil
         // This view's frame comes from its host, so its constraint subtree is only resolved on demand:
         // without this a freshly added host stays at zero size and renders blank.
         needsLayout = true
@@ -266,6 +299,8 @@ final class SidePanelHostView: NSView {
         pageHost = nil
         terminalHost.show(nil)
         terminalHost.isHidden = true
+        terminalHeaderHost.rootView = AnyView(EmptyView())
+        terminalFooterHost.rootView = AnyView(EmptyView())
     }
 }
 

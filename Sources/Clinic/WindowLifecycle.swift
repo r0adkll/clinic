@@ -51,7 +51,20 @@ final class WindowLifecycle: NSObject, NSWindowDelegate {
     enum QuitChoice { case quit, backgroundAll, hide, cancel }
 
     /// Quit with running sessions, per the preference (ADR-069).
-    static func quitChoice(runningCount: Int) -> QuitChoice {
+    /// Runs alone (ADR-122): they die with the app, so say so once.
+    static func confirmQuit(runningRuns: Int) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = runningRuns == 1 ? "Quit with a run still going?" : "Quit with \(runningRuns) runs still going?"
+        alert.informativeText = "Quitting stops them. Hide Window keeps them running."
+        alert.addButton(withTitle: "Quit"); alert.addButton(withTitle: "Hide Window"); alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return true
+        case .alertSecondButtonReturn: NSApp.windows.forEach { if $0.canBecomeMain { $0.orderOut(nil) } }; return false
+        default: return false
+        }
+    }
+
+    static func quitChoice(runningCount: Int, runningRuns: Int = 0) -> QuitChoice {
         switch UserDefaults.standard.string(forKey: "ClinicQuitBehaviour") ?? "ask" {
         case "quit": return .quit
         case "background": return .backgroundAll
@@ -60,6 +73,7 @@ final class WindowLifecycle: NSObject, NSWindowDelegate {
             let alert = NSAlert()
             alert.messageText = "Quit with \(runningCount) running session(s)?"
             alert.informativeText = "Quit stops them cleanly (resume later). Background All detaches idle sessions so they keep working (attach later). Hide Window keeps everything as it is."
+                + (runningRuns > 0 ? " \(runningRuns == 1 ? "A run is" : "\(runningRuns) runs are") going too; quitting or backgrounding stops \(runningRuns == 1 ? "it" : "them")." : "")
             alert.addButton(withTitle: "Quit"); alert.addButton(withTitle: "Background All"); alert.addButton(withTitle: "Hide Window"); alert.addButton(withTitle: "Cancel")
             switch alert.runModal() {
             case .alertFirstButtonReturn: return .quit

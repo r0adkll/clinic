@@ -122,17 +122,6 @@ struct OpenInLabel: View {
     }
 }
 
-/// A picker row, checked when the quick action opens in it. Choosing one only changes that choice — it
-/// never opens anything (the button beside the menu does the opening).
-struct OpenInPickerRow: View {
-    let target: OpenInTarget
-    @Binding var isDefault: Bool
-
-    var body: some View {
-        Toggle(isOn: $isDefault) { OpenInLabel(target: target) }
-    }
-}
-
 /// A menu row that opens a path in one target.
 struct OpenInRow: View {
     let target: OpenInTarget
@@ -154,23 +143,31 @@ struct OpenInToolbarMenu: View {
 
     var body: some View {
         if !path.isEmpty, let current = apps.defaultTarget {
-            Menu {
-                Section("Open with") {
-                    ForEach(apps.targets) { target in
-                        OpenInPickerRow(target: target, isDefault: apps.isDefault(target))
+            ToolbarSplitButton(help: "Open \(TabFooter.abbreviate(path)) in \(current.name)",
+                               choicesHelp: "Choose which app the button opens in", smokeId: "openIn") {
+                apps.open(path, in: current)
+            } label: {
+                Group {
+                    if let icon = apps.icon(current, size: 18) {
+                        Image(nsImage: icon).renderingMode(.original).accessibilityLabel("Open in \(current.name)")
+                    } else {
+                        Image(systemName: "arrow.up.forward.app").accessibilityLabel("Open In")
                     }
                 }
-            } label: {
-                if let icon = apps.icon(current, size: 18) {
-                    Image(nsImage: icon).renderingMode(.original).accessibilityLabel("Open in \(current.name)")
-                } else {
-                    Label("Open In", systemImage: "arrow.up.forward.app")
+                .frame(width: 34, height: 28)
+            } choices: {
+                // Choosing only changes which app the button uses; it never opens anything (ADR-078).
+                PopoverMenu(width: 240) {
+                    PopoverMenuHeader(title: "Open with")
+                    ForEach(apps.targets) { target in
+                        PopoverMenuRow(title: target.name, checked: apps.isDefault(target).wrappedValue) {
+                            apps.isDefault(target).wrappedValue = true
+                        } icon: {
+                            if let icon = apps.icon(target, size: 16) { Image(nsImage: icon) }
+                        }
+                    }
                 }
-            } primaryAction: {
-                apps.open(path, in: current)
             }
-            .menuIndicator(.visible)
-            .help("Open \(TabFooter.abbreviate(path)) in \(current.name); the menu picks a different app")
             .onAppear { apps.refreshIfStale() }
         }
     }

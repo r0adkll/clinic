@@ -94,6 +94,7 @@ struct ProjectMenu: View {
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }
         Divider()
         Button("Open Shell Here") { tabs.newShell(in: project.path) }
+        ProjectRunMenu(projectPath: project.path)
         OpenInMenu(path: project.path)
         Button("Open on GitHub") { if let remote { NSWorkspace.shared.open(remote) } }
             .disabled(remote == nil)

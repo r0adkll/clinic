@@ -9,6 +9,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
+    case run, stopRun, chooseRunConfiguration
 
     var id: String { rawValue }
 
@@ -52,6 +53,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .closePanelTab: "Close Panel Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .run: "Run"
+        case .stopRun: "Stop Run"
+        case .chooseRunConfiguration: "Choose Run Configuration…"
         }
     }
 
@@ -64,10 +68,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage,
              .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
         case .nextTab, .previousTab: "Tabs"
+        case .run, .stopRun, .chooseRunConfiguration: "Run"
         }
     }
 
-    static let sections = ["File", "Session", "View", "Panel", "Tabs"]
+    static let sections = ["File", "Session", "View", "Panel", "Run", "Tabs"]
 
     var defaultChord: KeyChord? {
         let s: String? = switch self {
@@ -111,6 +116,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .closePanelTab: "cmd+ctrl+w"
         case .nextTab: "cmd+shift+]"
         case .previousTab: "cmd+shift+["
+        // ADR-122. ⌘. is Stop Session, so stopping a run takes ⌃ as well.
+        case .run: "cmd+r"
+        case .stopRun: "cmd+ctrl+."
+        case .chooseRunConfiguration: "cmd+ctrl+r"
         }
         return s.flatMap(KeyChord.init(parsing:))
     }

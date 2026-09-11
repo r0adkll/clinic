@@ -17,6 +17,7 @@ struct RootView: View {
     @State private var detailsFor: SessionSummary?
     @State private var iconProject: IconGenerationTarget?
     @State private var newSessionProject: String?
+    @State private var runSheet: RunSheetRequest?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
     private var windowId: UUID { windowValue ?? TabStore.primaryWindowId }
@@ -40,6 +41,11 @@ struct RootView: View {
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
+        .sheet(item: $runSheet) { RunSheet(request: $0) }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicRunSheet)) { n in
+            guard isActive, let request = n.object as? RunSheetRequest else { return }
+            runSheet = request
+        }
         .modifier(TasksRouting(window: window, isActive: isActive))
         .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
@@ -66,17 +72,7 @@ struct RootView: View {
             guard isActive else { return }
             newSessionProject = n.object as? String; showNewSession = true
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session" + bindings.hint(.newSession))
-                Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab" + bindings.hint(.newShell))
-                CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine))
-                if let tab = tabs.selectedTab(in: window), tab.replay == nil {
-                    OpenInToolbarMenu(path: tab.pwd ?? tab.projectPath)
-                }
-                NotificationBell()
-            }
-        }
+        .modifier(RootToolbar(window: window))
         .navigationTitle(title(for: window))
     }
 
@@ -109,7 +105,7 @@ struct DetailView: View {
         return ZStack {
             // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
             TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
-                          keys: live.map { "\($0.id)|\($0.panel.renderKey)" })
+                          keys: live.map { "\($0.id)|\($0.panel.renderKey)|\(tabs.runs.renderKey(for: $0))" })
             ForEach(mine.filter { $0.replay != nil }) { tab in
                 ReplayView(model: tab.replay!)
                     .opacity(tab.id == window.selectedTabId ? 1 : 0)
@@ -313,3 +309,122 @@ struct ExitedOverlay: View {
     }
 }
 
+
+/// The window toolbar. On macOS 26 each split control gets its own glass capsule (ADR-123): adjacent
+/// items otherwise share one, and the split controls are plain buttons now, so they would all run
+/// together. `ToolbarSpacer(.fixed)` between them did not break the shared capsule (tried 2026-09-11),
+/// so these items opt out of it and draw their own.
+/// The window toolbar. On macOS 26 each split control gets its own glass capsule (ADR-123): adjacent
+/// items otherwise share one, and the split controls are plain buttons now, so they would all run
+/// together. `ToolbarSpacer(.fixed)` between them did not break the shared capsule (tried 2026-09-11),
+/// so these items opt out of it and draw their own.
+///
+/// Which items exist is decided here, not inside them: a `ToolbarItem` whose content is empty still
+/// takes its own width and its capsule's padding, which left a gap where the Run or device control
+/// would be (found 2026-09-11).
+private struct RootToolbar: ViewModifier {
+    @Environment(TabStore.self) private var tabs
+    let window: WindowState
+
+    func body(content: Content) -> some View {
+        // A screen or the composer is not a tab: the tab's controls step aside for them.
+        let tab = tabs.selectedTab(in: window)
+        let runTab = tab.flatMap { $0.replay == nil && !window.isShowingScreen && window.editingDraft == nil ? $0 : nil }
+        let platforms = runTab.map { tabs.devicePlatforms(for: $0) } ?? []
+        let openIn = tab.flatMap { $0.replay == nil ? ($0.pwd ?? $0.projectPath) : nil }
+        if #available(macOS 26.0, *) {
+            content.toolbar { SpacedItems(runTab: runTab, platforms: platforms, openIn: openIn) }
+        } else {
+            content.toolbar { Items(runTab: runTab, platforms: platforms, openIn: openIn) }
+        }
+    }
+
+    private struct Items: ToolbarContent {
+        let runTab: Tab?
+        let platforms: [RunDevicePlatform]
+        let openIn: String?
+
+        var body: some ToolbarContent {
+            ToolbarItemGroup {
+                StartButtons()
+                TabControls(runTab: runTab, platforms: platforms, openIn: openIn)
+                NotificationBell()
+            }
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private struct SpacedItems: ToolbarContent {
+        let runTab: Tab?
+        let platforms: [RunDevicePlatform]
+        let openIn: String?
+
+        var body: some ToolbarContent {
+            ToolbarItemGroup { StartButtons() }
+            // One item for every control that comes and goes, rather than one item each: SwiftUI
+            // settles a toolbar's *items* on the first build, so an item added later never appears and
+            // an item whose content went away keeps its width as a gap (both seen 2026-09-11). Inside
+            // one item they are ordinary views, which appear and collapse as they should.
+            ToolbarItem {
+                HStack(spacing: 8) { TabControls(runTab: runTab, platforms: platforms, openIn: openIn) }
+            }
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem { NotificationBell() }
+        }
+    }
+
+    /// Caffeine, Run, its devices and Open In: what the selected tab (or the lack of one) decides.
+    private struct TabControls: View {
+        let runTab: Tab?
+        let platforms: [RunDevicePlatform]
+        let openIn: String?
+
+        var body: some View {
+            CaffeineItem()
+            if let runTab { RunToolbarControl(tab: runTab).ownGlass() }
+            if let runTab, !platforms.isEmpty { DeviceControls(tab: runTab, platforms: platforms) }
+            if let openIn { OpenInToolbarMenu(path: openIn).ownGlass() }
+        }
+    }
+
+    private struct StartButtons: View {
+        @Environment(TabStore.self) private var tabs
+        @Environment(KeyBindings.self) private var bindings
+        var body: some View {
+            Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session" + bindings.hint(.newSession))
+            Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab" + bindings.hint(.newShell))
+        }
+    }
+
+    private struct CaffeineItem: View {
+        @Environment(CaffeineController.self) private var caffeine
+        @Environment(KeyBindings.self) private var bindings
+        var body: some View { CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine)).ownGlass() }
+    }
+
+    /// One capsule per platform the selected configuration installs onto (ADR-124).
+    private struct DeviceControls: View {
+        let tab: Tab
+        let platforms: [RunDevicePlatform]
+        var body: some View {
+            HStack(spacing: 8) {
+                ForEach(platforms) { platform in
+                    RunDeviceControl(platform: platform, projectPath: tab.projectPath).ownGlass()
+                }
+            }
+        }
+    }
+}
+
+private extension View {
+    /// A capsule of toolbar glass around a control that has left the shared one, drawn only where
+    /// there is a control — an empty item would otherwise leave an empty capsule. Earlier systems
+    /// draw no toolbar capsules.
+    @ViewBuilder func ownGlass() -> some View {
+        if #available(macOS 26.0, *) {
+            padding(.horizontal, 4).frame(height: 36).glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            self
+        }
+    }
+}

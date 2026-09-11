@@ -126,6 +126,78 @@ final class MCPToolService {
             if let keep { tabs?.selectedTabId = keep }
             return MCPToolSpec.textResult("Started a sibling session in \(directory) as a background tab.")
 
+        case "list_run_configurations", "run", "read_run_output", "stop_run":
+            return runTool(name, args: args, tab: tab)
+
+        default:
+            return MCPToolSpec.textResult("Unknown tool \(name)", isError: true)
+        }
+    }
+
+    // MARK: Run configurations (ADR-122)
+
+    /// The four run tools, for the session's own checkout. `run` executes only commands the user has
+    /// run or saved in Clinic, so a `run.json` Claude wrote (or a cloned repo shipped) is not a way
+    /// around Claude Code's own permission prompts.
+    private func runTool(_ name: String, args: [String: Any], tab: Tab) -> [String: Any] {
+        guard let tabs, let first = tabs.runContext(for: tab) else {
+            return MCPToolSpec.textResult("This session has no project to run configurations for.", isError: true)
+        }
+        tabs.runs.ensureLoaded(checkout: first.checkout, projectPath: first.projectPath)
+        let ctx = tabs.runContext(for: tab) ?? first
+        let runs = tabs.runs
+        if let error = ctx.fileError { return MCPToolSpec.textResult(error, isError: true) }
+        guard let file = ctx.file, !file.configurations.isEmpty else {
+            return MCPToolSpec.textResult("This project has no run configurations: there is no .clinic/run.json in \(ctx.projectPath). The user can ask you to set them up, or add them in Clinic's Run menu.", isError: name != "list_run_configurations")
+        }
+        func resolve() -> RunConfiguration? {
+            (args["name"] as? String).flatMap { runs.configuration(named: $0, in: file) }
+        }
+        let names = file.configurations.map { "“\($0.name)”" }.joined(separator: ", ")
+
+        switch name {
+        case "list_run_configurations":
+            let lines = file.configurations.map { config -> String in
+                let what = config.isCompound ? "runs \((config.compound ?? []).joined(separator: " + ")) at once" : "`\(config.command ?? "")`"
+                let state = file.members(of: config).map { RunText.status(runs.run(of: $0, checkout: ctx.checkout)) }.joined(separator: ", ")
+                let trusted = runs.isTrusted(config, in: file) ? "" : " (not yet run by the user, so `run` will refuse it)"
+                let device = config.device.map { p in
+                    " Installs onto " + (runs.devices.chosen(p, projectPath: ctx.projectPath).map { "\($0.name)\($0.isRunning ? "" : ", which Clinic boots first")" } ?? "a \(p.title) the user picks") + "."
+                } ?? ""
+                return "- \(config.name) [id: \(config.id)]: \(what). \(state)\(device)\(trusted)"
+            }
+            return MCPToolSpec.textResult("Run configurations in \(ctx.checkout):\n" + lines.joined(separator: "\n"))
+
+        case "run":
+            guard let config = resolve() else { return MCPToolSpec.textResult("No configuration by that name. There are: \(names).", isError: true) }
+            guard runs.isTrusted(config, in: file) else {
+                return MCPToolSpec.textResult("The user hasn't run or saved “\(config.name)” in Clinic yet, so Clinic won't run it for you. Ask them to run it once from Clinic's Run menu (or save it in Edit Configurations).", isError: true)
+            }
+            let started = runs.start(config, file: file, checkout: ctx.checkout, projectPath: ctx.projectPath, from: tab, byUser: false, front: false)
+            guard !started.isEmpty else { return MCPToolSpec.textResult("“\(config.name)” could not be started.", isError: true) }
+            return MCPToolSpec.textResult("Started \(started.map(\.name).joined(separator: " and ")) in \(ctx.checkout). It runs in Clinic's Run pane; call read_run_output for its state and output.")
+
+        case "read_run_output":
+            guard let config = resolve() else { return MCPToolSpec.textResult("No configuration by that name. There are: \(names).", isError: true) }
+            let lines = max(1, min(1000, args["lines"] as? Int ?? 80))
+            let parts = file.members(of: config).map { member -> String in
+                guard let run = runs.run(of: member, checkout: ctx.checkout) else { return "\(member.name): not started in this checkout." }
+                var state = RunText.status(run)
+                if case .running(let since) = run.status { state += " for \(RunStatus.duration(Date().timeIntervalSince(since)))" }
+                if let step = run.preparing { state += " (preparing: \(step))" }
+                if let problem = run.problem { state += " (it never started: \(problem))" }
+                let output = RunPrompts.tail(run.output ?? "", lines: lines)
+                return "\(member.name): \(state).\n```\n\(output)\n```"
+            }
+            return MCPToolSpec.textResult(parts.joined(separator: "\n\n"))
+
+        case "stop_run":
+            guard let config = resolve() else { return MCPToolSpec.textResult("No configuration by that name. There are: \(names).", isError: true) }
+            let live = file.members(of: config).compactMap { runs.run(of: $0, checkout: ctx.checkout) }.filter(\.status.isRunning)
+            guard !live.isEmpty else { return MCPToolSpec.textResult("“\(config.name)” is not running.") }
+            for run in live { runs.stop(run) }
+            return MCPToolSpec.textResult("Stopping \(live.map(\.name).joined(separator: " and ")). It gets Ctrl-C, then a terminate signal after five seconds.")
+
         default:
             return MCPToolSpec.textResult("Unknown tool \(name)", isError: true)
         }

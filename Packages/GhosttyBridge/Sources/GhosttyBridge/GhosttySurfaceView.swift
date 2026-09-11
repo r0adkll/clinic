@@ -14,6 +14,10 @@ public protocol GhosttySurfaceDelegate: AnyObject {
     /// The child process exited (`show_child_exited`). Sent for normal and abnormal
     /// exits regardless of `wait-after-command`; `exitCode` is nil if unknown.
     ///
+    /// On macOS libghostty starts every child under `/usr/bin/login`, which exits 0 whatever its
+    /// own child did, so `exitCode` is `login`'s and says nothing about the command. A host that
+    /// needs the command's code has to get it another way (ADR-122 has the command record it).
+    ///
     /// The bridge reports this action as handled, which suppresses libghostty's own
     /// "process exited" text in the terminal. What follows depends on the core:
     /// - normal exit and `wait-after-command = false`: `surfaceRequestedClose` follows
@@ -262,11 +266,17 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
     }
 
     /// The text currently visible in the viewport (what the user sees), for the agent's `read_terminal` tool.
-    public var visibleText: String? {
+    public var visibleText: String? { readText(GHOSTTY_POINT_VIEWPORT) }
+
+    /// The whole screen including scrollback: a run's full output, for *Fix with Claude* and
+    /// `read_run_output` (ADR-122).
+    public var screenText: String? { readText(GHOSTTY_POINT_SCREEN) }
+
+    private func readText(_ tag: ghostty_point_tag_e) -> String? {
         guard let surface else { return nil }
         var selection = ghostty_selection_s()
-        selection.top_left = ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
-        selection.bottom_right = ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
+        selection.top_left = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
+        selection.bottom_right = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
         selection.rectangle = false
         var text = ghostty_text_s()
         guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
