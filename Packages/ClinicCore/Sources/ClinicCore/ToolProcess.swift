@@ -148,3 +148,16 @@ enum ToolProcess {
         return Result(status: p.terminationStatus, stdout: outData, stderr: String(decoding: errData, as: UTF8.self))
     }
 }
+
+/// Whether a CLI a feature depends on can answer. "Missing" and "not logged in" are different
+/// problems with different fixes, so they stay apart all the way to the screen (ADR-086). Shared by
+/// every tool-backed provider (ADR-113); `GitHubService.Availability` is this type.
+public enum ToolAvailability: Equatable, Sendable {
+    case ready
+    /// `env` could not find the tool; the `PATH` we searched, for the message.
+    case notInstalled(searchedPath: String)
+    /// The tool ran and said no. Carries its own stderr, which already names the fix.
+    case notAuthenticated(String)
+
+    public var isReady: Bool { self == .ready }
+}

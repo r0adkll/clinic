@@ -26,6 +26,12 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// Scheduled prompts (ADR-095). Definitions only — a handful of small records; their run history
     /// grows without bound and lives in its own file (`AutomationRunStore`) so state stays small.
     public var automations: [Automation] = []
+    /// Per-project task source overrides (ADR-113). No entry = Automatic (whatever `gh` resolves in the
+    /// folder); a list replaces that; an empty list = None.
+    public var taskSources: [String: [WorkItemSource]] = [:]
+    /// Sessions started from a task, and the task (ADR-114). Clinic's own record, so it lives here
+    /// rather than on the transcript-derived `SessionSummary` a rescan rebuilds.
+    public var workItemLinks: [SessionID: [WorkItemRef]] = [:]
 
     public init() {}
 
@@ -59,7 +65,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -83,6 +89,8 @@ public struct ClinicState: Codable, Sendable, Equatable {
         // Tolerant like the rest: an automation whose cron no longer parses is dropped rather than
         // failing the whole state file and taking the sidebar with it.
         automations = ((try? c.decodeIfPresent([FailableAutomation].self, forKey: .automations)) ?? [])?.compactMap(\.value) ?? []
+        taskSources = (try? c.decodeIfPresent([String: [WorkItemSource]].self, forKey: .taskSources)) ?? [:]
+        workItemLinks = (try? c.decodeIfPresent([SessionID: [WorkItemRef]].self, forKey: .workItemLinks)) ?? [:]
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 

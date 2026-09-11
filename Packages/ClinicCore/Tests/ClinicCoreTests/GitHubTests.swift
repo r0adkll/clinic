@@ -313,7 +313,7 @@ private let laterHumanComment = """
     @Test func buildsGhArguments() {
         let url = "https://github.com/octocat/example/pull/42"
         #expect(GitHubService.arguments(for: .authStatus) == ["auth", "status"])
-        #expect(GitHubService.arguments(for: .viewer) == ["api", "user", "--jq", ".login"])
+        #expect(GitHubService.arguments(for: .viewer(host: nil)) == ["api", "user", "--jq", ".login"])
         #expect(GitHubService.arguments(for: .view(ref)) == ["pr", "view", url, "--json", GitHubService.viewFields.joined(separator: ",")])
         #expect(GitHubService.arguments(for: .diff(ref)) == ["pr", "diff", url])
         #expect(GitHubService.arguments(for: .ready(ref)) == ["pr", "ready", url])
