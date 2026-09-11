@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-116
 date: 2026-09-09
 supersedes: ADR-088
 tags: [adr, ui, github, icons]

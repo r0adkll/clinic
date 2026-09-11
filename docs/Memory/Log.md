@@ -2422,3 +2422,45 @@ linked to upload-google-play#288:
 anchor scrolling are untested by hand. The seeded dirs were deleted afterwards. Defaults keys present
 after the run (`ClinicPRShowTree`, `ClinicPanelWidth`, `ClinicTasksFilters`) were left alone: nothing
 shows this run wrote them, and they may be the user's own.
+
+## 2026-09-10 (cont.) — The PR panel speaks its service's visual language (ADR-116)
+User: *"Let's take a UI/UX design improvement pass at the PR panel. We should leverage more visuals
+for w/e the service is (i.e. Github, Gitlab)"*
+
+**Mockup first.** A published mockup put today's panel beside a GitHub version and a GitLab version.
+The user took all three recommendations:
+- the full pass, including the service's merge box, tabs and comment boxes;
+- the service glyph everywhere, not only in the panel;
+- GitLab visuals ready, but no GitLab data yet.
+
+**What was built.**
+- `CodeHost` and `CheckProvider` in ClinicCore. `PullRequest` gains `labels`, `reviewRequests`,
+  `commitCount`, `reviewers` and `diffstatBlocks`, and the mark gains `attentionTone`.
+- `ServiceArt` in the app holds both palettes, light and dark.
+- `PRPage` is rebuilt as a service strip, the forge's header, a merge box, a session-actions row,
+  the forge's tab idiom and the timeline.
+- `PRGlyph` puts a cut-out attention dot on the state glyph in the footer chip, the sidebar row,
+  the panel tab and the Tasks linked-PR chips.
+- 63 SVGs are vendored by `scripts/vendor-service-icons.sh` (Octicons, GitLab SVGs, Simple Icons,
+  all pinned). 303 ClinicCore tests pass.
+
+**Traps.**
+- macOS ignores `.borderedProminent` / `.tint` on a `Menu`, so the merge split button is drawn by
+  hand. The first screenshot showed it grey.
+- `gh pr view` spells a GitHub App author `app/dependabot` and GraphQL spells it `dependabot`. The
+  author was therefore neither labelled a bot nor given an avatar. `Author.isBot` now counts `app/`,
+  and avatars match on the GraphQL spelling.
+- `-AppleInterfaceStyle Light` as a launch argument doesn't change the appearance, because AppKit
+  reads the global domain.
+
+**Verified** in a `CLINIC_APP_SUPPORT` + `CLAUDE_CONFIG_DIR` smoke instance, seeded with
+NVIDIA/Model-Optimizer#2382 and r0adkll/upload-google-play#288, against live `gh`, **dark
+appearance only**:
+- #2382 (failing, running and skipped checks, 12 comments, 2 approvals): the strip, pill and branch
+  pills; the reviewer badges and diffstat; the merge box with inline Actions checks; the green split
+  merge button; the tab counters and underline; the author box; and the red-dot glyph on the tab,
+  footer chip and sidebar row.
+- #288: the labels in their GitHub colours, the bot comment box, and no attention dot.
+
+**Not verified:** light appearance on screen (the palette values are Primer's and Pajamas' own),
+clicking the merge menu, and anything GitLab, which has no data path yet.

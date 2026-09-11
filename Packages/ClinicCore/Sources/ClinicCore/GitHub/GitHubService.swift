@@ -9,7 +9,7 @@ public actor GitHubService {
     public static let viewFields: [String] = [
         "number", "title", "body", "state", "isDraft", "url", "author", "headRefName", "baseRefName", "createdAt", "updatedAt",
         "mergedAt", "mergeable", "mergeStateStatus", "reviewDecision", "autoMergeRequest", "additions", "deletions",
-        "changedFiles", "statusCheckRollup", "comments", "reviews",
+        "changedFiles", "statusCheckRollup", "comments", "reviews", "labels", "reviewRequests", "commits",
     ]
     static let checksFields = ["name", "state", "link", "workflow", "startedAt", "completedAt"]
 

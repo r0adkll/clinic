@@ -13,8 +13,14 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
         public init(login: String, name: String? = nil, avatarURL: URL? = nil) {
             self.login = login; self.name = name; self.avatarURL = avatarURL
         }
-        /// GitHub Apps (`dependabot[bot]`) and the Actions bot. Used to keep bot chatter out of "unanswered comments".
-        public var isBot: Bool { login.hasSuffix("[bot]") || login == "github-actions" || login == "dependabot" }
+        /// GitHub Apps (`dependabot[bot]`, and `app/dependabot` as `gh pr view` spells an App author) and
+        /// the Actions bot. Used to keep bot chatter out of "unanswered comments" and to label it in the timeline.
+        public var isBot: Bool {
+            login.hasPrefix("app/") || login.hasSuffix("[bot]") || login == "github-actions" || login == "dependabot"
+        }
+        /// The login GraphQL reports for this author: `gh pr view` prefixes a GitHub App with `app/`,
+        /// GraphQL does not, and the avatars from ADR-091 are keyed by GraphQL's spelling.
+        var graphQLLogin: String { login.hasPrefix("app/") ? String(login.dropFirst(4)) : login }
     }
 
     public struct Check: Hashable, Codable, Sendable, Identifiable {
@@ -94,6 +100,12 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public var checks: [Check]
     /// Issue comments and reviews merged, chronological.
     public var comments: [Comment]
+    /// In the repository's own colours, as on the Tasks screen (ADR-116).
+    public var labels: [WorkItemLabel]
+    /// Logins (or team names) asked to review and not yet heard from.
+    public var reviewRequests: [String]
+    /// Nil when `gh` did not report the commits, so the header can leave the count out rather than say 0.
+    public var commitCount: Int?
     public var fetchedAt: Date
     /// GitHub's own rendering of `body` (ADR-090). Nil until `GitHubService.bodyHTML` lands, so the
     /// panel can show the Markdown source immediately and swap in the real thing when it arrives.
@@ -104,13 +116,66 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
                 headRefName: String = "", baseRefName: String = "", createdAt: Date, updatedAt: Date, mergedAt: Date? = nil,
                 mergeable: String = "UNKNOWN", mergeStateStatus: String = "UNKNOWN", reviewDecision: String = "",
                 autoMergeEnabled: Bool = false, additions: Int = 0, deletions: Int = 0, changedFiles: Int = 0,
-                checks: [Check] = [], comments: [Comment] = [], fetchedAt: Date = Date(), bodyHTML: String? = nil) {
+                checks: [Check] = [], comments: [Comment] = [], labels: [WorkItemLabel] = [], reviewRequests: [String] = [],
+                commitCount: Int? = nil, fetchedAt: Date = Date(), bodyHTML: String? = nil) {
         self.ref = ref; self.title = title; self.body = body; self.state = state; self.isDraft = isDraft; self.author = author
         self.headRefName = headRefName; self.baseRefName = baseRefName; self.createdAt = createdAt; self.updatedAt = updatedAt
         self.mergedAt = mergedAt; self.mergeable = mergeable; self.mergeStateStatus = mergeStateStatus
         self.reviewDecision = reviewDecision; self.autoMergeEnabled = autoMergeEnabled; self.additions = additions
         self.deletions = deletions; self.changedFiles = changedFiles; self.checks = checks; self.comments = comments
+        self.labels = labels; self.reviewRequests = reviewRequests; self.commitCount = commitCount
         self.fetchedAt = fetchedAt; self.bodyHTML = bodyHTML
+    }
+
+    // MARK: Reviewers
+
+    /// Someone who reviewed this PR or was asked to, with the verdict that stands (ADR-116).
+    public struct Reviewer: Hashable, Sendable, Identifiable {
+        public enum Verdict: String, Hashable, Sendable { case approved, changesRequested, commented, requested }
+        public var login: String
+        public var avatarURL: URL?
+        public var verdict: Verdict
+        public var id: String { login }
+    }
+
+    /// One entry per reviewer, in the order they first reviewed, then outstanding requests.
+    ///
+    /// A reviewer's latest approval or request for changes is their verdict; a plain comment never
+    /// overrides one, because leaving a note after approving does not withdraw the approval. A
+    /// dismissed review drops them back to "commented". The author answering in review threads is
+    /// not a review of their own PR, so the author is never listed.
+    public var reviewers: [Reviewer] {
+        var order: [String] = []
+        var byLogin: [String: Reviewer] = [:]
+        for c in comments where c.kind == .review && c.author.login != author.login {
+            let login = c.author.login
+            let previous = byLogin[login]?.verdict
+            let verdict: Reviewer.Verdict
+            switch c.reviewState {
+            case "APPROVED": verdict = .approved
+            case "CHANGES_REQUESTED": verdict = .changesRequested
+            case "DISMISSED": verdict = .commented
+            default: verdict = previous ?? .commented
+            }
+            if byLogin[login] == nil { order.append(login) }
+            byLogin[login] = Reviewer(login: login, avatarURL: c.author.avatarURL ?? byLogin[login]?.avatarURL, verdict: verdict)
+        }
+        for login in reviewRequests where byLogin[login] == nil {
+            order.append(login)
+            byLogin[login] = Reviewer(login: login, avatarURL: nil, verdict: .requested)
+        }
+        return order.compactMap { byLogin[$0] }
+    }
+
+    /// GitHub's five-square diffstat: the squares split between additions and deletions in proportion,
+    /// and a side that changed anything always gets at least one. `(0, 0)` when nothing changed.
+    public static func diffstatBlocks(additions: Int, deletions: Int, total: Int = 5) -> (added: Int, deleted: Int) {
+        let sum = additions + deletions
+        guard sum > 0, total > 1 else { return (0, 0) }
+        var added = Int((Double(additions) / Double(sum) * Double(total)).rounded())
+        if additions > 0 { added = max(added, 1) }
+        if deletions > 0 { added = min(added, total - 1) }
+        return (added, total - added)
     }
 
     // MARK: Parsing
@@ -166,6 +231,12 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
             changedFiles: (obj["changedFiles"] as? NSNumber)?.intValue ?? 0,
             checks: parseRollup(obj["statusCheckRollup"]),
             comments: comments,
+            labels: (obj["labels"] as? [[String: Any]] ?? []).compactMap { l in
+                (l["name"] as? String).map { WorkItemLabel(name: $0, color: l["color"] as? String) }
+            },
+            // A request names a `User` by login or a `Team` by name.
+            reviewRequests: (obj["reviewRequests"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String ?? $0["name"] as? String },
+            commitCount: (obj["commits"] as? [Any])?.count,
             fetchedAt: now)
     }
 
@@ -214,11 +285,11 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public func applying(_ html: RenderedHTML) -> PullRequest {
         var copy = self
         if let body = html.body { copy.bodyHTML = body }
-        if let avatar = html.avatars[author.login] { copy.author.avatarURL = avatar }
+        if let avatar = html.avatars[author.graphQLLogin] { copy.author.avatarURL = avatar }
         copy.comments = comments.map { c in
             var c = c
             if let rendered = html.byID[c.id] { c.bodyHTML = rendered }
-            if let avatar = html.avatars[c.author.login] { c.author.avatarURL = avatar }
+            if let avatar = html.avatars[c.author.graphQLLogin] { c.author.avatarURL = avatar }
             return c
         }
         return copy
@@ -334,6 +405,17 @@ public struct PullRequestMark: Hashable, Sendable {
     public var symbolName: String
     /// One line, e.g. "Open · 2 checks failing".
     public var summary: String
+
+    /// The tone of the corner dot on the service glyph (ADR-116): the glyph shows the PR's state, the
+    /// dot shows what wants attention. Nil when nothing does.
+    public var attentionTone: PullRequestStatus.Tone? {
+        switch attention {
+        case .checksFailing, .conflicts, .changesRequested: .blocking
+        case .unansweredComments, .checksPending: .waiting
+        case .approved: .good
+        case .none: nil
+        }
+    }
 
     public init(state: PullRequest.State, isDraft: Bool, attention: Attention, symbolName: String, summary: String) {
         self.state = state; self.isDraft = isDraft; self.attention = attention; self.symbolName = symbolName; self.summary = summary
