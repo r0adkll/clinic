@@ -7,6 +7,7 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 .swiftpm/
+.claude/
 
 # libghostty build output (rebuilt by scripts/build-ghostty.sh)
 Packages/GhosttyBridge/GhosttyKit.xcframework
