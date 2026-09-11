@@ -2595,3 +2595,44 @@ is in ADR-118:
 - Choosing from the Remote Branches submenu, *Make This the Default*, and the Settings picker on
   screen.
 - The error line under the branch field.
+
+## 2026-09-11 — The empty screen becomes a home (ADR-120)
+User: *"Let's enhance the UI/UX of the "empty" screen when no session or screen is selected.
+Including some quick actions for adding projects, starting empty chats, or maybe some keyboard
+shortcut suggestions. Help me design this"*
+
+**Designed first.** Four directions went on a design canvas, drawn in the user's dark appearance with
+the red accent and their real sidebar, beside a smoke-instance screenshot of the old
+`ContentUnavailableView`: Launchpad, Resume, Composer, Shortcut sheet. Colours were measured from
+the live window (window `#2C2B2A`, sidebar `#363636`, empty detail `#282828`). The user chose
+**Resume**. A recent row **resumes** its session, and the folder drop target is **first launch
+only**.
+
+**What was built.**
+- `HomeScreen.swift`: Start cards (chords read from `KeyBindings`, two by two when narrow), Needs
+  you (waiting tabs in any window, then detached agents that need you), Recent (five across
+  projects, `TabStore.reveal` on click), and one tip per process with *All Shortcuts…*.
+- First launch (only Chats registered): a dashed drop target with *Choose Folder…*, plus New Chat,
+  New Shell and *Import a Session*. The pane accepts folder drops.
+- An empty roster (first scan not landed) draws nothing, so the first-launch screen never flashes.
+- `ProjectFolderPicker` now backs the sidebar's add-project button too. `PreferencesView.open(_:)`
+  opens Settings on a pane, or switches an open window to it.
+
+**Verified** in `CLINIC_APP_SUPPORT` smoke instances:
+- With a copy of the real `state.json`, Recent listed the five latest sessions across clinic, Chats
+  and ditto, with PR marks and relative times, under the four cards and a ⇧⌘G tip.
+- With an empty state and `CLAUDE_CONFIG_DIR`, the first-launch screen matched the mockup.
+- The live defaults domain was unchanged, and the smoke dirs were deleted.
+- `make build` and the ClinicCore (317) and GhosttyBridge (5) tests passed.
+
+**Not verified:**
+- Clicking on screen: a recent row resuming, the Needs you row (no waiting session in the smoke
+  runs), a folder drop, and *All Shortcuts…* landing on the Shortcuts pane.
+- The two-by-two wrap at a narrow pane.
+
+**Follow-up, same day.** User: *"Let's center the content of this screen, and put the app logo /
+title above the content too (also centered)"*. `HomeHeader` (the app icon at 72 pt, *Clinic* at
+26 pt bold, then 34 pt when the user asked for a larger title) now tops both states. The Resume column is centred vertically: a `GeometryReader` gives
+the scroll content a minimum height of the pane, so a short window still scrolls. *All Shortcuts…*
+now uses the accent rather than the link blue. Re-verified both states in smoke instances. The
+defaults domain was unchanged.

@@ -76,10 +76,7 @@ struct SidebarView: View {
     }
 
     private func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        panel.message = "Choose a project folder to show in the sidebar"
-        if panel.runModal() == .OK, let url = panel.url { sessions.addProject(url.path) }
+        if let path = ProjectFolderPicker.choose() { sessions.addProject(path) }
     }
 
     private var sessionList: some View {

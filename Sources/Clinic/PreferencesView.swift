@@ -72,6 +72,16 @@ struct PreferencesView: View {
 
     private var pane: SettingsPane { selection ?? .general }
 
+    /// A pane asked for before the window existed; the new window takes it on appear.
+    @MainActor private static var requestedPane: SettingsPane?
+
+    /// Opens Settings on `pane`, or switches an open Settings window to it (the home screen's
+    /// "All Shortcuts…", ADR-120).
+    @MainActor static func open(_ pane: SettingsPane) {
+        requestedPane = pane
+        NotificationCenter.default.post(name: .clinicOpenSettings, object: pane.rawValue)
+    }
+
     var body: some View {
         NavigationSplitView {
             // The `List` is wrapped rather than being the column's root: a bare list as the root of a
@@ -107,6 +117,11 @@ struct PreferencesView: View {
         .frame(minWidth: 660, idealWidth: 780, maxWidth: .infinity,
                minHeight: 430, idealHeight: 560, maxHeight: .infinity)
         .background(SettingsWindowConfigurator())
+        .onAppear { if let p = Self.requestedPane { selection = p; Self.requestedPane = nil } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { n in
+            guard let raw = n.object as? String, let p = SettingsPane(rawValue: raw) else { return }
+            selection = p; Self.requestedPane = nil
+        }
     }
 }
 

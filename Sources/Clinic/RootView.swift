@@ -133,9 +133,7 @@ struct DetailView: View {
                 NewSessionScreen(draft: draft)
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
             } else if mine.isEmpty {
-                ContentUnavailableView("No session open", systemImage: "rectangle.on.rectangle.slash",
-                                       description: Text("Pick a session from the sidebar, or press ⌘N to start a new one."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+                HomeScreen()
             } else if let tab = selected, tab.childExited {
                 ExitedOverlay(tab: tab)
             }
