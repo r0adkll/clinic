@@ -15,6 +15,8 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ScreenNavRow(screen: .tasks, icon: "list.bullet.clipboard", shortcut: .tasks,
+                         help: "Issues from your projects, and sessions to work on them")
             ScreenNavRow(screen: .marketplace, icon: "storefront", shortcut: .marketplace,
                          help: "Find and install Claude Code plugins")
             ScreenNavRow(screen: .mcpServers, icon: "server.rack", shortcut: .mcpServers,
@@ -304,6 +306,10 @@ struct SessionContextMenu: View {
         }
         Button("Replay…") { tabs.openReplay(summary) }
         Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: summary.id.rawValue) }
+        // The task this session was started from (ADR-114).
+        if let ref = sessions.workItems(for: summary.id).last {
+            Button("Show Task") { NotificationCenter.default.post(name: .clinicShowTask, object: ref) }
+        }
         Divider()
         Button("Rename…") { SessionActions.rename(summary, sessions: sessions) }
         if sessions.state.manualNames[summary.id] != nil { Button("Clear Custom Name") { sessions.rename(summary.id, to: nil) } }

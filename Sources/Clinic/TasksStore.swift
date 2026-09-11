@@ -177,6 +177,8 @@ final class TasksStore {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        // Projects come from the session scan; resolving before it lands would resolve nothing.
+        await sessions.initialScan?.value
         await loadFromDiskIfNeeded()
         let available = await provider.availability()
         availability = available
@@ -265,6 +267,18 @@ final class TasksStore {
         }
         // A failed search keeps the last answer rather than emptying the view.
         if !failed || mentioned.isEmpty { mentioned = refs }
+    }
+
+    /// A project added while the screen is up resolves and loads now, not at the next poll.
+    func projectsChanged() {
+        guard visibleCount > 0, !isRefreshing, availability?.isReady == true else { return }
+        let missing = projects.map(\.path).filter { resolutions[$0] == nil && sessions.state.taskSources[$0] == nil }
+        guard !missing.isEmpty else { return }
+        Task {
+            await resolveProjects(missing)
+            let new = missing.flatMap { self.sources(for: $0) }.filter { snapshots[$0.id] == nil }
+            if !new.isEmpty { await fetchOpen(new) }
+        }
     }
 
     /// The state filter now includes Closed somewhere: fetch them once, and keep them fresh from then on.

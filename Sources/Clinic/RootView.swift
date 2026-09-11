@@ -40,6 +40,7 @@ struct RootView: View {
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
+        .modifier(TasksRouting(window: window, isActive: isActive))
         .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicAutomations)) { _ in if isActive { window.screen = .automations } }
@@ -121,6 +122,9 @@ struct DetailView: View {
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            } else if window.screen == .tasks {
+                TasksScreen()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if window.screen == .marketplace {
                 MarketplaceScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

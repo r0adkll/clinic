@@ -69,6 +69,22 @@ public struct WorkItemFilter: Codable, Hashable, Sendable {
 
     public init() {}
 
+    private enum CodingKeys: String, CodingKey { case view, state, text, labels, assignee, author, milestone, sort, grouping }
+
+    /// Tolerant: a saved filter from an older build keeps whatever it still has.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        view = (try? c.decodeIfPresent(View.self, forKey: .view)) ?? .assigned
+        state = (try? c.decodeIfPresent(StateFilter.self, forKey: .state)) ?? .open
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        labels = (try? c.decodeIfPresent(Set<String>.self, forKey: .labels)) ?? []
+        assignee = try? c.decodeIfPresent(String.self, forKey: .assignee)
+        author = try? c.decodeIfPresent(String.self, forKey: .author)
+        milestone = try? c.decodeIfPresent(String.self, forKey: .milestone)
+        sort = (try? c.decodeIfPresent(Sort.self, forKey: .sort)) ?? .updated
+        grouping = (try? c.decodeIfPresent(Grouping.self, forKey: .grouping)) ?? .none
+    }
+
     /// True when anything beyond view, state, sort and grouping narrows the list — what "Clear" resets.
     public var hasRefinements: Bool {
         !text.trimmingCharacters(in: .whitespaces).isEmpty || !labels.isEmpty || assignee != nil || author != nil || milestone != nil

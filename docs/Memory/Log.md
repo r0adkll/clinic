@@ -2349,3 +2349,50 @@ caption", and notes the Favorites-under-Projects cost the user saw and accepted.
 has 12 pt above it instead of 4, so the Automations → Projects step goes from 30 to 38 pt
 centre-to-centre, measured on smoke screenshots before and after. With the gap, the row reads as the
 header of the list, not a fourth nav row. Defaults domain unchanged.
+
+## 2026-09-10 (cont.) — Tasks: issues from every project, and sessions from issues (ADR-112..114)
+User: *"Let's design and develop a "Tasks" feature, a full screen issues/task list manager through the
+side bar navigation … Grill me to help build the full design"*
+
+Four grilling rounds settled the design (35 questions). Tasks is a viewer and a launchpad, not a
+tracker. It shows **issues only**, aggregated across every project, with UI word "Tasks" and model word
+`WorkItem` (ADR-025 amended). A **source** (provider + host + scope) is separate from a project, and
+GitHub sources come from `gh repo view` run in the project folder. The screen has three panes
+(scope column | list | detail), filters are menus plus plain search, and label washes use GitHub's
+own colours (the user chose them over neutral capsules). Start Session opens the composer pre-filled
+with a worktree, and ⌘↩ starts one straight away. Clinic remembers each issue ↔ session link.
+
+Where the build deviated from the grilling, and why (recorded in the ADRs):
+- **Glyph `list.bullet.clipboard`, not `checklist`**: the sidebar toolbar's select-mode toggle already
+  uses `checklist`, one row below.
+- **Views switch with ⌃1–⌃4**: ⌘1–⌘9 are the Tabs menu's "Tab 1…9". My first grep missed them because
+  they're built in a loop. This was the fallback the grilling had agreed.
+- **Flat project list**: ADR-062's "project groups" are the per-project sections, so there is nothing to
+  nest under.
+- **List transport is paginated GraphQL, not `gh issue list`**: that command can only report a comment
+  count by shipping up to 100 full comment bodies per issue (measured 73 KB for 20 issues on `cli/cli`).
+
+Built in three commits on `feature/tasks`: the ClinicCore model and GitHub provider with fixture tests
+(291 tests green), `TasksStore`, then the screen, the detail pane and the session links.
+
+Two traps found in the smoke run:
+- **The first refresh resolved nothing.** `-ClinicScreenOnLaunch tasks` shows the screen before the
+  session scan has built the project list. `TasksStore.refresh` now waits for `initialScan`, and new
+  projects resolve as soon as they appear.
+- **The thread web view stayed blank.** The Swift 6 "nearly matches optional requirement" warning on
+  `webView(_:decidePolicyFor:decisionHandler:)` means WebKit never calls the policy method. With the
+  correct `@MainActor @Sendable` handler it *is* called, and ADR-090's `webView.url == nil` test then
+  cancels the `loadHTMLString` load itself (the URL is already the base URL by then). Tasks allows the
+  base URL explicitly. **`GitHubHTMLView` still has the mismatched signature**, so the PR panel's
+  open-links-in-the-browser policy has never run. It's left as it was and reported to the user.
+
+**Verified** in a `CLINIC_APP_SUPPORT` smoke instance against live `gh`, with four projects:
+- three resolved (clinic, upload-google-play, ditto), and the non-git folder dimmed as "Not a git
+  repository";
+- 10 open issues, 2 assigned to the user, 1 mention;
+- label washes, the thread with avatars and code blocks, and the composer pre-filled with
+  `issue-265-dep0040-dep0169-deprecation-warnings`.
+
+New smoke keys: `-ClinicScreenOnLaunch tasks`, `-ClinicTasksView`, `-ClinicTasksSelectAfterLaunch` and
+`-ClinicTasksComposeOnLaunch`. The run wrote `ClinicTasksFilters` into the real defaults domain, and it
+was deleted afterwards.

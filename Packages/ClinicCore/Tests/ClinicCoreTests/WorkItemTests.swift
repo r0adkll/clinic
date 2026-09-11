@@ -273,6 +273,15 @@ private let issuesPage = """
         #expect(f.sourceCounts(items, context: ctx) == [clinic.id: 3, enterprise.id: 1])
     }
 
+    @Test func savedFiltersDecodeTolerantly() throws {
+        var f = WorkItemFilter(); f.view = .mentioned; f.labels = ["bug"]; f.grouping = .project
+        #expect(try JSONDecoder().decode(WorkItemFilter.self, from: JSONEncoder().encode(f)) == f)
+        let partial = try JSONDecoder().decode(WorkItemFilter.self, from: Data(#"{"view":"all","sort":"nonsense","future":1}"#.utf8))
+        #expect(partial.view == .all)
+        #expect(partial.sort == .updated)
+        #expect(partial.state == .open)
+    }
+
     @Test func facetsMergeByName() {
         let facets = WorkItemFacets(items)
         #expect(facets.labels.map(\.name) == ["bug", "p1", "UI"])

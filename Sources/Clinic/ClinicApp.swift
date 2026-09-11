@@ -115,16 +115,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let id = sessions.state.selectedSessionId, let s = sessions.sessions[id] { tabs.open(session: s) }
             }
         }
-        // `-ClinicScreenOnLaunch automations|marketplace|mcpServers` (ADR-038): land straight on a
+        // `-ClinicScreenOnLaunch tasks|automations|marketplace|mcpServers` (ADR-038): land straight on a
         // screen, so a smoke run does not have to synthesise a click into the sidebar.
         if let screen = UserDefaults.standard.string(forKey: "ClinicScreenOnLaunch"), !screen.isEmpty {
             let mapped: WindowState.Screen? = switch screen {
+            case "tasks": .tasks
             case "automations": .automations
             case "marketplace": .marketplace
             case "mcpServers": .mcpServers
             default: nil
             }
             if let mapped { tabs.activeWindow.screen = mapped }
+        }
+        // `-ClinicTasksView assigned|created|mentioned|all [-ClinicTasksSelectAfterLaunch <seconds>]`
+        // (ADR-112): pick a view, then select the first task once the lists have loaded, so the
+        // detail pane can be screenshotted without a synthesised click.
+        if let raw = UserDefaults.standard.string(forKey: "ClinicTasksView"), let view = WorkItemFilter.View(rawValue: raw) {
+            tabs.activeWindow.tasks.filter.view = view
+        }
+        let selectAfter = UserDefaults.standard.double(forKey: "ClinicTasksSelectAfterLaunch")
+        if selectAfter > 0 {
+            Task {
+                try? await Task.sleep(for: .seconds(selectAfter))
+                let state = tabs.activeWindow.tasks
+                let first = state.filter.apply(tasks.items(includingClosed: state.filter.state.includesClosed), context: tasks.context).first
+                state.selectedID = first?.id
+                // `-ClinicTasksComposeOnLaunch YES` (ADR-114): then open the pre-filled composer for it — never sends.
+                if UserDefaults.standard.bool(forKey: "ClinicTasksComposeOnLaunch"), let first {
+                    try? await Task.sleep(for: .seconds(2))
+                    TaskActions.startSession(first, immediately: false, preferring: nil, store: tasks, tabs: tabs, sessions: sessions)
+                }
+            }
         }
 
         // `-ClinicFloatOnLaunch YES` (ADR-038): keep the window above everything, so a screenshot of a
@@ -494,6 +515,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.jumpToSession))
         }
         CommandGroup(after: .sidebar) {
+            Button("Tasks") { NotificationCenter.default.post(name: .clinicTasks, object: nil) }.keyboardShortcut(key(.tasks))
             Button("MCP Servers") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
             Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
             Button("Automations") { NotificationCenter.default.post(name: .clinicAutomations, object: nil) }.keyboardShortcut(key(.automations))
@@ -550,6 +572,11 @@ extension Notification.Name {
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
     static let clinicMarketplace = Notification.Name("com.r0adkll.clinic.marketplace")
     static let clinicAutomations = Notification.Name("com.r0adkll.clinic.automations")
+    static let clinicTasks = Notification.Name("com.r0adkll.clinic.tasks")
+    /// Object: the `WorkItemRef` to reveal (ADR-114).
+    static let clinicShowTask = Notification.Name("com.r0adkll.clinic.showTask")
+    /// Object: the project path whose task source to edit (ADR-113).
+    static let clinicTaskSource = Notification.Name("com.r0adkll.clinic.taskSource")
     static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")

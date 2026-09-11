@@ -37,6 +37,8 @@ struct SessionDetailsSheet: View {
                     row("Transcript size", ByteCountFormatter.string(fromByteCount: s.fileSize, countStyle: .file))
                     row("MCP servers", s.mcpServers.isEmpty ? "—" : s.mcpServers.joined(separator: ", "))
                     row("Pull requests", summary.pullRequests.isEmpty ? "—" : summary.pullRequests.map { "#\($0.number)" }.joined(separator: ", "))
+                    let tasks = sessions.workItems(for: summary.id)
+                    row("Tasks", tasks.isEmpty ? "—" : tasks.map(\.display).joined(separator: ", "))
                 }
                 .font(.callout)
                 if !s.toolCalls.isEmpty {

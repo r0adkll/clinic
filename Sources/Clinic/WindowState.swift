@@ -22,12 +22,14 @@ final class WindowState: Identifiable {
     /// modes is pairwise, so a third and fourth boolean would have cost twelve `didSet` assignments
     /// to keep straight. Adding a screen is now a new case.
     enum Screen: Hashable {
+        case tasks         // ADR-112
         case marketplace   // ADR-084
         case mcpServers    // ADR-093
         case automations   // ADR-095
 
         var title: String {
             switch self {
+            case .tasks: "Tasks"
             case .marketplace: "Marketplace"
             case .mcpServers: "MCP Servers"
             case .automations: "Automations"
@@ -65,6 +67,8 @@ final class WindowState: Identifiable {
     /// Sidebar select mode and the multi-selection (ADR-074).
     var selectMode = false { didSet { if !selectMode { bulkSelection = [] } } }
     var bulkSelection: Set<SidebarItem> = []
+    /// What this window's Tasks screen shows (ADR-112); each window keeps its own.
+    let tasks = TasksViewState()
 
     /// True while the content area belongs to a screen rather than a tab: no tab bar, no footer, no terminals.
     var isShowingScreen: Bool { screen != nil || editingDraft != nil }
