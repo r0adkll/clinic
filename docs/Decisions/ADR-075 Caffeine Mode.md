@@ -1,9 +1,14 @@
 ---
-status: accepted
+status: superseded by ADR-119
 date: 2026-09-08
 tags: [adr, ui, milestone-3]
 ---
 # ADR-075: Caffeine Mode
+
+> **Partly superseded by [[ADR-119 Caffeine Persists And Can Wait For Agents]]** (2026-09-10).
+> The assertion and its toggles stand. *Not persisted* is reversed, because each relaunch dropped the
+> assertion without the user noticing. The automatic mode the consequence deferred now exists as
+> *Agent Based*.
 
 ## Context
 Collins' caffeine toggle inhibits suspend so long runs finish while the user is away. On macOS the equivalent is a power-management assertion.

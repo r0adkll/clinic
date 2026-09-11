@@ -2464,3 +2464,79 @@ appearance only**:
 
 **Not verified:** light appearance on screen (the palette values are Primer's and Pajamas' own),
 clicking the merge menu, and anything GitLab, which has no data path yet.
+
+## 2026-09-10 (cont.) — Caffeine survives a relaunch, and can wait for agents (ADR-119)
+User: *"I'm not sure the caffeine mode is always working. Also could we add a mode where it can be on
+if an agent is running, maybe with some indication for it too"*.
+
+**Diagnosis.** Clinic holds the assertion correctly: `pmset -g log` shows no idle sleep during any
+span in which *Clinic caffeine mode* was held. The same log shows it ending as `ClientDied` at 19:55,
+21:13 and 22:34, and each of those was a relaunch. ADR-075's *off on every launch* rule meant the Mac
+went back to sleeping on its idle timer after each one. The other sleeps in the log are lid closes
+(`Clamshell Sleep`), which no assertion can prevent.
+
+**Built.**
+- `CaffeineController` moved to `Caffeine.swift`. It persists `isOn` and `onlyWhileWorking` (a smoke
+  instance never writes them) and holds the assertion when `isOn && (!onlyWhileWorking ||
+  workingCount > 0)`.
+- `workingCount` comes from a provider in `ClinicApp`: session ids of tabs in `working`, unioned
+  with detached agents that are `isWorking`, re-read through `withObservationTracking`.
+- `BackgroundAgent.isWorking` (ClinicCore) is `state == working` with no `waitingFor`, rather than
+  `status == busy`. One new test; 304 ClinicCore tests pass.
+- `CaffeineToolbarMenu`: a click toggles, the chevron opens both switches and a status line. The
+  glyph is a non-template `NSImage` on a fixed 24×18 canvas.
+- The status item and the View menu got the *Only While Agents Work* switch, and the status item
+  shows the working count as a subtitle.
+
+**Traps.**
+- A toolbar `Menu` label drops `foregroundStyle`, so the first build drew a grey cup. This is the
+  same trap as ADR-116's merge button.
+- The steaming cup is 20 pt wide and the plain one 24 pt. Without the fixed canvas, the toolbar
+  shifted 4 pt each time an agent started or stopped.
+- A smoke window opened with `open -g` is inactive, and an inactive toolbar desaturates every item,
+  the accent included. `System Events … set frontmost of (first process whose unix id is <pid>)`
+  brings that one process forward; `NSRunningApplication.activate()` from a script did nothing.
+
+**Verified** in a `CLINIC_APP_SUPPORT` + `CLAUDE_CONFIG_DIR` smoke instance with the `aaaaaaaa…`
+fixture session, driving turns with `clinic-hook` against its `hook.sock`:
+- With *While Agents Work* armed, there is no assertion.
+- A `UserPromptSubmit` brings up *Clinic caffeine mode: an agent is working* and the accent
+  steaming cup.
+- A `Stop` releases the assertion and shows the accent outline cup.
+- *Always* holds *Clinic caffeine mode* and shows the full cup; *off* shows the template cup.
+- The live `com.r0adkll.clinic` domain gained no caffeine keys.
+
+**Not verified:** clicking the toolbar cup and its chevron (it is the same `Menu(primaryAction:)`
+pattern as Open In), the status item menu, a detached agent driving the count, and whether
+`idle_prompt` clears a tab after an interrupt.
+
+## 2026-09-10 (cont.) — Caffeine's menu: Always On or Agent Based (ADR-119 revised)
+User: *"Its not very clear in the dropdown which one is selected. Also the options shown should be
+Always on or Agent based"*.
+
+**Changed.** The two independent switches (*Caffeine Mode* and *Only While Agents Work*) are now two
+mutually exclusive modes, `CaffeineController.Mode` `.alwaysOn` and `.agentBased`.
+- `mode` is nil while caffeine is off, so no item is checked. Choosing the checked mode turns caffeine
+  off.
+- The same stored keys persist, and the cup's click still toggles, back on in the last mode.
+- The header over the modes says what caffeine is doing now, e.g. *Caffeine is waiting for an agent
+  to work*. The toolbar menu, the menu bar item (an `NSMenuItem.sectionHeader`) and View ▸ Caffeine
+  all share it.
+- View ▸ Caffeine ends with *Turn Caffeine Off* / *Turn Caffeine On (mode)*, which carries the
+  rebindable shortcut. That shortcut is renamed *Turn Caffeine On or Off*.
+
+**Trap.** A SwiftUI toolbar `Menu` builds its items once per toolbar item and never refreshes them,
+even when their inputs change. After choosing *Always On* from the menu, the assertion and the cup
+switched, but the menu reopened with the check still on *Agent Based*. Passing the mode as a value
+into the items view did not help. `.id(statusLine)` on the `Menu` did.
+
+**Verified** in a smoke instance, with a guarded `.cghidEventTap` click (frontmost pid plus a point
+inside its layer-0 window, mapped through the PNG's opaque bounding box):
+- Menu screenshots of Agent Based waiting, Always On, off, and Agent Based with *1 agent working*.
+- Each mode chosen from the menu, with the matching `pmset` assertion.
+- Choosing the checked mode turned caffeine off, and clicking the cup brought back Always On.
+- View ▸ Caffeine read through System Events (`AXMenuItemMarkChar`) had its check on the active mode.
+- Turning caffeine off in the smoke instance left the live `ClinicCaffeine = 1` untouched. That value
+  was written by a non-smoke run of this branch.
+
+**Not verified:** the menu bar item's menu on screen.
