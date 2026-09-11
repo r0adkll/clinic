@@ -98,6 +98,9 @@ struct ProjectMenu: View {
         Button("Open on GitHub") { if let remote { NSWorkspace.shared.open(remote) } }
             .disabled(remote == nil)
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }
+        if !SessionStore.isChats(project.path) {
+            Button("Task Source…") { NotificationCenter.default.post(name: .clinicTaskSource, object: project.path) }
+        }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.path, forType: .string) }
         Divider()
         Button("Generate Icon…") { NotificationCenter.default.post(name: .clinicGenerateIcon, object: project.path) }

@@ -498,6 +498,8 @@ private struct CheckRow: View {
 /// authenticated `gh` can still be invisible — and telling that user to log in is a dead end (ADR-086).
 struct GitHubUnavailableView: View {
     let availability: GitHubService.Availability
+    /// What Clinic was trying to read: "pull requests" or "issues" (ADR-113).
+    var subject = "pull requests"
     let retry: () async -> Void
     @State private var busy = false
 
@@ -511,7 +513,7 @@ struct GitHubUnavailableView: View {
                     Label("Can't find the gh CLI", systemImage: "terminal")
                 } description: {
                     VStack(spacing: 8) {
-                        Text("Clinic runs `gh` to read pull requests, but it isn't on the PATH this app was launched with. Install it with `brew install gh`, or make sure your login shell exports its location.")
+                        Text("Clinic runs `gh` to read \(subject), but it isn't on the PATH this app was launched with. Install it with `brew install gh`, or make sure your login shell exports its location.")
                         DisclosureGroup("Searched PATH") {
                             Text(path.replacingOccurrences(of: ":", with: "\n"))
                                 .font(.system(.caption2, design: .monospaced))

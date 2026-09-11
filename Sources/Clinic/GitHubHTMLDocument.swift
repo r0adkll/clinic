@@ -7,7 +7,9 @@ import Foundation
 /// handful of rules that make tables and code blocks look native. The GitHub custom properties are
 /// defined because GitHub inlines `style="background-color: var(--bgColor-muted)"` on images.
 enum GitHubHTMLDocument {
-    static func page(body: String, dark: Bool) -> String {
+    /// `reportsHeight` is off for a view that scrolls itself (the Tasks thread, ADR-112): there is
+    /// no height handler to post to, and nothing to size.
+    static func page(body: String, dark: Bool, reportsHeight: Bool = true, extraCSS: String = "") -> String {
         let nonce = UUID().uuidString
         return """
         <!doctype html>
@@ -15,11 +17,18 @@ enum GitHubHTMLDocument {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta http-equiv="Content-Security-Policy" content="\(csp(nonce: nonce))">
-        <style>\(css(dark: dark))</style>
+        <style>\(css(dark: dark))\(extraCSS)</style>
         </head><body>\(body)
-        <script nonce="\(nonce)">\(heightScript)</script>
+        \(reportsHeight ? "<script nonce=\"\(nonce)\">\(heightScript)</script>" : "")
         </body></html>
         """
+    }
+
+    /// Text for an HTML context. Only for Clinic's own strings (logins, dates); GitHub's `bodyHTML`
+    /// is already HTML and goes in as it came.
+    static func escape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     /// Images (and the media a comment may embed) load; everything else is refused. Scripts are

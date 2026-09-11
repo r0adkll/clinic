@@ -6,7 +6,7 @@ import ClinicCore
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
-    case mcpServers, marketplace, automations, selectSessions, notifications, caffeine
+    case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
 
@@ -31,6 +31,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .replaySession: "Replay Session…"
         case .jumpToSession: "Jump to Session…"
         case .moveTabToNewWindow: "Move Tab to New Window"
+        case .tasks: "Tasks"
         case .mcpServers: "MCP Servers"
         case .marketplace: "Marketplace"
         case .automations: "Automations"
@@ -58,7 +59,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
-        case .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
+        case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage,
              .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
@@ -87,6 +88,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .replaySession: "cmd+opt+r"
         case .jumpToSession: "cmd+k"
         case .moveTabToNewWindow: nil
+        case .tasks: "cmd+opt+t"   // ADR-112
         case .mcpServers: "cmd+shift+m"
         case .marketplace: "cmd+opt+m"
         case .automations: "cmd+opt+a"

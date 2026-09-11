@@ -94,7 +94,7 @@ private struct HTMLWebView: NSViewRepresentable {
             guard loaded != key else { return }
             loaded = key
             view.loadHTMLString(GitHubHTMLDocument.page(body: html, dark: colorScheme == .dark),
-                                baseURL: URL(string: "https://github.com/"))
+                                baseURL: GitHubHTMLNavigation.baseURL)
         }
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -103,17 +103,48 @@ private struct HTMLWebView: NSViewRepresentable {
             if abs(clamped - height) > 0.5 { height = clamped }
         }
 
-        /// Nothing navigates in place. The first `loadHTMLString` is allowed; a click on a link opens
-        /// in the user's browser, and anything else — a meta refresh, a form post — is simply refused.
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if action.navigationType == .other, action.request.url?.scheme == "about" || webView.url == nil {
-                decisionHandler(.allow); return
-            }
-            if let url = action.request.url, action.navigationType == .linkActivated {
-                NSWorkspace.shared.open(url)
-            }
-            decisionHandler(.cancel)
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+            decisionHandler(GitHubHTMLNavigation.decide(action))
         }
+    }
+}
+
+/// ADR-090's navigation policy, shared by every view of GitHub's HTML (the PR panel's bodies and the
+/// Tasks thread, ADR-112): nothing navigates in place.
+///
+/// The delegate method this backs went uncalled until 2026-09-10. It was declared with a
+/// `decisionHandler` that only *nearly matched* WebKit's `@MainActor @Sendable` requirement, and
+/// under Swift 6 a near miss is a different method, so WebKit fell back to allowing everything and a
+/// clicked link loaded inside the body. Declare it with the exact signature, or it is dead again.
+enum GitHubHTMLNavigation {
+    static let baseURL = URL(string: "https://github.com/")!
+
+    @MainActor
+    static func decide(_ action: WKNavigationAction) -> WKNavigationActionPolicy {
+        guard let url = action.request.url else { return .cancel }
+        switch action.navigationType {
+        case .other:
+            // `loadHTMLString` itself. It arrives *after* the web view has adopted the base URL, so
+            // "the view has no URL yet" is not a test for it.
+            return url.scheme == "about" || url == baseURL ? .allow : .cancel
+        case .linkActivated:
+            // A footnote or heading anchor (`#user-content-…`) scrolls the body; anything else is
+            // somewhere else and opens in the browser.
+            if url.fragment != nil, url.withoutFragment == baseURL { return .allow }
+            NSWorkspace.shared.open(url)
+            return .cancel
+        default:
+            // A form post, a reload, a scripted or meta-refresh navigation: refused.
+            return .cancel
+        }
+    }
+}
+
+private extension URL {
+    var withoutFragment: URL? {
+        guard var c = URLComponents(url: self, resolvingAgainstBaseURL: false) else { return nil }
+        c.fragment = nil
+        return c.url
     }
 }

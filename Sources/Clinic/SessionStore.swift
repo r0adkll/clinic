@@ -167,6 +167,16 @@ final class SessionStore {
         pending[id] = pending[id] != nil ? s : nil
     }
 
+    /// Records that a session was started from a task (ADR-114). Only Start Session writes this.
+    func linkWorkItem(_ ref: WorkItemRef, to id: SessionID) {
+        update { s in
+            guard s.workItemLinks[id]?.contains(ref) != true else { return }
+            s.workItemLinks[id, default: []].append(ref)
+        }
+    }
+
+    func workItems(for id: SessionID) -> [WorkItemRef] { state.workItemLinks[id] ?? [] }
+
     /// Hides the project and its sessions until something re-registers the path (ADR-050).
     func removeProject(_ project: Project) {
         update { s in

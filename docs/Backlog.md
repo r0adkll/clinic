@@ -106,3 +106,20 @@ deferred below.
   gallery search. Deferred templates: TODO sweep, stale-branch prune, changelog draft, dead-code report, security
   advisories, standup draft, and the Gmail/Calendar inbox brief (needs those MCP servers configured
   before its tile is anything but greyed out).
+
+## Milestone 8 — tasks — **built 2026-09-10** (steps 1–5, branch `feature/tasks`)
+Issues from every project's GitHub repository, in one screen that starts sessions →
+[[ADR-112 Tasks Screen]], [[ADR-113 Work Item Providers and Sources]], [[ADR-114 Starting A Session From A Task]].
+1. **`ClinicCore/WorkItems`**: `WorkItem`, `WorkItemRef`, `WorkItemSource`, `WorkItemProvider`,
+   `WorkItemFilter` (pure filter/sort/count), `WorkItemCache`; `GitHubWorkItemProvider` over new
+   `GitHubService` issue operations (paginated GraphQL list, repo resolution, mention search, detail);
+   fixture tests.
+2. **`TasksStore`**: source resolution + overrides, cache load, refresh while visible (300 s, ≤ 4 `gh`
+   at once), closed on demand, detail on selection, `lastViewed`.
+3. **`TasksScreen`**: nav row (first, ⌥⌘T), scope column, list with filters/search/sort/group, footer.
+4. **Detail pane**: native header + one scrolling thread web view.
+5. **Start Session**: pre-filled composer, ⌘↩ immediate, `workItemLinks`, Show Task, Session Details row.
+- Deferred: editable prompt template (+ a Settings pane); issue types, sub-issues, Projects (v2)
+  fields; hide/snooze/pin; Tasks in ⌘K and the menu bar item; **attach an issue from the composer**
+  (the reverse hand-off); GitLab (`glab`) and Linear providers; write actions (close, assign, comment).
+- ~~Found on the way: the PR panel's link policy (ADR-090) never ran.~~ Fixed 2026-09-10 → [[ADR-115 GitHub HTML Navigation Is Enforced]].
