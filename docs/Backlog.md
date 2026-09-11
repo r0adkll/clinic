@@ -107,7 +107,7 @@ deferred below.
   advisories, standup draft, and the Gmail/Calendar inbox brief (needs those MCP servers configured
   before its tile is anything but greyed out).
 
-## Milestone 8 — tasks
+## Milestone 8 — tasks — **built 2026-09-10** (steps 1–5, branch `feature/tasks`)
 Issues from every project's GitHub repository, in one screen that starts sessions →
 [[ADR-112 Tasks Screen]], [[ADR-113 Work Item Providers and Sources]], [[ADR-114 Starting A Session From A Task]].
 1. **`ClinicCore/WorkItems`**: `WorkItem`, `WorkItemRef`, `WorkItemSource`, `WorkItemProvider`,
@@ -122,3 +122,7 @@ Issues from every project's GitHub repository, in one screen that starts session
 - Deferred: editable prompt template (+ a Settings pane); issue types, sub-issues, Projects (v2)
   fields; hide/snooze/pin; Tasks in ⌘K and the menu bar item; **attach an issue from the composer**
   (the reverse hand-off); GitLab (`glab`) and Linear providers; write actions (close, assign, comment).
+- Found on the way: `GitHubHTMLView`'s `webView(_:decidePolicyFor:decisionHandler:)` only *nearly matches*
+  the Swift 6 protocol requirement, so WebKit never calls it and the PR panel's link policy (ADR-090) has
+  never run. Fixing the signature also needs the initial-load check `TaskThreadView` uses: by the time the
+  policy runs, `webView.url` is already the base URL.
