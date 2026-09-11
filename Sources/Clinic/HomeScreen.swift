@@ -350,7 +350,7 @@ private struct HomeActionCard: View {
 }
 
 /// The nav rows' and Settings' tile (ADR-108, ADR-111) at any size: accent glyph on accent at 16 %.
-private struct AccentTile: View {
+struct AccentTile: View {
     let symbol: String
     var size: CGFloat = 22
     var glyph: CGFloat = 12
@@ -365,7 +365,7 @@ private struct AccentTile: View {
 }
 
 /// A chord drawn as one key, the way a menu shows it.
-private struct KeyCap: View {
+struct KeyCap: View {
     let chord: String
     init(_ chord: String) { self.chord = chord }
 

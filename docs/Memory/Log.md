@@ -2636,3 +2636,36 @@ title above the content too (also centered)"*. `HomeHeader` (the app icon at 72 
 the scroll content a minimum height of the pane, so a short window still scrolls. *All Shortcuts…*
 now uses the accent rather than the link blue. Re-verified both states in smoke instances. The
 defaults domain was unchanged.
+
+## 2026-09-11 (cont.) — The new session sheet becomes a project picker (ADR-121)
+
+User: *"When starting a new session from the empty/new screen It is using the old new session
+dialog … we could greatly improve the UI/UX of this dialog to be more aligned with other new-Stuff
+UIs"*.
+
+**Found.** The sheet (reached with no project in view: the home screen's New Session card, ⇧⌘N, the
+status item) was still ADR-032's form. ADR-071 had said it would shrink to a folder picker, but it
+never did. Its *Start* only opened the composer, which then asked for model, effort and worktree a
+second time. The effort chosen in the sheet was thrown away.
+
+**Built.** `NewSessionSheet` is now only a picker. It has an accent-tile header, a filter field
+styled like the composer card, then Chat and projects by latest session, with real icons,
+monospaced paths, and *N sessions · time*. ↑/↓/Return/Escape work, one click continues, and a
+folder dropped on the sheet becomes a project. The footer has *Choose Folder…*, *Cancel* and
+*Continue*. Filter matches rank name-prefix first, then name, then path. `AccentTile` and `KeyCap`
+are shared from `HomeScreen.swift`. There is a new smoke key, `-ClinicNewSessionSheetOnLaunch`.
+
+**Verified** in a `CLINIC_APP_SUPPORT` smoke instance seeded with a copy of `state.json`:
+- The sheet rendered with the most recent project highlighted.
+- ↓↓ moved the highlight.
+- Typing filtered the list. That is how the path-match ranking problem showed up, and it is fixed.
+- The defaults domain was unchanged, and the smoke dir was deleted.
+- `make build` passed.
+
+**Not verified on screen:**
+- Return continuing into the composer.
+- The re-ranked filter.
+- Folder drop and click-to-continue.
+
+A second round of synthetic keystrokes lost focus partway through: the smoke window was not key
+when "ca" was typed, so I stopped driving input.

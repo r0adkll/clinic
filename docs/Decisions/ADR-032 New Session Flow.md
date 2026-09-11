@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-071 and ADR-121
 date: 2026-09-07
 tags: [adr, ui, sessions]
 ---

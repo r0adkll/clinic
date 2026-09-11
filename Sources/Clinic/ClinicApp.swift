@@ -340,6 +340,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { try? await Task.sleep(for: .seconds(2)); NotificationCenter.default.post(name: .clinicGenerateIcon, object: path) }
         }
         if UserDefaults.standard.bool(forKey: "ClinicNewChatOnLaunch") { tabs.newChat() }
+        // `-ClinicNewSessionSheetOnLaunch YES`: the project picker (ADR-121), once the roster has landed.
+        if UserDefaults.standard.bool(forKey: "ClinicNewSessionSheetOnLaunch") {
+            Task { await sessions.initialScan?.value; NotificationCenter.default.post(name: .clinicNewSession, object: nil) }
+        }
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionScreenOnLaunch"), !path.isEmpty {
             tabs.startNewSession(projectPath: path)
             // `-ClinicDraftPromptOnLaunch <text>`: fill the editor, so a screenshot shows typed text where the
