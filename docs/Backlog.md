@@ -122,7 +122,4 @@ Issues from every project's GitHub repository, in one screen that starts session
 - Deferred: editable prompt template (+ a Settings pane); issue types, sub-issues, Projects (v2)
   fields; hide/snooze/pin; Tasks in ⌘K and the menu bar item; **attach an issue from the composer**
   (the reverse hand-off); GitLab (`glab`) and Linear providers; write actions (close, assign, comment).
-- Found on the way: `GitHubHTMLView`'s `webView(_:decidePolicyFor:decisionHandler:)` only *nearly matches*
-  the Swift 6 protocol requirement, so WebKit never calls it and the PR panel's link policy (ADR-090) has
-  never run. Fixing the signature also needs the initial-load check `TaskThreadView` uses: by the time the
-  policy runs, `webView.url` is already the base URL.
+- ~~Found on the way: the PR panel's link policy (ADR-090) never ran.~~ Fixed 2026-09-10 → [[ADR-115 GitHub HTML Navigation Is Enforced]].

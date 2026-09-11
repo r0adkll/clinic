@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (navigation clause superseded by ADR-115)
 date: 2026-09-09
 supersedes: the "not now" on full GFM in ADR-053 and ADR-087
 tags: [adr, github, ui, webkit]

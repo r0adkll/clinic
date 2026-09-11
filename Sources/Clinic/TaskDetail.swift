@@ -251,7 +251,6 @@ enum TaskThreadDocument {
 /// A web view that scrolls itself: the thread is the whole pane below the header, so there is
 /// nothing to hand scrolling to and nothing to measure (unlike `GitHubHTMLView`, ADR-091).
 struct TaskThreadView: NSViewRepresentable {
-    static let baseURL = URL(string: "https://github.com/")!
     let html: String
     /// Reload only when this changes: a refresh renews signed image URLs in `html` every time, and
     /// reloading for that alone would throw the reader back to the top every five minutes.
@@ -283,22 +282,12 @@ struct TaskThreadView: NSViewRepresentable {
             loaded = full
             let dark = colorScheme == .dark
             view.loadHTMLString(GitHubHTMLDocument.page(body: html, dark: dark, reportsHeight: false, extraCSS: TaskThreadDocument.css(dark: dark)),
-                                baseURL: TaskThreadView.baseURL)
+                                baseURL: GitHubHTMLNavigation.baseURL)
         }
 
-        /// ADR-090's policy: the first load is allowed, a clicked link opens in the browser, and
-        /// nothing else navigates.
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-            // `loadHTMLString` itself arrives as an `.other` navigation to the base URL.
-            if action.navigationType == .other, let url = action.request.url,
-               url.scheme == "about" || url == TaskThreadView.baseURL {
-                decisionHandler(.allow); return
-            }
-            if let url = action.request.url, action.navigationType == .linkActivated {
-                NSWorkspace.shared.open(url)
-            }
-            decisionHandler(.cancel)
+            decisionHandler(GitHubHTMLNavigation.decide(action))
         }
     }
 }

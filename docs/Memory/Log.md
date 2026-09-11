@@ -2396,3 +2396,29 @@ Two traps found in the smoke run:
 New smoke keys: `-ClinicScreenOnLaunch tasks`, `-ClinicTasksView`, `-ClinicTasksSelectAfterLaunch` and
 `-ClinicTasksComposeOnLaunch`. The run wrote `ClinicTasksFilters` into the real defaults domain, and it
 was deleted afterwards.
+
+## 2026-09-10 (cont.) — ADR-090's link policy finally runs (ADR-115)
+User: *"Lets fix the bug"*
+
+The Tasks work found this: the PR panel's `webView(_:decidePolicyFor:decisionHandler:)` only nearly
+matched WebKit's `@MainActor @Sendable` requirement, so WebKit never called it and let every navigation
+through. A clicked link in a PR comment loaded inside the comment.
+
+- **Shared policy.** Both web views now call one policy, `GitHubHTMLNavigation.decide`, with the exact
+  signature.
+- **Initial load.** It is recognised as an `.other` navigation to the base URL, not by `webView.url == nil`.
+  That test cancels the load once the policy actually runs.
+- **Anchors.** Same-document links (`#user-content-…` footnotes and heading anchors) scroll in place,
+  where ADR-090 would have sent them to the browser. That departure is why this is a new ADR, not a
+  silent fix.
+- **No more warnings.** The build has no "nearly matches" warnings left.
+
+**Verified** in a `CLINIC_APP_SUPPORT` + `CLAUDE_CONFIG_DIR` smoke instance with a seeded session
+linked to upload-google-play#288:
+- the PR's Dependabot body and its `github-actions` comment render, so the initial load passes the policy;
+- the Tasks thread renders under the same code.
+
+**Not verified:** a real click on a link. No synthetic click was run, so opening in the browser and
+anchor scrolling are untested by hand. The seeded dirs were deleted afterwards. Defaults keys present
+after the run (`ClinicPRShowTree`, `ClinicPanelWidth`, `ClinicTasksFilters`) were left alone: nothing
+shows this run wrote them, and they may be the user's own.
