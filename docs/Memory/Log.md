@@ -2111,3 +2111,153 @@ space opens Quick Look with Finder's chrome → space closes it → return opens
 4 × 4 image → ⌘W closes just that window → space with the terminal focused opens nothing → ⌘Y opens
 Quick Look with no click at all. Clipboard saved and restored around the run; smoke support dir removed;
 no new defaults keys written.
+
+## 2026-09-10 (cont.) — A design pass over the settings window (ADR-108)
+User: *"The settings panel is a little unwieldy to use since it can't be re-sized. Its UI/UX leaves a
+lot to be desired as well. Help me do a design / ux pass on this to improve it"*
+
+Measured the complaint before changing anything (smoke instance, all five panes screenshotted):
+`.frame(width: 560, height: 420)` on the `TabView` gave Shortcuts' ~2100 pt of content a 420 pt
+viewport — **six rows of thirty-eight** — while Notifications and Diagnostics wasted half the window,
+and nothing could be dragged to fix either. "General" was fourteen controls in date-added order with
+no sections.
+
+[[ADR-108 The Settings Window Is A Source List]]: a resizable source-list window; five one-word panes
+(General / Sessions / Notifications / Shortcuts / Advanced) with the MCP tool switches folded into
+Sessions; every caption a `Section` footer; the shortcut editor gains a filter, a pinned footer bar
+and single-height rows.
+
+**Three things worth remembering:**
+1. **`LabeledContent` aligns on the first text baseline, and an `NSViewRepresentable` has none** — so
+   SwiftUI used the shortcut recorder's *bottom edge* as its baseline, dropped it below the label and
+   doubled every row. `.fixedSize()` and `intrinsicContentSize` do nothing about it; the fix is the
+   representable's `sizeThatFits` plus an explicit `.alignmentGuide(.firstTextBaseline)`. 56 pt → 28 pt.
+2. **A `Settings` scene's window cannot be zoomed or miniaturised**, whatever the style mask says.
+   It reported `resizable=true`, `maxSize` unbounded — and the green button was dead. Switched to a
+   `Window` scene + `.windowResizability(.contentMinSize)` + `CommandGroup(replacing: .appSettings)`
+   to keep ⌘, and the app-menu item.
+3. **Synthetic corner-drags do not drive NSWindow's live resize** — four rounds went into a resize
+   drag that reported "dragged" and changed nothing, while a titlebar drag with the same tool moved
+   the window fine. What settled it was clicking the *zoom button* (780 × 560 → 1800 × 1130). Prefer a
+   button click to a drag when proving a window can resize; and prefer an in-app probe to a synthetic
+   click for anything in the menu bar (the click guard rightly refuses it — `NSApp.mainMenu` answered
+   `Settings…[⌘,]` directly).
+
+**Verified**: five panes at the default size, the pane set and every section; zoom to 1800 × 1130 with
+24 shortcut rows visible; the frame surviving quit → relaunch; `-ClinicPreferencesTab tools` and
+`diagnostics` still resolving. `swift test --package-path Packages/ClinicCore` — 265 pass. The smoke
+runs wrote `NSWindow Frame ClinicSettings`, both `NSSplitView Subview Frames …SidebarNavigationSplitView`
+keys and overwrote `NSWindow Frame com_apple_SwiftUI_Settings_window` into the real defaults domain;
+diffed against a snapshot taken before the work and restored key for key, and the smoke support dir
+removed.
+
+## 2026-09-10 (cont.) — Styling the settings window after System Settings (ADR-108)
+User: *"This is a great start, can we update the styling to more closely match the built-in System
+Settings"*
+
+Screenshotted the real System Settings (it was already running — read-only, left alone) and matched
+it rather than working from memory. Four changes, folded into [[ADR-108 The Settings Window Is A
+Source List]] since nothing had shipped yet:
+
+- **Coloured icon tiles** in the source list — white `.fill` glyph on a 20 pt rounded square with a
+  `.gradient` fill. The single strongest cue; General/Notifications/Shortcuts take the colours System
+  Settings gives its own General, Notifications and Keyboard.
+- **An empty title bar** (`titlebarAppearsTransparent`, `titleVisibility = .hidden`, no
+  `navigationTitle`) so the source list runs to the top with the traffic lights over it, and the pane
+  name moves into the content as a 17 pt bold title. Shortcuts puts its filter in the same band.
+- Source list 186 → **215 pt** (System Settings' is 222).
+- **A 760 pt column** holding the title bar and the form together.
+
+**Two things worth remembering:**
+1. **A grouped `Form` caps and centres its own boxes past ~760 pt.** That is why a fixed-inset title
+   bar above one drifts out of alignment on a wide window — the boxes move and the title does not.
+   Pinning both to one column is the fix, and it holds in a zoomed window too.
+2. **A `Section` footer's ideal width propagates to the scene.** One long unwrapped line of footer
+   text made the `Window` scene open **1027 × 795** on a first run, ignoring `idealWidth`; the
+   deferred `setContentSize` had already run by then, so it did not correct it. Bounding the column
+   bounds the ideal and the window opens at 780 × 560. Suspect an unwrapped `Text` whenever a SwiftUI
+   window opens wider than it was asked to.
+
+**Verified**: all five panes at 780 × 560 against the System Settings screenshot; the title on the
+boxes' left edge at 780 pt and zoomed to 1800 pt; the green button still resizing 780 × 560 →
+1800 × 1130. `swift test --package-path Packages/ClinicCore` — 265 pass. Smoke defaults diffed and
+restored, smoke support dir removed.
+
+## 2026-09-10 (cont.) — Clinic's own sidebar and its own glyphs (ADR-108)
+User: *"I was thinking visually that the sidebar might look more like the sidebar in the main part of
+the app where it flows up and behind the window controls. Also, I'm not sure I like the visual of
+those main setting icons (though they are like the system settings). Maybe we can stick more with the
+glyphs we use elsewhere and put them in a container/shape that takes on the accent color."*
+
+Both right, and the second one caught a real drift: the `.fill` symbols the System Settings tiles
+wanted were **the only filled symbols in the app**. The tiles now carry Clinic's own outline glyphs
+(`gear`, `terminal`, `bell`, `keyboard`, `wrench.and.screwdriver`) on an accent tint at 0.16 — the
+on-state `PaneIconButton` already draws. One colour for all five; the glyph carries the meaning.
+Built the solid-accent variant too and sent both side by side; solid competes with every
+accent-coloured control in the pane beside it, so the tint ships.
+
+**`.toolbar(removing: .sidebarToggle)` is what made the sidebar an inset floating panel.** A
+`NavigationSplitView` only unifies its sidebar with the title bar when the window has a toolbar, and
+removing the only toolbar item leaves it with none — so the sidebar became macOS 26's inset rounded
+panel starting *below* the title bar, instead of the main window's flat full-height column with the
+traffic lights on it. Four wrong guesses first, each plausible because the main window does them:
+`titlebarAppearsTransparent`, `.windowStyle(.titleBar)`, `.navigationTitle`, and wrapping the `List`
+in a `VStack` (the main window's `SidebarView` is a `VStack` around a `List`). All four removed again
+after testing them one at a time — the toggle was the whole cause.
+
+The toggle was removed in the first place on the theory that hiding the list would strand a reader
+with no way back. Tested it: **the toggle follows the collapse**, sitting beside the traffic lights,
+so it never could.
+
+**Also worth remembering:** `screencapture -x -o -l` gives *exact* window pixels with no shadow
+padding (checked three captures against their point sizes), so measuring alignment straight off a
+screenshot is sound — the shadow-padding caveat in [[clinic-smoke-instances]] applies to captures
+without `-o`.
+
+**Verified**: all five panes at 780 × 560; the sidebar flat and full-height with the lights on it;
+collapse and restore via the toggle; the pane title still on the boxes' left edge.
+`swift test --package-path Packages/ClinicCore` — 265 pass.
+
+## 2026-09-10 (cont.) — The pane's name belongs in the title bar (ADR-108)
+User: *"Bug 1, on first open 'General' or the default tab doesn't display in the window menu bar.
+Additionally, we should only display the section or tab name in the same bar and remove from
+content"*
+
+Both the bug and the request have one cause and one fix. The System-Settings pass had set
+`window.titleVisibility = .hidden` so the window title would not collide with the pane name drawn at
+the top of the content — so the title bar showed nothing, ever. Once the sidebar became a *unified*
+one (the previous entry), the content's title also sat one line below the bar that should have been
+carrying it, saying the same word twice.
+
+`titleVisibility` is left alone now, `.navigationTitle(pane.title)` names the window, and no pane
+draws a title of its own. `SettingsPaneTitleBar` and `SettingsPaneBody` are deleted; panes are just
+their `Form` held to the column. Shortcuts' filter moved into the **toolbar** beside the pane name —
+it was the only pane that needed chrome there, and a band holding one field would have been exactly
+the second bar this change removes. Nine shortcut rows fit where eight did.
+
+**Verified**: launched with no `-ClinicPreferencesTab` at all (the real default path) — title bar
+reads "General" on first open, and follows the selection through clicks on Sessions and Shortcuts,
+read back from `kCGWindowName`. All panes at 780 × 560 with no duplicated title.
+
+## 2026-09-10 (cont.) — Don't paint over Liquid Glass (ADR-108)
+User: *"Looks like the search bar in Shortcuts is overlapping an other one, we should use the modern
+liquid glass version here"*
+
+Exactly right, and the zoomed screenshot showed two offset capsules in the corner of the window.
+**macOS 26 wraps a custom `ToolbarItem` in a Liquid Glass container of its own**, so `TreeFilterField`
+— which paints its own capsule fill and border (ADR-103) — landed inside a second one. Reaching for
+the house component was the wrong instinct here: the system search field *is* the glass one, and the
+way to get that material right is to not draw over it. `.searchable(text:placement:.toolbar,
+prompt:)` and the doubling is gone.
+
+The one thing `TreeFilterField` carried that the system field has nowhere to put is the match count,
+so it moved to the footer bar beside *Reset All* — "how much of this list am I looking at" is the one
+question a filtered list cannot answer on its own.
+
+**Also corrected a number I had been repeating:** there are **37** rebindable actions, not 38. Counted
+the `ShortcutAction` cases from source rather than by eye; ADR-108 said 38 in three places and now
+says 37. The live footer reading "6 of 37" is what caught it — a good argument for putting a computed
+count on screen where you have to look at it.
+
+**Verified** by synthetic click into the field and typing "new": six rows survive across File and
+Session, the footer reads "6 of 37", and the field is a single capsule with the focus ring.

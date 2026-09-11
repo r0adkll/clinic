@@ -12,7 +12,6 @@ struct RootView: View {
     @Environment(KeyBindings.self) private var bindings
     @Environment(CaffeineController.self) private var caffeine
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
     @State private var showNewSession = false
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
@@ -54,7 +53,7 @@ struct RootView: View {
             guard isActive, let path = n.object as? String else { return }
             iconProject = IconGenerationTarget(path: path)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { _ in if isActive { openSettings() } }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { _ in if isActive { openWindow(id: PreferencesView.windowID) } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicOpenWindow)) { n in
             guard isActive, let id = n.object as? UUID else { return }
             openWindow(id: "main", value: id)

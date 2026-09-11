@@ -26,13 +26,21 @@ struct ClinicApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
         .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine) }
-        Settings {
+        // A `Window` rather than a `Settings` scene (ADR-108). The settings scene builds a window
+        // that cannot be zoomed or miniaturised — reasonable for a fixed panel, wrong for one the
+        // reader is meant to size to the pane they are in. `.appSettings` below keeps ⌘, and the
+        // app-menu item pointing here.
+        Window("Clinic Settings", id: PreferencesView.windowID) {
             PreferencesView(tabs: appDelegate.tabs)
                 .environment(appDelegate.usage)
                 .environment(appDelegate.bindings)
                 .environment(appDelegate.tabs.snapshots)
                 .environment(appDelegate.tabs.sounds)
         }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 780, height: 560)
+        .defaultPosition(.center)
+        .commandsRemoved()
     }
 }
 
@@ -444,6 +452,12 @@ struct ClinicCommands: Commands {
     private func key(_ a: ShortcutAction) -> KeyboardShortcut? { bindings.shortcut(for: a) }
 
     var body: some Commands {
+        // ADR-108 moved the settings out of the `Settings` scene, which is what normally provides
+        // this item; it is rebuilt here so the app menu and ⌘, are unchanged for the reader.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { NotificationCenter.default.post(name: .clinicOpenSettings, object: nil) }
+                .keyboardShortcut(",", modifiers: .command)
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Session") { tabs.startNewSession() }.keyboardShortcut(key(.newSession))
             Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut(key(.newSessionInFolder))

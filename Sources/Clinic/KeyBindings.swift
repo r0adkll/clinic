@@ -128,6 +128,8 @@ final class KeyBindings {
     func chord(for action: ShortcutAction) -> KeyChord? { overrides.chord(for: action.rawValue, default: action.defaultChord) }
     func shortcut(for action: ShortcutAction) -> KeyboardShortcut? { chord(for: action).flatMap(Self.keyboardShortcut) }
     func isOverridden(_ action: ShortcutAction) -> Bool { overrides.raw[action.rawValue] != nil }
+    /// Whether *Reset All* has anything to reset (ADR-108: a button that can do nothing is disabled).
+    var hasOverrides: Bool { !overrides.raw.isEmpty }
     /// Display string for help texts, e.g. "(⇧⌘G)"; empty when unbound.
     func hint(_ action: ShortcutAction) -> String { chord(for: action).map { " (\($0.display))" } ?? "" }
 
@@ -229,6 +231,13 @@ struct ShortcutRecorder: NSViewRepresentable {
         v.needsDisplay = true
     }
 
+    /// Without this the recorder answers a proposed height, so every shortcut row was twice as tall
+    /// as it needed to be and the label sat *above* its chord instead of beside it (ADR-108).
+    /// `intrinsicContentSize` alone does not settle it: SwiftUI asks the representable, not the view.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: RecorderView, context: Context) -> CGSize? {
+        RecorderView.size
+    }
+
     @MainActor
     final class RecorderView: NSView {
         var onChord: ((KeyChord?) -> Void)?
@@ -237,8 +246,10 @@ struct ShortcutRecorder: NSViewRepresentable {
         /// Focus only after a click, so opening Preferences never starts recording on its own.
         private var clicked = false
 
+        static let size = CGSize(width: 116, height: 22)
+
         override var acceptsFirstResponder: Bool { clicked }
-        override var intrinsicContentSize: NSSize { NSSize(width: 130, height: 22) }
+        override var intrinsicContentSize: NSSize { Self.size }
         override func mouseDown(with event: NSEvent) { clicked = true; window?.makeFirstResponder(self) }
         override func becomeFirstResponder() -> Bool { recording = true; return true }
         override func resignFirstResponder() -> Bool { recording = false; clicked = false; return true }
@@ -273,35 +284,121 @@ struct ShortcutRecorder: NSViewRepresentable {
     }
 }
 
-/// Preferences → Shortcuts (ADR-073).
+/// Preferences → Shortcuts ([[ADR-073]]), re-laid-out by ADR-108.
+///
+/// Thirty-eight actions is more than any settings pane can show at once, so the two things a reader
+/// needs are a way to *find* one and a way to see many at a time. The filter is the finding, and the
+/// row is one line high because the recorder now answers a fixed size. The help text and Reset All
+/// are pinned to the foot rather than sitting at the end of the scroll, where they were unreachable
+/// without reading past every binding in the app.
 struct ShortcutsPreferences: View {
     @Environment(KeyBindings.self) private var bindings
     @State private var message: String?
+    @State private var query = ""
+
+    /// Matches an action's title or the chord it is bound to, so "⌘N" and "session" both find rows.
+    private func matches(_ action: ShortcutAction) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        if action.title.localizedCaseInsensitiveContains(q) { return true }
+        if action.section.localizedCaseInsensitiveContains(q) { return true }
+        guard let chord = bindings.chord(for: action) else { return false }
+        return chord.display.localizedCaseInsensitiveContains(q) || chord.stringValue.localizedCaseInsensitiveContains(q)
+    }
+
+    private var shown: [ShortcutAction] { ShortcutAction.allCases.filter(matches) }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if shown.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                paneForm.settingsColumn()
+            }
+
+            Divider()
+            HStack(spacing: 12) {
+                Text(message ?? "Click a shortcut, then type the new one. ⌫ clears it, ⎋ cancels. A chord your Ghostty config binds still wins inside the terminal.")
+                    .font(.caption)
+                    .foregroundStyle(message == nil ? Color.secondary : Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                // `TreeFilterField` showed this inside itself; the system search field has nowhere
+                // to put it, and "how many of them am I looking at" is the one thing a filtered list
+                // cannot answer on its own.
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text("\(shown.count) of \(ShortcutAction.allCases.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+                Button("Reset All") { bindings.resetAll(); message = nil }
+                    .disabled(!bindings.hasOverrides)
+            }
+            .padding(.horizontal, SettingsMetrics.inset)
+            .padding(.vertical, 9)
+            .background(.bar)
+        }
+        // The filter lives in the window's toolbar, beside the pane's name: no other pane needs a
+        // header band, and one here would be a second bar under the title bar saying nothing.
+        //
+        // It is `.searchable` rather than the `TreeFilterField` the file browsers use (ADR-103).
+        // macOS 26 wraps a custom `ToolbarItem` in a Liquid Glass container of its own, so a field
+        // that draws its own capsule lands inside a second one — two offset search bars in the
+        // corner of the window. The system field *is* the glass one, so it gets the treatment right
+        // by not fighting it.
+        .searchable(text: $query, placement: .toolbar, prompt: "Filter")
+    }
+
+    private var paneForm: some View {
         Form {
             ForEach(ShortcutAction.sections, id: \.self) { section in
-                Section(section) {
-                    ForEach(ShortcutAction.allCases.filter { $0.section == section }) { action in
-                        LabeledContent(action.title) {
-                            HStack(spacing: 6) {
-                                ShortcutRecorder(action: action, message: $message).fixedSize()
-                                Button { bindings.reset(action); message = nil } label: { Image(systemName: "arrow.uturn.backward") }
-                                    .buttonStyle(.borderless).help("Reset to default").opacity(bindings.isOverridden(action) ? 1 : 0)
-                            }
+                let actions = shown.filter { $0.section == section }
+                if !actions.isEmpty {
+                    Section(section) {
+                        ForEach(actions) { action in
+                            ShortcutRow(action: action, message: $message)
                         }
                     }
                 }
             }
-            Section {
-                HStack {
-                    Text(message ?? "Click a shortcut, then type the new one. ⌫ clears it, ⎋ cancels. Chords bound in your Ghostty config still win inside the terminal.")
-                        .font(.caption).foregroundStyle(message == nil ? Color.secondary : Color.red)
-                    Spacer()
-                    Button("Reset All") { bindings.resetAll(); message = nil }
-                }
-            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// One binding. The reset arrow sits *left* of the recorder so every chord box in the pane lines up
+/// on the same edge, and it appears only for a binding that is not the default — which is the only
+/// place a reader can see that they changed something.
+private struct ShortcutRow: View {
+    let action: ShortcutAction
+    @Binding var message: String?
+    @Environment(KeyBindings.self) private var bindings
+
+    var body: some View {
+        let overridden = bindings.isOverridden(action)
+        LabeledContent {
+            HStack(spacing: 6) {
+                Button { bindings.reset(action); message = nil } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(.borderless)
+                .help("Reset to default")
+                .opacity(overridden ? 1 : 0)
+                .disabled(!overridden)
+                .accessibilityHidden(!overridden)
+
+                ShortcutRecorder(action: action, message: $message)
+                    .frame(width: ShortcutRecorder.RecorderView.size.width,
+                           height: ShortcutRecorder.RecorderView.size.height)
+                    // `LabeledContent` aligns its label and content on the first text baseline, and
+                    // an `NSViewRepresentable` has none — so SwiftUI used the recorder's *bottom*
+                    // edge as the baseline, dropped it below the label and doubled the row height.
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 6 }
+            }
+        } label: {
+            Text(action.title)
+        }
     }
 }
