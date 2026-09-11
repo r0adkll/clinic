@@ -10,6 +10,12 @@ enum Prefs {
     /// Master on/off. The files it plays, if any, are ADR-097's `NotificationSounds.defaultsKey`.
     static let notificationSound = "ClinicNotificationSound"
     static let hookTrace = "ClinicHookTrace"
+    /// Where new worktrees branch from when a project has no choice of its own (ADR-118).
+    static let worktreeBase = "ClinicWorktreeBase"
+
+    static var defaultWorktreeBase: WorktreeBase {
+        UserDefaults.standard.string(forKey: worktreeBase).flatMap(WorktreeBase.init(rawValue:)) ?? .defaultBranch
+    }
 }
 
 /// The panes of the settings window (ADR-108). One word each, and each one a subject rather than a
@@ -251,6 +257,7 @@ private struct SessionsPane: View {
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
+    @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
 
     var body: some View {
         Form {
@@ -258,10 +265,16 @@ private struct SessionsPane: View {
                 Picker("Default model", selection: $defaultModel) {
                     ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
                 }
+                Picker("New worktrees branch from", selection: $worktreeBase) {
+                    Text("The default branch").tag(WorktreeBase.defaultBranch)
+                    Text("The current branch").tag(WorktreeBase.currentBranch)
+                }
             } header: {
                 Text("New sessions")
             } footer: {
-                Text("Per-project choices in the New Session sheet override this.")
+                Text("The default branch is the remote's, fetched when it is more than a day old. A project can keep "
+                     + "its own choice, and one session can start from any branch, both from the worktree row of the "
+                     + "New Session screen. Per-project model choices there override the default model.")
             }
 
             Section("Archiving") {

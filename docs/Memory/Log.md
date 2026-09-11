@@ -2540,3 +2540,58 @@ inside its layer-0 window, mapped through the PNG's opaque bounding box):
   was written by a non-smoke run of this branch.
 
 **Not verified:** the menu bar item's menu on screen.
+
+## 2026-09-10 (cont.) — Task suggestions in the composer, and a chosen worktree base (ADR-117, ADR-118)
+User: *"Let's pull some of the new session auto suggestions from the tasks provider(s) for the
+project. Additionally, we should be able to configure the base branch that worktrees should spawn
+from, with a setting to change the default branch choice"*
+
+**Checked against the CLI first** (`claude` 2.1.268, scratch repo, `HEAD` on `feature`). Each fact
+is in ADR-118:
+- `-w` branches from `origin/HEAD`, not the current branch, so ADR-083's caption had been wrong since
+  it shipped.
+- `worktree.baseRef` is only `fresh` or `head`.
+- A second `--settings` replaces the first.
+- `-w <name>` adopts an existing directory at its tip.
+- Adopted worktrees get no `.worktreeinclude` copy.
+
+**What was built.**
+- `WorkItemSuggestions.rank` ranks a project's open tasks: yours, then mentions and yours-filed,
+  then unassigned. It leaves out anything someone else owns or that already has a session.
+  `TasksStore.composerAppeared` refreshes only that project's sources, and only when they are older
+  than 300 s. The composer shows a Tasks row above Recent, and a pill fills the prompt, the worktree
+  name and the link (click again to unlink).
+- `WorktreeBase` can be the default branch, the current branch, or a named branch.
+  - `HookService` writes `hooks-worktree-{fresh,head}.json` twins.
+  - A named branch goes through `GitRepository.createWorktree`: `worktree add --no-track -b
+    worktree-<name>`, plus the `.worktreeinclude` copy, then `-w <name>` adopts it.
+  - The composer row's caption is a base menu with *Make This the Default for `<project>`*.
+    Settings → Sessions has the global default.
+- 316 ClinicCore tests passed on the branch, 13 of them new: the ranking, the plan, branch parsing,
+  and a real repo that builds a worktree from `develop` with an included `.env`.
+
+**Traps.**
+- A worktree-isolated session refuses compound git commands, so the scratch-repo experiments were
+  run one git command per call.
+- `~/Library/Caches/clinic-smoke` was live: another instance had rebound its sockets minutes before.
+  This run used `clinic-nsb` instead.
+
+**Verified** in a `CLINIC_APP_SUPPORT` smoke instance, on a shallow clone of r0adkll/upload-google-play:
+- The Tasks row led with #238 and #200 (assigned to r0adkll). #269, #265 and #245, assigned to
+  another maintainer, were absent.
+- Clicking #238 filled the prompt and `issue-238-debug-mode-so-i-can-troubleshoot-why`, and turned
+  the pill accent with a ✓.
+- Send with base `origin/fix/internal-errors` created the worktree at that ref's tip (`45a454cb`),
+  with no upstream, and linked the session to #238.
+  - The shell line carried `-w issue-238-… --settings …/hooks-worktree-head.json`.
+  - The CLI then stopped on workspace trust, expected for a never-trusted folder.
+- After relaunch, #238 had left the suggestions. The base menu listed Default and Current Branch — master,
+  the new local branch, Remote Branches ▸, and *Make This the Default for ugp*.
+- No new keys in the live defaults domain; the smoke dir was deleted.
+
+**Not verified:**
+- A real session running inside a Clinic-created worktree: the scratch clone was untrusted. The CLI's
+  adoption was checked by hand with `claude -p` instead.
+- Choosing from the Remote Branches submenu, *Make This the Default*, and the Settings picker on
+  screen.
+- The error line under the branch field.

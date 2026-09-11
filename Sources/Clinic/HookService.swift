@@ -23,6 +23,16 @@ final class HookService {
         server = HookServer(socketPath: HookServer.defaultSocketPath(appSupport: appSupport))
     }
 
+    /// The `--settings` file for a launch: plain `hooks.json`, or for a worktree launch a twin that also
+    /// names the CLI's `worktree.baseRef` (ADR-118). A second `--settings` flag would replace the first,
+    /// hooks and all, so the base has to ride in the same file.
+    func settingsFileURL(worktreeBaseRef: String?) -> URL {
+        guard let worktreeBaseRef else { return settingsFileURL }
+        return settingsFileURL.deletingLastPathComponent().appendingPathComponent("hooks-worktree-\(worktreeBaseRef).json")
+    }
+
+    static let worktreeBaseRefs = ["fresh", "head"]
+
     static var helperPath: String {
         if let url = Bundle.main.url(forAuxiliaryExecutable: "clinic-hook") { return url.path }
         if let url = Bundle.main.url(forResource: "clinic-hook", withExtension: nil) { return url.path }
@@ -33,6 +43,10 @@ final class HookService {
         do {
             try FileManager.default.createDirectory(at: settingsFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try HookSettings.json(helperPath: Self.helperPath, socketPath: server.socketPath).write(to: settingsFileURL, options: .atomic)
+            for ref in Self.worktreeBaseRefs {
+                try HookSettings.json(helperPath: Self.helperPath, socketPath: server.socketPath, worktreeBaseRef: ref)
+                    .write(to: settingsFileURL(worktreeBaseRef: ref), options: .atomic)
+            }
             server.onUndecodable = { data, error in
                 Self.log.error("undecodable hook payload (\(data.count) bytes): \(error, privacy: .public)")
             }

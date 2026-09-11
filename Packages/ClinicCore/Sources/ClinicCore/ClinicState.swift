@@ -12,6 +12,8 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var projectsAddedAt: [String: Date] = [:]
     public var lastModelByProject: [String: String] = [:]
     public var lastWorktreeByProject: [String: Bool] = [:]
+    /// Per-project worktree base, set from the composer (ADR-118). No entry = the Settings default.
+    public var worktreeBaseByProject: [String: WorktreeBase] = [:]
     public var selectedSessionId: SessionID?
     public var windowFrame: [Double]?   // x, y, w, h
     public var mutedSessions: Set<SessionID> = []
@@ -65,7 +67,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -79,6 +81,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         projectsAddedAt = try c.decodeIfPresent([String: Date].self, forKey: .projectsAddedAt) ?? [:]
         lastModelByProject = try c.decodeIfPresent([String: String].self, forKey: .lastModelByProject) ?? [:]
         lastWorktreeByProject = try c.decodeIfPresent([String: Bool].self, forKey: .lastWorktreeByProject) ?? [:]
+        worktreeBaseByProject = (try? c.decodeIfPresent([String: WorktreeBase].self, forKey: .worktreeBaseByProject)) ?? [:]
         selectedSessionId = try c.decodeIfPresent(SessionID.self, forKey: .selectedSessionId)
         windowFrame = try c.decodeIfPresent([Double].self, forKey: .windowFrame)
         mutedSessions = try c.decodeIfPresent(Set<SessionID>.self, forKey: .mutedSessions) ?? []

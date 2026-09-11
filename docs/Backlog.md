@@ -121,5 +121,10 @@ Issues from every project's GitHub repository, in one screen that starts session
 5. **Start Session**: pre-filled composer, ⌘↩ immediate, `workItemLinks`, Show Task, Session Details row.
 - Deferred: editable prompt template (+ a Settings pane); issue types, sub-issues, Projects (v2)
   fields; hide/snooze/pin; Tasks in ⌘K and the menu bar item; **attach an issue from the composer**
-  (the reverse hand-off); GitLab (`glab`) and Linear providers; write actions (close, assign, comment).
+  (the reverse hand-off; the project's suggested tasks can be attached since
+  [[ADR-117 The Composer Suggests Tasks]], an arbitrary issue by search still can't); GitLab (`glab`)
+  and Linear providers; write actions (close, assign, comment).
+- Found on the way (2026-09-10): automations still launch `-w` with plain `hooks.json`, so they
+  ignore the worktree base setting ([[ADR-118 Where A Worktree Branches From]]). Give an automation
+  a base, or make it follow its project's.
 - ~~Found on the way: the PR panel's link policy (ADR-090) never ran.~~ Fixed 2026-09-10 → [[ADR-115 GitHub HTML Navigation Is Enforced]].

@@ -302,6 +302,42 @@ final class TasksStore {
         }
     }
 
+    // MARK: Composer suggestions (ADR-117)
+
+    /// A project's best few open tasks to start a session on, from what is loaded. Tasks that already
+    /// have a session are left out.
+    func suggestions(for projectPath: String, limit: Int = 3) -> [WorkItem] {
+        let sources = sources(for: projectPath)
+        guard !sources.isEmpty else { return [] }
+        let linked = Set(sessions.state.workItemLinks.values.flatMap { $0.map(\.id) })
+        return WorkItemSuggestions.rank(sources.flatMap { snapshots[$0.id]?.items ?? [] }, context: context, linked: linked, limit: limit)
+    }
+
+    /// A composer opened on a project. Draw from the cache at once, then bring *this project's*
+    /// sources up to date if they are older than the poll interval. The rest of the roster is left to
+    /// the Tasks screen.
+    func composerAppeared(projectPath: String) async {
+        guard !SessionStore.isChats(projectPath) else { return }
+        await loadFromDiskIfNeeded()
+        let available = await provider.availability()
+        availability = available
+        guard available.isReady, !isRefreshing else { return }
+        if resolution(for: projectPath) == nil { await resolveProjects([projectPath]) }
+        let sources = sources(for: projectPath)
+        for host in Set(sources.map(\.host)) where viewers[host] == nil {
+            if let login = await provider.viewerLogin(host: host) { viewers[host] = login }
+        }
+        let stale = sources.filter { source in
+            guard !loadingSources.contains(source.id) else { return false }
+            guard let fetched = snapshots[source.id]?.fetchedAt else { return true }
+            return Date().timeIntervalSince(fetched) > Self.suggestionMaxAge
+        }
+        if !stale.isEmpty { await fetchOpen(stale) }
+    }
+
+    /// The poll interval: a composer never shows suggestions staler than an open Tasks screen would.
+    static let suggestionMaxAge: TimeInterval = 300
+
     // MARK: Detail
 
     func loadDetail(_ ref: WorkItemRef) async {
