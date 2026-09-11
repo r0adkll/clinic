@@ -84,7 +84,7 @@ struct TaskDetailView: View {
         if !prs.isEmpty || !linked.isEmpty {
             FlowLayout(spacing: 6) {
                 ForEach(prs) { pr in
-                    LinkChip(symbol: PullRequestMark.symbol, title: "#\(pr.number) \(pr.title)", tint: prTint(pr),
+                    LinkChip(asset: prGlyph(pr), title: "#\(pr.number) \(pr.title)", tint: prTint(pr),
                              help: "Pull request \(pr.state == .merged ? "merged" : pr.state == .closed ? "closed" : pr.isDraft ? "draft" : "open"): \(pr.url.absoluteString)") {
                         NSWorkspace.shared.open(pr.url)
                     }
@@ -99,12 +99,13 @@ struct TaskDetailView: View {
         }
     }
 
+    /// A linked PR in its service's own glyph and colour (ADR-116), as in the PR panel.
+    private func prGlyph(_ pr: WorkItemDetail.LinkedPullRequest) -> String {
+        CodeHost(host: pr.url.host ?? "github.com").art.stateGlyph(pr.state, isDraft: pr.isDraft)
+    }
+
     private func prTint(_ pr: WorkItemDetail.LinkedPullRequest) -> Color {
-        switch pr.state {
-        case .merged: .purple
-        case .closed: .secondary
-        case .open: pr.isDraft ? .secondary : .green
-        }
+        CodeHost(host: pr.url.host ?? "github.com").art.stateInk(pr.state, isDraft: pr.isDraft)
     }
 
     // MARK: Thread
@@ -135,7 +136,9 @@ struct TaskDetailView: View {
 
 /// A linked pull request or session under the task's actions.
 private struct LinkChip: View {
-    let symbol: String
+    /// An SF Symbol, or with `asset` a vendored template glyph.
+    var symbol: String = ""
+    var asset: String?
     let title: String
     let tint: Color
     let help: String
@@ -145,7 +148,10 @@ private struct LinkChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(tint)
+                Group {
+                    if let asset { ServiceIcon(asset, size: 12) } else { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
+                }
+                .foregroundStyle(tint)
                 Text(title).lineLimit(1).truncationMode(.tail)
             }
             .font(.callout)

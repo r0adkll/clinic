@@ -325,7 +325,7 @@ private let laterHumanComment = """
 
     @Test func viewFieldsMatchContract() {
         #expect(GitHubService.viewFields.joined(separator: ",") ==
-                "number,title,body,state,isDraft,url,author,headRefName,baseRefName,createdAt,updatedAt,mergedAt,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,additions,deletions,changedFiles,statusCheckRollup,comments,reviews")
+                "number,title,body,state,isDraft,url,author,headRefName,baseRefName,createdAt,updatedAt,mergedAt,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,additions,deletions,changedFiles,statusCheckRollup,comments,reviews,labels,reviewRequests,commits")
         #expect(GitHubService.MergeMethod.allCases.map(\.rawValue) == ["merge", "squash", "rebase"])
     }
 

@@ -25,14 +25,19 @@ final class PanelPane: Identifiable {
             }
         }
 
-        /// Point size for `symbol` in the tab strip. Larger in the compact strip, where the glyph is
-        /// the whole chip and has to carry the tab's identity on its own (ADR-104). The PR glyph runs
-        /// ~2 pt over the boxy ones either way: `arrow.trianglehead.pull` is tall and narrow, so at a
-        /// shared size it reads smaller than its neighbours and its arrowhead does not resolve at all
-        /// (ADR-089).
+        /// Point size for the glyph in the tab strip. Larger in the compact strip, where the glyph is
+        /// the whole chip and has to carry the tab's identity on its own (ADR-104). A PR tab draws its
+        /// service's state glyph instead of `symbol` (ADR-116), sized by `PRStyle.glyphSize`.
         func glyphSize(compact: Bool) -> CGFloat {
             if case .pr = self { return compact ? PRStyle.glyphSize.tabCompact : PRStyle.glyphSize.tab }
             return compact ? 13 : 11
+        }
+
+        /// `symbol` as an image, except that a PR shows its service's glyph (ADR-116). For menus and
+        /// labels; the tab chip itself draws `PRTabGlyph`, which also shows the PR's state.
+        var icon: Image {
+            if case .pr(let ref) = self { return Image(ref.codeHost.art.open).renderingMode(.template) }
+            return Image(systemName: symbol)
         }
 
         var defaultTitle: String {
@@ -41,7 +46,7 @@ final class PanelPane: Identifiable {
             case .diff: "Diff"
             case .files: "Files"
             case .attachments: "Images"
-            case .pr(let ref): "PR #\(ref.number)"
+            case .pr(let ref): ref.codeHost.reference(ref.number)
             }
         }
 
@@ -225,7 +230,7 @@ struct SidePanelTabBar: View {
                 Section("Add") {
                     ForEach(available, id: \.self) { kind in
                         Button { tabs.showPane(kind, in: tab) } label: {
-                            Label(tabs.paneTitle(kind, in: tab), systemImage: kind.symbol)
+                            Label { Text(tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
                         }
                     }
                 }
@@ -234,7 +239,7 @@ struct SidePanelTabBar: View {
                 Section("Open") {
                     ForEach(tab.panel.panes) { pane in
                         Button { tabs.selectPane(pane, in: tab) } label: {
-                            Label(tabs.paneTitle(pane.kind, in: tab), systemImage: pane.kind.symbol)
+                            Label { Text(tabs.paneTitle(pane.kind, in: tab)) } icon: { pane.kind.icon }
                         }
                     }
                 }
@@ -266,9 +271,15 @@ struct SidePanelTabChip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: pane.kind.symbol)
-                .font(.system(size: pane.kind.glyphSize(compact: compact)))
-                .frame(width: 16)
+            Group {
+                if case .pr(let ref) = pane.kind {
+                    PRTabGlyph(ref: ref, size: pane.kind.glyphSize(compact: compact))
+                } else {
+                    Image(systemName: pane.kind.symbol)
+                        .font(.system(size: pane.kind.glyphSize(compact: compact)))
+                }
+            }
+            .frame(width: 16)
             if !compact {
                 Text(title).font(.callout).lineLimit(1)
                 // Always laid out, only faded in: a close button that appears on hover must not
@@ -322,7 +333,7 @@ struct SidePanelEmptyState: View {
             VStack(spacing: 6) {
                 ForEach(tabs.availablePanes(for: tab), id: \.self) { kind in
                     Button { tabs.showPane(kind, in: tab) } label: {
-                        Label(kind.defaultTitle, systemImage: kind.symbol).frame(maxWidth: 180)
+                        Label { Text(kind.defaultTitle) } icon: { kind.icon }.frame(maxWidth: 180)
                     }
                 }
             }
