@@ -82,7 +82,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let show = NSMenuItem(title: "Show Clinic", action: #selector(showApp), keyEquivalent: ""); show.target = self; menu.addItem(show)
         let new = NSMenuItem(title: "New Session…", action: #selector(newSession), keyEquivalent: ""); new.target = self; menu.addItem(new)
-        let caf = NSMenuItem(title: "Caffeine Mode", action: #selector(toggleCaffeine), keyEquivalent: ""); caf.target = self; caf.state = caffeine.isOn ? .on : .off; menu.addItem(caf)
+        // The same header and modes as the toolbar cup's menu (ADR-119).
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: caffeine.statusLine))
+        for (i, m) in CaffeineController.Mode.allCases.enumerated() {
+            let mi = NSMenuItem(title: m.title, action: #selector(chooseCaffeineMode(_:)), keyEquivalent: ""); mi.target = self; mi.tag = i
+            mi.state = caffeine.mode == m ? .on : .off; menu.addItem(mi)
+        }
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Clinic", action: #selector(quit), keyEquivalent: ""); quit.target = self; menu.addItem(quit)
     }
@@ -92,7 +98,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         showApp()
         tabs.select(tab)
     }
-    @objc private func toggleCaffeine() { caffeine.isOn.toggle() }
+    /// Choosing the checked mode turns caffeine off, as in the toolbar menu.
+    @objc private func chooseCaffeineMode(_ sender: NSMenuItem) {
+        let m = CaffeineController.Mode.allCases[sender.tag]
+        caffeine.mode = caffeine.mode == m ? nil : m
+    }
     @objc private func showApp() { WindowLifecycle.showMainWindow() }
     @objc private func newSession() { showApp(); NotificationCenter.default.post(name: .clinicNewSession, object: tabs.selectedTab?.projectPath) }
     @objc private func quit() { NSApp.terminate(nil) }

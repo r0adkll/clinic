@@ -80,7 +80,7 @@ Legend: ✅ done · 🟡 partial/different by design · ❌ missing. Decisions t
 | Delete archived sessions; auto-delete after N; move to trash; delete permanently | ❌ (ADR-018 forbids; would need an ADR) |
 | Export as Markdown | ❌ |
 | Reveal transcript, Open In…, Open in new window, Rename to match PR, Repair link, Open in Ghostty | 🟡 reveal + Finder; rest missing |
-| Caffeine mode | ✅ ADR-075 |
+| Caffeine mode | ✅ ADR-075, ADR-119 (persisted; Always On or Agent Based) |
 | Multiple windows; move session to new window | ✅ ADR-072 |
 
 ## Proposed milestone 3 — session & project management parity

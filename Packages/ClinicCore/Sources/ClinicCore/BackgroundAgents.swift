@@ -31,6 +31,9 @@ public struct BackgroundAgent: Sendable, Hashable, Identifiable {
     public var isBackground: Bool { kind == "background" || kind == "background_agent" }
     public var isRunning: Bool { !Self.terminalStates.contains(state ?? "") && status != "stopped" }
     public var needsAttention: Bool { Self.attentionStates.contains(state ?? "") || waitingFor != nil }
+    /// Mid-task, as opposed to merely alive: what caffeine's *while agents work* scope counts (ADR-119).
+    /// Not `status == "busy"`, which the CLI also reports for an agent stopped on a permission prompt.
+    public var isWorking: Bool { isRunning && state == "working" && !needsAttention }
 
     public init(id: String, sessionId: SessionID?, kind: String, status: String, state: String? = nil, waitingFor: String? = nil, cwd: String? = nil, name: String? = nil, pid: Int? = nil, startedAt: Date? = nil) {
         self.id = id; self.sessionId = sessionId; self.kind = kind; self.status = status; self.state = state; self.waitingFor = waitingFor; self.cwd = cwd; self.name = name; self.pid = pid; self.startedAt = startedAt

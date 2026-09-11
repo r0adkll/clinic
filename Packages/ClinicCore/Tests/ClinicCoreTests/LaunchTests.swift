@@ -56,6 +56,7 @@ import Testing
         let agents = BackgroundAgent.parse(Data(json.utf8))
         #expect(agents.count == 1)
         #expect(agents[0].id == "agent-1" && agents[0].isBackground && agents[0].needsAttention && agents[0].isRunning)
+        #expect(!agents[0].isWorking)   // `busy` on a permission prompt is not work caffeine waits for (ADR-119)
         #expect(agents[0].startedAt.map { Calendar.current.component(.year, from: $0) } == 2026)
     }
 
@@ -83,6 +84,14 @@ import Testing
         #expect(BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "busy", state: "working").isRunning)
         // `status: stopped` still wins even when `state` is unknown to us.
         #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "stopped", state: "mystery").isRunning)
+    }
+
+    @Test func onlyAWorkingAgentIsWorking() {
+        #expect(BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "busy", state: "working").isWorking)
+        #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "busy", state: "working", waitingFor: "permission").isWorking)
+        #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "idle", state: "idle").isWorking)
+        #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "busy").isWorking)
+        #expect(!BackgroundAgent(id: "x", sessionId: nil, kind: "background", status: "stopped", state: "working").isWorking)
     }
 
     @Test func shellQuoting() {
