@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (toolbar metrics and "no caption" superseded by ADR-109)
 date: 2026-09-08
 supersedes: parts of ADR-040, ADR-050, ADR-062, ADR-068
 tags: [adr, ui, projects, sidebar]

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (nav row metrics superseded by ADR-111)
 date: 2026-09-08
 amends: ADR-018
 tags: [adr, ui, plugins, marketplace, milestone-6]

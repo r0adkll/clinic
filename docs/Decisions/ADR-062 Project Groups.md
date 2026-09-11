@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (fold glyphs superseded by ADR-109)
 date: 2026-09-07
 tags: [adr, ui, projects, milestone-4]
 ---

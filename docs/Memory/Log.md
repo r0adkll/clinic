@@ -2261,3 +2261,91 @@ count on screen where you have to look at it.
 
 **Verified** by synthetic click into the field and typing "new": six rows survive across File and
 Session, the footer reads "6 of 37", and the field is a single capsule with the focus ring.
+
+## 2026-09-10 (cont.) — The sidebar toolbar, sized like the nav rows (ADR-109)
+User: *"Lets increase the size of the actions above the projects in the sidebar. Let's do a UI/UX
+improvement pass"*
+
+The row (Select, Collapse All, Expand All, Add Project) was ADR-077's "compact" 11 pt glyphs in
+22 × 20 boxes, the smallest thing in the sidebar. It now takes the nav rows' measurements: **14 pt
+glyph, 28 × 24 box, 6 pt corner, 10 pt inset**. The last of those lines Add Project up with the nav
+pills and the search field.
+
+**13 pt was the first build and it wasn't enough.** It matches the nav glyphs' *point size*, but those
+are filled symbols and these are outlines, so they still looked a step lighter in the real app. Size to
+visual weight, not to the number on the neighbouring view.
+
+The pass also fixed what the screenshot showed besides size:
+- **Expand All was `chevron.down`, the same glyph as every project header's disclosure chevron** a few
+  points below it. Collapse All was `chevron.up.chevron.down`, the pop-up/stepper mark. They are now
+  converging and diverging arrows on a line. `rectangle.compress/expand.vertical` rendered busy at
+  this size.
+- Select mode now shows as **latched** (accent glyph on an accent wash), not just an accent glyph.
+- **The fold buttons disable when they'd do nothing**: everything already collapsed or expanded, or
+  a filter typed, since folding is suspended while filtering.
+- Each button uses its help text as its accessibility label, not the symbol name.
+
+A "Projects" caption on the empty left side was reconsidered and dropped. It fails for the same reason
+ADR-077 removed "Sessions": with favourites, the first section under it is Favorites.
+
+**Verified** in a smoke instance (three seeded projects, one collapsed, empty `CLAUDE_CONFIG_DIR`):
+14 pt reads at the nav glyphs' weight. Clicking Select latches it. Hovering Collapse All fills it.
+Clicking Collapse All folds all four groups (read back from the smoke `state.json`), after which
+Collapse All dims and Expand All stays live. The real `com.r0adkll.clinic` defaults domain was
+exported before the run and matched it exactly after.
+
+## 2026-09-10 (cont.) — A "Projects" trial, a hover that never existed, and nav tiles (ADR-110, ADR-111)
+Three asks in a row: *"Let's add the "Projects" title just to see"*, *"the hover state on sessions is
+not visible in dark mode (or light mode even?)"*, *"Then lets beef up the top nav items in the
+sidebar"*.
+
+**"Projects" caption: trial, not yet decided.** The toolbar now has a `.subheadline` semibold
+secondary "Projects" caption, starting where the nav glyphs start. With a favourite seeded, the smoke
+screenshot shows the problem ADR-109 predicted: "Favorites", in almost the same style, sits directly
+under it and reads as a sub-section of Projects. Shown to the user; ADR-109's "no caption" bullet
+changes only if they keep it.
+
+**The session hover wasn't faint, it was absent.** A `.sidebar` `List` draws no hover state, and
+`SessionRow.hovering` only swapped the badges for the actions. ADR-077's phrase "selection and hover
+fills" had described a hover fill no one built. Fixed with a `listRowBackground` pill in `.quaternary`
+(ADR-110). **Measure the system's shape, don't guess it:** a small pixel-profile tool (the first
+x that differs, per scanline, across a corner) showed the selection corner at about 8 pt against the
+first guess of 6. After the change both profiles agree within a pixel.
+
+**Nav rows** now lead with the project header's 22 pt colour tile (orange / blue / purple), a 14 pt
+label and a 30 pt pill with an 8 pt corner (ADR-111). Four variants were rendered in a harness; grey
+tiles read as disabled next to the coloured project tiles, and a bigger bare glyph was still the
+plainest row in the sidebar.
+
+**Verified** in smoke instances, dark and then light (`-NSRequiresAquaSystemAppearance YES`), seeded
+with two transcripts and a favourite. Select mode was used to get a selected row without clicking one
+open, because a plain click would have run `claude --resume` on a fake session. The real defaults
+domain matched its export afterwards.
+
+## 2026-09-10 (cont.) — Nav tiles take the accent, like Settings (ADR-111 revised)
+User: *"Let's try the D option for the nav rows, but make it the accent color like we did in settings"*
+
+The per-destination colour tiles are gone. The nav rows now draw the Settings source list's tile
+(`SettingsPaneIcon`, ADR-108) at the sidebar's 22 pt tile size: an accent outline glyph on a 16 %
+accent wash with a 5 pt continuous corner. On the active row, whose pill is the accent, the tile turns
+white on white at 22 % so it doesn't vanish. The glyphs switched to their outline forms (`storefront`,
+`alarm`); that also makes the block uniform for the first time, since `server.rack.fill` doesn't exist
+(ADR-095). ADR-111 was rewritten in place (renamed to *Nav Rows Wear Accent Tiles*): it was drafted
+this session and never committed, and the colour-tile version is kept in its Options as the path
+not taken.
+
+This is the second time the user has turned down a per-item palette in favour of one accent (ADR-108
+was the first). Default to accent-tinted tiles for any new icon container.
+
+**Verified** in dark and light smoke instances with MCP Servers active and Marketplace hovered.
+Defaults domain unchanged.
+
+## 2026-09-10 (cont.) — "Projects" stays, and the list gets some air (ADR-109)
+User: *"Add a bit more padding between the nav items and the projects bar/list. I also like the
+"Projects" title so we can keep that"*
+
+The caption trial is now a decision: ADR-109 records "Projects" as kept, reversing ADR-077's "no
+caption", and notes the Favorites-under-Projects cost the user saw and accepted. The toolbar row now
+has 12 pt above it instead of 4, so the Automations → Projects step goes from 30 to 38 pt
+centre-to-centre, measured on smoke screenshots before and after. With the gap, the row reads as the
+header of the list, not a fourth nav row. Defaults domain unchanged.

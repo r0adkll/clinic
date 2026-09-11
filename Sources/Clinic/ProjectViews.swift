@@ -72,6 +72,7 @@ struct NewSessionPlaceholderRow: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .sidebarRowHover(hovering)
         .onTapGesture { if chats { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
         .help(chats ? "Start a chat" : "Start a session in \(project.name)")
     }

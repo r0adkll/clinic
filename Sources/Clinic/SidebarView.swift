@@ -15,11 +15,11 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenNavRow(screen: .marketplace, icon: "storefront.fill", shortcut: .marketplace,
+            ScreenNavRow(screen: .marketplace, icon: "storefront", shortcut: .marketplace,
                          help: "Find and install Claude Code plugins")
             ScreenNavRow(screen: .mcpServers, icon: "server.rack", shortcut: .mcpServers,
                          help: "Configure the MCP servers your sessions get")
-            ScreenNavRow(screen: .automations, icon: "alarm.fill", shortcut: .automations,
+            ScreenNavRow(screen: .automations, icon: "alarm", shortcut: .automations,
                          help: "Prompts that run on a schedule")
             sidebarToolbar
             // The gap above the first project sits outside the scroll view on purpose: as
@@ -41,20 +41,36 @@ struct SidebarView: View {
             .sorted { ($0.rawValue) < ($1.rawValue) }
     }
 
-    /// Collapse-all / expand-all, select mode and add-project (ADR-062, ADR-074). The row carries no
-    /// caption: what it sits above is a list of projects, not "Sessions" (ADR-077).
+    /// Collapse-all / expand-all, select mode and add-project (ADR-062, ADR-074), under a "Projects"
+    /// caption: the row heads the project list, not the nav block above it (ADR-109). Its buttons take a
+    /// nav row's height and corner, and its 10 pt inset lines the last box up with the nav pills
+    /// and the search field (ADR-109).
     private var sidebarToolbar: some View {
-        HStack(spacing: 1) {
+        // Folding is suspended while a filter is typed (every match shows), so both are no-ops then.
+        let canCollapse = query.isEmpty && sessions.projects.contains { !sessions.isCollapsed($0) }
+        let canExpand = query.isEmpty && sessions.projects.contains { sessions.isCollapsed($0) }
+        return HStack(spacing: 2) {
+            Text("Projects")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                // 6 pt more than the row's inset: the caption starts where the nav rows' glyphs do.
+                .padding(.leading, 6)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             ToolbarIcon(window.selectMode ? "checklist.checked" : "checklist",
                         help: (window.selectMode ? "Done selecting" : "Select sessions") + bindings.hint(.selectSessions),
                         active: window.selectMode) { window.selectMode.toggle() }
-            ToolbarIcon("chevron.up.chevron.down", help: "Collapse all") { sessions.collapseAll() }
-            ToolbarIcon("chevron.down", help: "Expand all") { sessions.expandAll() }
-            Divider().frame(height: 12).padding(.horizontal, 3)
+            ToolbarIcon("arrow.down.and.line.horizontal.and.arrow.up", help: "Collapse all projects") { sessions.collapseAll() }
+                .disabled(!canCollapse)
+            ToolbarIcon("arrow.up.and.line.horizontal.and.arrow.down", help: "Expand all projects") { sessions.expandAll() }
+                .disabled(!canExpand)
+            Divider().frame(height: 14).padding(.horizontal, 4)
             ToolbarIcon("folder.badge.plus", help: "Add project folder") { addProject() }
         }
-        .padding(.horizontal, 8).padding(.vertical, 4)
+        // 12 pt above, 4 below: the extra 8 pt is what separates the destinations above from the
+        // project list this row heads, which it otherwise sat as tight against as a fourth nav row.
+        .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
     }
 
     private func addProject() {
@@ -128,27 +144,30 @@ struct ScreenNavRow: View {
 
     var body: some View {
         Button { window.screen = screen } label: {
-            HStack(spacing: 6) {
-                // No phantom disclosure column and no 22 pt icon column: these rows are not part of
-                // the project outline — they sit above the toolbar that separates them — so indenting
-                // them to match a chevron they do not have was all the horizontal padding was buying.
+            HStack(spacing: 8) {
+                // The project headers' 22 pt tile size, in the Settings source list's accent wash
+                // (ADR-108, ADR-111). No phantom disclosure column: these rows are not part of the
+                // project outline, so they do not indent to clear a chevron they do not have.
                 Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .frame(width: 18, height: 16)
-                Text(screen.title).font(.body.weight(.semibold)).lineLimit(1)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accentColor))
+                    .frame(width: 22, height: 22)
+                    .background(active ? Color.white.opacity(0.22) : Color.accentColor.opacity(0.16),
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                Text(screen.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 4)
             }
             .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.primary))
             .padding(.vertical, 4).padding(.horizontal, 6)
-            .background(background, in: RoundedRectangle(cornerRadius: 6))
+            .background(background, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help + bindings.hint(shortcut))
-        // The pill's box lines up with the search field above and the session rows' selection fills;
-        // what shrank is what is *inside* it.
-        .padding(.horizontal, 10).padding(.top, 4)
+        .accessibilityLabel(screen.title)
+        // The pill's box lines up with the search field above and the session rows' selection fills.
+        .padding(.horizontal, 10).padding(.top, 3)
     }
 
     private var background: AnyShapeStyle {
@@ -401,7 +420,9 @@ struct SessionRow: View {
         }
         .padding(.vertical, 3)
         .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .sidebarRowHover(hovering)
     }
 
     /// Trailing hover actions (ADR-077). They replace the badges rather than the timestamp, so the
@@ -431,6 +452,24 @@ struct SessionRow: View {
     }
 }
 
+extension View {
+    /// The pointer-over fill for a sidebar list row: the nav rows' `.quaternary` pill, drawn as the
+    /// row's background so it takes the same inset box as the list's own selection fill (ADR-110).
+    /// A `.sidebar` list draws no hover state of its own.
+    func sidebarRowHover(_ hovering: Bool) -> some View {
+        listRowBackground(
+            RoundedRectangle(cornerRadius: SidebarRowFill.cornerRadius)
+                .fill(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
+                .padding(.horizontal, SidebarRowFill.inset)
+        )
+    }
+}
+
+enum SidebarRowFill {
+    static let inset: CGFloat = 10
+    static let cornerRadius: CGFloat = 8
+}
+
 /// One trailing action on a session row. Deliberately unstyled: on a selected sidebar row the
 /// glyph inherits the selection's own label colour, which accent-coloured text did not (ADR-077).
 struct RowAction: View {
@@ -457,8 +496,10 @@ struct RowAction: View {
     }
 }
 
-/// A sidebar toolbar glyph: secondary until hovered, accent while its mode is on.
+/// A sidebar toolbar button: secondary until hovered, tertiary when there is nothing for it to do,
+/// and latched — accent glyph on an accent wash — while its mode is on (ADR-109).
 struct ToolbarIcon: View {
+    @Environment(\.isEnabled) private var isEnabled
     let systemName: String
     let help: String
     var active = false
@@ -472,15 +513,27 @@ struct ToolbarIcon: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(hovering ? HierarchicalShapeStyle.primary : .secondary))
-                .frame(width: 22, height: 20)
-                .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 5))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(foreground)
+                .frame(width: 28, height: 24)
+                .background(background, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
         .onHover { hovering = $0 }
+    }
+
+    private var foreground: AnyShapeStyle {
+        if !isEnabled { return AnyShapeStyle(.tertiary) }
+        if active { return AnyShapeStyle(Color.accentColor) }
+        return hovering ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(.secondary)
+    }
+
+    private var background: AnyShapeStyle {
+        if active { return AnyShapeStyle(Color.accentColor.opacity(hovering ? 0.26 : 0.18)) }
+        return hovering && isEnabled ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)
     }
 }
 
