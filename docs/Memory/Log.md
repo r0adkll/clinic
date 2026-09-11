@@ -2989,3 +2989,25 @@ smoke dir is deleted and `com.r0adkll.clinic` is byte-identical to before the ru
 the file appear): writing `.clinic/run.json` grew the pill to *🔨 Clinic* and deleting it shrank it
 back, with the capsules either side re-flowing and no leftover gap — the failure mode from the
 device capsule on 2026-09-11. Defaults unchanged, smoke dir and temporary `run.json` deleted.
+
+## 2026-09-11 (cont.) — Clinic's own run configurations
+
+*Set Up with Claude…* over this repo wrote `.clinic/run.json`: **Clinic** (default), **Build**,
+**Tests**, **Core Tests**, **Build GhosttyKit** and **Release**. Nothing has a `device`; this repo
+builds only the macOS app.
+
+- **Clinic runs the executable, not `open`.** `open` returns at once, so the run would end
+  *Succeeded* while the app was still starting. Running `Clinic.app/Contents/MacOS/Clinic` keeps
+  the app as the run's process, so its output lands in the pane and Stop quits it.
+- **The dev instance gets `CLINIC_APP_SUPPORT=$HOME/Library/Caches/clinic-dev`**, set inside the
+  command so fish expands `$HOME` (`env` values are passed literally). A run always happens inside
+  a live Clinic, and a second instance on the default folder takes over its `hook.sock` and
+  `mcp.sock`. Preferences are still shared ([[clinic-smoke-instances]] in auto-memory).
+- **Build and Clinic call `xcodebuild -quiet`, not `make build`.** `make build`'s `| tail -20`
+  hides the errors and exits 0 on a failed build, so a chain like `make build && …` would launch
+  the stale app.
+
+**Verified without building**: `xcodebuild -list` shows the `Clinic` scheme, `make -n` resolved
+every target, the executable sits at `Contents/MacOS/Clinic`, fish parses each command (`fish -n`),
+and all six icons exist on this Mac (`NSImage(systemSymbolName:)`). None of the configurations was
+run.

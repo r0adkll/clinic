@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "default": "clinic",
+  "configurations": [
+    {
+      "id": "clinic",
+      "name": "Clinic",
+      "icon": "macwindow",
+      "command": "make project && xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation -quiet build && env CLINIC_APP_SUPPORT=$HOME/Library/Caches/clinic-dev build/Build/Products/Debug/Clinic.app/Contents/MacOS/Clinic",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "build",
+      "name": "Build",
+      "icon": "hammer",
+      "command": "make project && xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation -quiet build",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "icon": "testtube.2",
+      "command": "make test",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "core-tests",
+      "name": "Core Tests",
+      "icon": "checklist",
+      "command": "swift test --package-path Packages/ClinicCore",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "ghostty",
+      "name": "Build GhosttyKit",
+      "icon": "terminal",
+      "command": "make ghostty",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "icon": "shippingbox",
+      "command": "make release",
+      "rerunAfterTurn": false
+    }
+  ]
+}
