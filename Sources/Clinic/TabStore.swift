@@ -302,7 +302,8 @@ final class TabStore {
         }
         let window = inNewWindow ? openNewWindow() : activeWindow
         if let d = drafts[path] { window.editingDraft = d; return }
-        let d = NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false)
+        let d = NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false,
+                                worktreeBase: worktreeBase(for: path))
         drafts[path] = d
         window.editingDraft = d
     }
@@ -310,7 +311,8 @@ final class TabStore {
     /// The composer pre-filled from a task (ADR-114). Replaces the project's unsent draft: this is an
     /// explicit request for a new one.
     func startNewSession(projectPath: String, prompt: String, worktreeName: String?, workItem: WorkItemRef?) {
-        let d = NewSessionDraft(projectPath: projectPath, model: sessions.state.lastModelByProject[projectPath], worktree: worktreeName != nil)
+        let d = NewSessionDraft(projectPath: projectPath, model: sessions.state.lastModelByProject[projectPath], worktree: worktreeName != nil,
+                                worktreeBase: worktreeBase(for: projectPath))
         d.prompt = prompt
         d.worktreeName = worktreeName ?? ""
         d.workItem = workItem
@@ -331,22 +333,106 @@ final class TabStore {
         w.selectedTabId = tabs(in: w).last?.id
     }
 
+    /// Sends the composer. A worktree from a named branch is created first, with the composer still on
+    /// screen, so a git failure lands in the worktree row instead of in a tab (ADR-118).
     func sendDraft(_ d: NewSessionDraft, empty: Bool = false) {
-        let prompt = empty ? nil : d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !d.isStarting else { return }
+        let trimmed = empty ? nil : d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let worktree = d.worktree && !SessionStore.isChats(d.projectPath)
+        guard worktree, case .branch(let ref) = d.worktreeBase else {
+            closeDraft(d)
+            launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: worktree, worktreeName: worktree ? d.worktreeName : nil,
+                             worktreeBaseRef: worktree ? d.worktreeBase.cliBaseRef : nil, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+            return
+        }
+        d.isStarting = true
+        d.startError = nil
+        Task {
+            do {
+                let plan = try await prepareWorktree(projectPath: d.projectPath, ref: ref, name: d.worktreeName)
+                d.isStarting = false
+                // Discarded while git ran: the worktree stays, reusable by name, and nothing launches.
+                guard drafts[d.projectPath]?.id == d.id else { return }
+                closeDraft(d)
+                launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: true, worktreeName: plan.name,
+                                 worktreeBaseRef: d.worktreeBase.cliBaseRef, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+            } catch {
+                d.isStarting = false
+                d.startError = Self.describeWorktreeFailure(error)
+            }
+        }
+    }
+
+    private func closeDraft(_ d: NewSessionDraft) {
         drafts[d.projectPath] = nil
         let window = window(showing: d) ?? activeWindow
         window.editingDraft = nil
         if activeWindowId != window.id { activeWindowId = window.id }
-        newSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: d.worktree, worktreeName: d.worktree ? d.worktreeName : nil,
-                   effort: d.resolvedEffort, prompt: (prompt?.isEmpty ?? true) ? nil : prompt, workItem: d.workItem)
+    }
+
+    // MARK: Worktree base (ADR-118)
+
+    /// Where a project's new worktrees branch from: its own choice, else the Settings default.
+    func worktreeBase(for projectPath: String) -> WorktreeBase {
+        sessions.state.worktreeBaseByProject[projectPath] ?? Prefs.defaultWorktreeBase
+    }
+
+    /// Nil returns the project to the Settings default.
+    func setWorktreeBase(_ base: WorktreeBase?, for projectPath: String) {
+        sessions.update { $0.worktreeBaseByProject[projectPath] = base }
+    }
+
+    /// Creates `.claude/worktrees/<name>` from `ref` for `-w <name>` to adopt, unless it already exists.
+    private func prepareWorktree(projectPath: String, ref: String, name: String) async throws -> WorktreePlan {
+        guard let repo = await GitRepository.discover(from: projectPath) else {
+            throw GitError(command: "worktree add", exitCode: 128, stderr: "", description: "\(TabFooter.abbreviate(projectPath)) is not a git repository.")
+        }
+        let plan = WorktreePlan.make(ref: ref, name: name, repoRoot: repo.root, suffix: WorktreePlan.randomSuffix())
+        try await repo.createWorktree(plan)
+        return plan
+    }
+
+    /// Git's own sentence ("a branch named 'worktree-x' already exists"), not the whole argv.
+    static func describeWorktreeFailure(_ error: any Error) -> String {
+        guard let e = error as? GitError else { return "\(error)" }
+        let line = e.stderr.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+        guard let line else { return e.description }
+        for prefix in ["fatal: ", "error: "] where line.hasPrefix(prefix) { return String(line.dropFirst(prefix.count)) }
+        return line
     }
 
     /// New session with a pre-assigned id (ADR-017). `prompt` becomes the first turn (ADR-071).
-    /// `workItem` records the task it was started from (ADR-114).
-    func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, effort: String? = nil, prompt: String? = nil,
-                    workItem: WorkItemRef? = nil) {
+    /// `workItem` records the task it was started from (ADR-114). `worktreeBase` defaults to the
+    /// project's (ADR-118); a named branch creates the worktree before the tab opens.
+    func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, worktreeBase: WorktreeBase? = nil,
+                    effort: String? = nil, prompt: String? = nil, workItem: WorkItemRef? = nil) {
+        let base = worktreeBase ?? self.worktreeBase(for: projectPath)
+        guard worktree, case .branch(let ref) = base else {
+            launchNewSession(projectPath: projectPath, model: model, worktree: worktree, worktreeName: worktreeName,
+                             worktreeBaseRef: worktree ? base.cliBaseRef : nil, effort: effort, prompt: prompt, workItem: workItem)
+            return
+        }
+        Task {
+            do {
+                let plan = try await prepareWorktree(projectPath: projectPath, ref: ref, name: worktreeName ?? "")
+                launchNewSession(projectPath: projectPath, model: model, worktree: true, worktreeName: plan.name,
+                                 worktreeBaseRef: base.cliBaseRef, effort: effort, prompt: prompt, workItem: workItem)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't create a worktree from \(ref)"
+                alert.informativeText = Self.describeWorktreeFailure(error)
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
+    }
+
+    private func launchNewSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String?, worktreeBaseRef: String?,
+                                  effort: String?, prompt: String?, workItem: WorkItemRef?) {
         let id = SessionID.generate()
-        var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree, settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
+        var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree,
+                                  settingsFilePath: hooks.settingsFileURL(worktreeBaseRef: worktree ? worktreeBaseRef : nil).path, prompt: prompt)
         launch.worktreeName = worktreeName
         launch.mcpConfigPath = mcp?.configPath(for: id)
         guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }

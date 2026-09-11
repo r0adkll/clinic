@@ -103,7 +103,10 @@ public enum HookSettings {
     /// - Parameters:
     ///   - helperPath: absolute path to the bundled `clinic-hook` executable.
     ///   - socketPath: Clinic's Unix socket; passed as an argument so the helper needs no discovery.
-    public static func json(helperPath: String, socketPath: String) throws -> Data {
+    ///   - worktreeBaseRef: the CLI's `worktree.baseRef` (`fresh` or `head`) for a worktree launch
+    ///     (ADR-118). It rides in this file because a second `--settings` flag replaces the first
+    ///     rather than merging with it, which would drop the hooks.
+    public static func json(helperPath: String, socketPath: String, worktreeBaseRef: String? = nil) throws -> Data {
         let hook: [String: Any] = [
             "type": "command",
             "command": [helperPath, socketPath].map(ClaudeLaunch.shellQuote).joined(separator: " "),
@@ -112,7 +115,8 @@ public enum HookSettings {
         ]
         var hooks: [String: Any] = [:]
         for event in events { hooks[event] = [["hooks": [hook]]] }
-        let root: [String: Any] = ["hooks": hooks]
+        var root: [String: Any] = ["hooks": hooks]
+        if let worktreeBaseRef { root["worktree"] = ["baseRef": worktreeBaseRef] }
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])
     }
 }

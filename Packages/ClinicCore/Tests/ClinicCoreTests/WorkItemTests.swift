@@ -311,6 +311,37 @@ private let issuesPage = """
     }
 }
 
+// MARK: - Composer suggestions (ADR-117)
+
+@Suite struct WorkItemSuggestionTests {
+    let context = WorkItemFilter.Context(viewers: ["github.com": "r0adkll"], mentioned: [])
+
+    @Test func tiersThenRecency() {
+        let items = [
+            item(1, updated: 900),                                     // unassigned, newest
+            item(2, assignees: ["R0ADKLL"], updated: 100),             // mine, oldest
+            item(3, author: "r0adkll", updated: 500),                  // filed by me
+            item(4, assignees: ["someone"], updated: 950),             // someone else's
+            item(5, state: .closed, assignees: ["r0adkll"], updated: 999),
+            item(6, updated: 300),                                     // mentions me
+        ]
+        var ctx = context
+        ctx.mentioned = [items[5].id]
+        #expect(WorkItemSuggestions.rank(items, context: ctx, limit: 10).map(\.ref.number) == [2, 3, 6, 1])
+        #expect(WorkItemSuggestions.rank(items, context: ctx).map(\.ref.number) == [2, 3, 6])
+    }
+
+    @Test func itemsWithSessionsAreLeftOut() {
+        let mine = item(2, assignees: ["r0adkll"])
+        #expect(WorkItemSuggestions.rank([mine, item(1)], context: context, linked: [mine.id]).map(\.ref.number) == [1])
+    }
+
+    @Test func unknownViewerRanksByRecencyAlone() {
+        let items = [item(1, source: enterprise, assignees: ["someone"], updated: 10), item(2, source: enterprise, updated: 20)]
+        #expect(WorkItemSuggestions.rank(items, context: context).map(\.ref.number) == [2, 1])
+    }
+}
+
 // MARK: - Cache and state
 
 @Suite struct WorkItemCacheTests {

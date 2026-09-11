@@ -347,6 +347,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if UserDefaults.standard.bool(forKey: "ClinicDraftWorktreeOnLaunch") {
                 tabs.editingDraft?.worktree = true
                 if let name = UserDefaults.standard.string(forKey: "ClinicDraftBranchOnLaunch") { tabs.editingDraft?.worktreeName = name }
+                // `-ClinicDraftWorktreeBaseOnLaunch default|current|branch:<ref>` (ADR-118).
+                if let raw = UserDefaults.standard.string(forKey: "ClinicDraftWorktreeBaseOnLaunch"), let base = WorktreeBase(rawValue: raw) {
+                    tabs.editingDraft?.worktreeBase = base
+                }
             }
         }
         // `-ClinicSelectTabAfterLaunch <index>`: select a tab once launch tabs exist (attention smoke tests).
