@@ -18,6 +18,23 @@ public actor GitRepository {
         return top.isEmpty ? nil : GitRepository(root: top)
     }
 
+    /// `git rev-parse --git-common-dir`, absolute; nil when not a repo.
+    ///
+    /// The *common* directory, not `--git-dir`: in a linked worktree (ADR-083) `.git` is a file and
+    /// the per-worktree directory holds only that checkout's HEAD and index, while `refs/remotes`
+    /// — what a push moves, and what ADR-127 watches — lives in the main repository's `.git`.
+    /// Git answers relatively (`.git`) when asked from the top level, so the result is resolved
+    /// against the directory it was asked from.
+    public static func commonDirectory(from directory: String) async -> String? {
+        guard FileManager.default.fileExists(atPath: directory) else { return nil }
+        let r = await GitProcess.run(["rev-parse", "--git-common-dir"], in: directory)
+        guard r.status == 0 else { return nil }
+        let out = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !out.isEmpty else { return nil }
+        let url = out.hasPrefix("/") ? URL(filePath: out) : URL(filePath: directory).appending(path: out)
+        return url.standardizedFileURL.path
+    }
+
     // MARK: Status
 
     /// `git status --porcelain=v2 --branch -z`.

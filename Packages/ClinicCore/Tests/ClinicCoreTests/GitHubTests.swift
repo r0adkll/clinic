@@ -52,6 +52,7 @@ private let capturedView = """
   "autoMergeRequest": null,
   "baseRefName": "discover/01-screen",
   "headRefName": "discover/02-background-scan",
+  "headRefOid": "008120e4e6a5b0f2d1c7a39f5b1e0c2d4a6f8b90",
   "body": "## Summary\\n\\nStacked on #1032. Moves the Upcoming scan onto a background worker.",
   "comments": [
     {"author": {"login": "github-actions"}, "authorAssociation": "NONE",
@@ -135,6 +136,7 @@ private let laterHumanComment = """
         #expect(!pr.isDraft)
         #expect(pr.author == PullRequest.Author(login: "octocat", name: "Octo Cat"))
         #expect(pr.headRefName == "discover/02-background-scan" && pr.baseRefName == "discover/01-screen")
+        #expect(pr.headRefOid == "008120e4e6a5b0f2d1c7a39f5b1e0c2d4a6f8b90")
         #expect(pr.createdAt == PullRequest.date("2026-09-02T22:36:50Z"))
         #expect(pr.updatedAt == PullRequest.date("2026-09-03T01:29:14Z"))
         #expect(pr.mergedAt == PullRequest.date("2026-09-03T01:29:12Z"))
@@ -325,7 +327,7 @@ private let laterHumanComment = """
 
     @Test func viewFieldsMatchContract() {
         #expect(GitHubService.viewFields.joined(separator: ",") ==
-                "number,title,body,state,isDraft,url,author,headRefName,baseRefName,createdAt,updatedAt,mergedAt,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,additions,deletions,changedFiles,statusCheckRollup,comments,reviews,labels,reviewRequests,commits")
+                "number,title,body,state,isDraft,url,author,headRefName,baseRefName,headRefOid,createdAt,updatedAt,mergedAt,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,additions,deletions,changedFiles,statusCheckRollup,comments,reviews,labels,reviewRequests,commits")
         #expect(GitHubService.MergeMethod.allCases.map(\.rawValue) == ["merge", "squash", "rebase"])
     }
 

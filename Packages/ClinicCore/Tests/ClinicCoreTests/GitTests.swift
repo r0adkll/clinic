@@ -393,6 +393,53 @@ import Testing
         watcher.stop()   // idempotent
     }
 
+    /// The signal ADR-127 watches for, end to end over real git: a push writes into the repository's
+    /// git directory, the watcher sees it, and `PullRequestRefresh.isRefUpdate` recognises what it saw.
+    @Test func aPushReachesTheWatcherAsARefUpdate() async throws {
+        let (_, dir) = try GitRepositoryTests.makeRepo()
+        try GitRepositoryTests.write(dir, "a.txt", "hello\n")
+        try GitRepositoryTests.sh(dir, ["add", "."])
+        try GitRepositoryTests.sh(dir, ["commit", "-q", "-m", "init"])
+        let remote = dir.appendingPathComponent("remote.git")
+        try GitRepositoryTests.sh(dir, ["init", "-q", "--bare", remote.path])
+        try GitRepositoryTests.sh(dir, ["remote", "add", "origin", remote.path])
+
+        let common = try #require(await GitRepository.commonDirectory(from: dir.path))
+        #expect(common.hasSuffix("/.git"))
+        let watcher = FSEventsWatcher(paths: [common], latency: 0.1)
+        watcher.start()
+        defer { watcher.stop() }
+        try await Task.sleep(for: .milliseconds(300))
+
+        try GitRepositoryTests.sh(dir, ["push", "-q", "-u", "origin", "main"])
+        let changes = watcher.changes
+        let refUpdate = await withTimeout(seconds: 10) { () -> Bool? in
+            for await batch in changes where batch.contains(where: PullRequestRefresh.isRefUpdate) { return true }
+            return nil
+        }
+        #expect(refUpdate == true)
+        #expect(FileManager.default.fileExists(atPath: common + "/refs/remotes/origin/main"))
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// In a linked worktree (ADR-083) `refs/remotes` lives in the main repository's git directory, not
+    /// in the worktree's own — so that is what the watcher has to be pointed at (ADR-127).
+    @Test func aWorktreeWatchesTheMainRepositorysGitDirectory() async throws {
+        let (_, dir) = try GitRepositoryTests.makeRepo()
+        try GitRepositoryTests.write(dir, "a.txt", "hello\n")
+        try GitRepositoryTests.sh(dir, ["add", "."])
+        try GitRepositoryTests.sh(dir, ["commit", "-q", "-m", "init"])
+        let tree = dir.appendingPathComponent("wt")
+        try GitRepositoryTests.sh(dir, ["worktree", "add", "-q", "--detach", tree.path])
+
+        let common = try #require(await GitRepository.commonDirectory(from: tree.path))
+        let expected = URL(filePath: dir.path).appending(path: ".git").standardizedFileURL.path
+        #expect(common == expected)
+        // Not the worktree's own git directory, which holds only its HEAD and index.
+        #expect(!common.contains("/worktrees/"))
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     @Test func ignoresGitObjects() {
         #expect(FSEventsWatcher.isIgnored("/repo/.git/objects/ab/cdef"))
         #expect(FSEventsWatcher.isIgnored("/repo/.git/objects"))

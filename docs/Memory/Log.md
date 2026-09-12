@@ -3011,3 +3011,50 @@ builds only the macOS app.
 every target, the executable sits at `Contents/MacOS/Clinic`, fish parses each command (`fish -n`),
 and all six icons exist on this Mac (`NSImage(systemSymbolName:)`). None of the configurations was
 run.
+
+## 2026-09-11 (cont.) — The PR panel refreshes on events
+
+User: *"It would be nice if the PR panel felt more responsive. Like in my recent example, I had the
+agent push some changes but had to manually refresh the PR panel to see the updates. Also with the
+checks, it feels like we should poll or poll more frequently if viewing the panel while checks are in
+progress."*
+
+ADR-053's one rule — five minutes for every open PR of every open tab — was the whole refresh story,
+and reading a PR while an agent works on it is not what it was written for. Recorded as
+[[ADR-127 The PR Panel Refreshes On Events Not On A Timer]], linked from the design tree, with
+ADR-053's refresh bullet pointing at it.
+
+- **A push is now a file-system event.** One `FSEventsWatcher` per open pane's repository, over its
+  `git rev-parse --git-common-dir` — the main repo's `.git` even from a linked worktree, because that
+  is where `refs/remotes` lives. Filtered to `refs/remotes/…` and `packed-refs`; `FETCH_HEAD` is
+  excluded (a plain fetch writes it with nothing moved).
+- **The end of a turn is a hook.** `TabStore` bumps that session's PRs on `Stop`, after the transcript
+  re-read so a turn that *opened* the PR is covered by the same signal that discovers it. A bump is
+  two reads eight seconds apart, because GitHub creates a commit's check runs asynchronously.
+- **The cadence follows the screen** (`PullRequestRefresh`, pure, in ClinicCore): 15s on screen with a
+  result still coming — `mergeable`/`mergeStateStatus` `UNKNOWN` counts, that being what GitHub says
+  right after a push — 60s on screen and settled, 300s behind another pane or with Clinic in the
+  background, never once merged. Coming back to a pane re-reads anything older than 20s.
+- **Fast reads are cheap.** The rendered-HTML call (ADR-090) left every refresh: the rendering in hand
+  is re-applied before the PR reaches the screen, and re-fetched only when a body changed or its
+  signed image URLs near expiry. This also kills the flash the old order caused — store the PR without
+  HTML, fetch the HTML, swap — which is what made a faster cadence impossible before.
+- **The Files tab tracks `headRefOid`**, new in the `gh pr view` fields: a moved head re-reads the diff
+  in place (old files stay up until the new ones land) and the tree is keyed on the commit, so a push
+  that edits the same files again still rebuilds. It previously never reloaded at all, ⟳ included.
+- ⟳ spins for the reader's own press only and carries *updated N ago*; the Checks tab prints its age
+  and, while something runs, *Rechecking every 15s* — guarded on `NSApp.isActive`, since the store is
+  on its slow tier when Clinic is in the background.
+
+**Verified** in a smoke instance (`clinic-prr`, its own App Support and `CLAUDE_CONFIG_DIR`, seeded
+with a `pr-link` to a live open PR with four running checks — swiftlang/swift#92204, read-only):
+- reads at 20:48:26 / :42 / :59, `html=false` each time — the 15s tier, no GraphQL on a fast read;
+- the live Clinic took focus back at ~20:49:0x and the reads stopped dead, with the Checks line
+  dropping to a plain *Updated 20 seconds ago* — the backoff and the honesty guard, both on screen;
+- `git update-ref refs/remotes/origin/clinic-refresh-probe HEAD` in this repo (with the app in the
+  *background*) logged `refs moved … bumping 1 pr(s)` at 20:50:08.664 and a read at :09.648 — under a
+  second from write to read — with the second look at :22. The probe ref was deleted afterwards.
+
+406 ClinicCore tests pass (14 new for the policy, 2 for the push signal over real git — init, push to
+a bare remote, assert the watcher emits a path `isRefUpdate` accepts — and the worktree common dir);
+`make build` passes. Smoke dir and probe ref removed; `ClinicPRShowTree` is at its default `1`.

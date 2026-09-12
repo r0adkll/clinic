@@ -23,7 +23,9 @@ struct PRFilesView: View {
                                            description: Text("This pull request changes nothing."))
                 } else {
                     DiffBrowserView(browser: browser, showTree: $showTree, treeWidth: $treeWidth)
-                        .task(id: diff.files.map(\.path)) { browser.show(diff.files) }
+                        // Keyed on the commit the diff was read at, not on its paths: a push that
+                        // edits the same files again changes every hunk and no path (ADR-127).
+                        .task(id: identity(diff)) { browser.show(diff.files) }
                 }
             } else if let error = prs.errors[ref.id], prs.diffs[ref.id] == nil {
                 ContentUnavailableView("Could not load the diff", systemImage: "exclamationmark.triangle",
@@ -33,5 +35,9 @@ struct PRFilesView: View {
                     .task { await prs.loadDiff(ref) }
             }
         }
+    }
+
+    private func identity(_ diff: UnifiedDiff) -> String {
+        "\(prs.diffHead(for: ref) ?? "-")|\(diff.files.count)"
     }
 }

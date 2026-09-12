@@ -7,7 +7,8 @@ public actor GitHubService {
 
     /// Fields requested from `gh pr view --json`; `PullRequest.parse` understands exactly these.
     public static let viewFields: [String] = [
-        "number", "title", "body", "state", "isDraft", "url", "author", "headRefName", "baseRefName", "createdAt", "updatedAt",
+        "number", "title", "body", "state", "isDraft", "url", "author", "headRefName", "baseRefName", "headRefOid",
+        "createdAt", "updatedAt",
         "mergedAt", "mergeable", "mergeStateStatus", "reviewDecision", "autoMergeRequest", "additions", "deletions",
         "changedFiles", "statusCheckRollup", "comments", "reviews", "labels", "reviewRequests", "commits",
     ]

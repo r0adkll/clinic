@@ -84,6 +84,9 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public var author: Author
     public var headRefName: String
     public var baseRefName: String
+    /// The head commit. A push moves it, which is the panel's signal that the diff it cached for the
+    /// Files tab is of an older PR than the one on screen (ADR-127).
+    public var headRefOid: String?
     public var createdAt: Date
     public var updatedAt: Date
     public var mergedAt: Date?
@@ -113,13 +116,15 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
     public var id: String { ref.id }
 
     public init(ref: PullRequestRef, title: String, body: String = "", state: State, isDraft: Bool = false, author: Author,
-                headRefName: String = "", baseRefName: String = "", createdAt: Date, updatedAt: Date, mergedAt: Date? = nil,
+                headRefName: String = "", baseRefName: String = "", headRefOid: String? = nil,
+                createdAt: Date, updatedAt: Date, mergedAt: Date? = nil,
                 mergeable: String = "UNKNOWN", mergeStateStatus: String = "UNKNOWN", reviewDecision: String = "",
                 autoMergeEnabled: Bool = false, additions: Int = 0, deletions: Int = 0, changedFiles: Int = 0,
                 checks: [Check] = [], comments: [Comment] = [], labels: [WorkItemLabel] = [], reviewRequests: [String] = [],
                 commitCount: Int? = nil, fetchedAt: Date = Date(), bodyHTML: String? = nil) {
         self.ref = ref; self.title = title; self.body = body; self.state = state; self.isDraft = isDraft; self.author = author
-        self.headRefName = headRefName; self.baseRefName = baseRefName; self.createdAt = createdAt; self.updatedAt = updatedAt
+        self.headRefName = headRefName; self.baseRefName = baseRefName; self.headRefOid = headRefOid
+        self.createdAt = createdAt; self.updatedAt = updatedAt
         self.mergedAt = mergedAt; self.mergeable = mergeable; self.mergeStateStatus = mergeStateStatus
         self.reviewDecision = reviewDecision; self.autoMergeEnabled = autoMergeEnabled; self.additions = additions
         self.deletions = deletions; self.changedFiles = changedFiles; self.checks = checks; self.comments = comments
@@ -219,6 +224,7 @@ public struct PullRequest: Hashable, Codable, Sendable, Identifiable {
             author: author(obj["author"]),
             headRefName: obj["headRefName"] as? String ?? "",
             baseRefName: obj["baseRefName"] as? String ?? "",
+            headRefOid: obj["headRefOid"] as? String,
             createdAt: createdAt,
             updatedAt: date(obj["updatedAt"]) ?? createdAt,
             mergedAt: date(obj["mergedAt"]),

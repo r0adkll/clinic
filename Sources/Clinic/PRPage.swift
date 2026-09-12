@@ -24,6 +24,8 @@ struct PRPage: View {
     /// Merge-box lines whose checks the reader has shown or hidden, against the default: a blocking line
     /// starts open, so a failing build is a glance away, not a click (ADR-087).
     @State private var toggledLines: Set<String> = []
+    /// The reader pressed ⟳ and that read has not landed yet (ADR-127).
+    @State private var isRefreshing = false
 
     struct PendingAction: Identifiable { let id = UUID(); let title: String; let message: String; let run: () async -> Void }
 
@@ -35,7 +37,10 @@ struct PRPage: View {
             header
             content
         }
-        .task(id: ref.id) { if prs.pullRequest(for: ref) == nil { await prs.refresh(ref) } }
+        // The pane is only built while it is the one on screen, so this is also "came to the front":
+        // ADR-127 re-reads a pull request that went stale while the pane was away, and starts watching
+        // its checkout's refs.
+        .task(id: ref.id) { await prs.attach(ref) }
         .alert(confirm?.title ?? "", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button("Cancel", role: .cancel) { confirm = nil }
             Button(confirm?.title ?? "OK") { if let c = confirm { Task { await c.run() } }; confirm = nil }
@@ -93,8 +98,14 @@ struct PRPage: View {
                 .font(.callout)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 8)
-            Button { Task { await prs.refresh(ref) } } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.borderless).help("Refresh")
+            // Spinning for the reader's own press only. An automatic read every fifteen seconds
+            // (ADR-127) would otherwise blink the header at them; the Checks tab says the panel is
+            // watching in words instead.
+            RefreshButton(loading: isRefreshing, fetchedAt: prs.pullRequest(for: ref)?.fetchedAt) {
+                // The one gesture that means "everything, now": the rendered bodies are re-fetched
+                // whether or not ADR-127 thinks they are due.
+                Task { isRefreshing = true; await prs.refresh(ref, html: .force); isRefreshing = false }
+            }
             Button { NSWorkspace.shared.open(ref.url) } label: {
                 Label { Text(host.openTitle) } icon: { ServiceMark(host: host, size: 12) }
             }
@@ -447,6 +458,7 @@ struct PRPage: View {
     private func checks(_ pr: PullRequest) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
+                ChecksFreshness(pr: pr).padding(.horizontal, 12)
                 ForEach(PRChecksGroup.group(pr.checks)) { group in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 6) {
@@ -470,6 +482,66 @@ struct PRPage: View {
 }
 
 // MARK: - Pieces
+
+/// ⟳, spinning while a read is in flight, with what it last read in its tooltip. The panel refreshes
+/// itself (ADR-127); this says so, and says when, so pressing it is a choice rather than a reflex.
+private struct RefreshButton: View {
+    let loading: Bool
+    let fetchedAt: Date?
+    let refresh: () -> Void
+
+    var body: some View {
+        Button(action: refresh) {
+            ZStack {
+                Image(systemName: "arrow.clockwise").opacity(loading ? 0 : 1)
+                if loading { ProgressView().controlSize(.small).scaleEffect(0.7) }
+            }
+            .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .disabled(loading)
+        .help(fetchedAt.map { "Refresh · updated \(PRFreshness.phrase(for: $0))" } ?? "Refresh")
+    }
+}
+
+/// How long ago a pull request was read, in words. Its own type because both the ⟳ tooltip and the
+/// Checks tab print it, and "just now" has to mean the same thing in both.
+enum PRFreshness {
+    static func phrase(for date: Date, now: Date = Date()) -> String {
+        now.timeIntervalSince(date) < 10 ? "just now" : date.formatted(.relative(presentation: .named))
+    }
+}
+
+/// What the Checks tab says about its own freshness (ADR-127). A rollup is a photograph of something
+/// still happening, so it names its own age — and while a check is in flight, says that it is watching
+/// rather than leaving the reader to press ⟳ to find out.
+private struct ChecksFreshness: View {
+    let pr: PullRequest
+
+    var body: some View {
+        // Five seconds is well inside the fastest cadence, so the age on screen is never a lie by more
+        // than a tick. Nothing else in the pane redraws: `Text` is all this builds.
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Text(phrase(at: context.date))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private func phrase(at now: Date) -> String {
+        let age = "Updated " + PRFreshness.phrase(for: pr.fetchedAt, now: now)
+        // `NSApp.isActive`, not `true`: with Clinic in the background the store is on its slow cadence
+        // (ADR-127), and a line claiming otherwise would be a lie the reader could see in a screenshot.
+        guard PullRequestRefresh.interval(for: pr, isFront: true, appActive: NSApp.isActive) == PullRequestRefresh.watching
+        else { return age }
+        let every = Int(PullRequestRefresh.watching.seconds)
+        return "Rechecking every \(every)s · " + age.lowercased()
+    }
+}
 
 /// The service's merge button: its merge colour, white text, and a menu segment to pick the method for
 /// this merge (as on github.com) while the Settings method stays the default. Drawn by hand because

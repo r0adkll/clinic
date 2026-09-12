@@ -202,6 +202,8 @@ final class TabStore {
     var backgroundAgents: BackgroundAgentsService?
     /// Set by the app so hook events can reach scheduled runs (ADR-095).
     weak var automations: AutomationsModel?
+    /// Set by the app so the end of a turn re-reads that session's pull requests (ADR-127).
+    weak var prs: PRStore?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -964,12 +966,23 @@ final class TabStore {
         // ADR-080: turn boundaries become snapshots. Before any early return below, and before the
         // SessionEnd close path so a closing session still gets its last turn sealed.
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
-        if event.hookEventName == "Stop" { runs.turnEnded(in: tab, snapshots: snapshots) }
+        let endedTurn = event.hookEventName == "Stop"
+        if endedTurn { runs.turnEnded(in: tab, snapshots: snapshots) }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {
-            Task { await sessions.refresh(transcriptPath: path); self.refreshFooter(tab) }
+            Task {
+                await sessions.refresh(transcriptPath: path)
+                self.refreshFooter(tab)
+                // A turn that pushed, opened a pull request or answered a review has changed what the
+                // panel shows, and this is the moment we know it ended (ADR-127). After the transcript
+                // re-read, not before: the refs come from the transcript, so a turn that *opened* the
+                // PR is bumped by the same signal that discovers it.
+                if endedTurn { self.prs?.bump(self.pullRequests(for: tab)) }
+            }
+        } else if endedTurn {
+            prs?.bump(pullRequests(for: tab))
         } else if event.hookEventName == "CwdChanged" {
             refreshFooter(tab)
         }

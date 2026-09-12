@@ -91,11 +91,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tabs.runs.preload(projectPaths: sessions.projects.map(\.path))
         }
         if UserDefaults.standard.bool(forKey: "ClinicShowUsage") { usage.start() }
-        prs.openRefsProvider = { [weak self] in
+        // What the PR store polls and watches, and how hard (ADR-127): every PR pane that exists, the
+        // checkout it belongs to, and whether it is the pane actually on screen.
+        prs.openPRsProvider = { [weak self] in
             guard let self else { return [] }
-            return self.tabs.tabs.flatMap { tab in self.tabs.pullRequests(for: tab) }
+            return self.tabs.tabs.flatMap { tab in
+                let directory = tab.pwd ?? tab.projectPath
+                return self.tabs.pullRequests(for: tab).map { ref in
+                    PRStore.OpenPR(ref: ref, directory: directory,
+                                   isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab))
+                }
+            }
         }
         prs.start()
+        tabs.prs = prs
         tabs.mcp = mcp
         tabs.backgroundAgents = backgroundAgents
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
