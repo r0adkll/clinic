@@ -232,34 +232,55 @@ struct PRPage: View {
         }
     }
 
+    /// The footer's buttons, and while one of them is running, what it is doing (ADR-129). The control
+    /// the reader pressed becomes its own progress indicator and the rest go quiet, so a `gh pr merge`
+    /// followed by a read — a couple of seconds in which the box otherwise looks untouched — is
+    /// visibly Clinic working rather than Clinic ignoring the click.
     private func mergeFooter(_ pr: PullRequest, _ status: PullRequestStatus) -> some View {
-        HStack(spacing: 7) {
+        let acting = prs.acting(for: ref)
+        // The pressed control's own title, replaced by what it is doing while it is the one running.
+        func title(_ control: PRStore.Acting.Control, _ idle: String) -> String {
+            acting?.control == control ? acting?.verb ?? idle : idle
+        }
+        return HStack(spacing: 7) {
             if pr.isDraft {
-                Button(host.readyTitle) {
+                Button(title(.ready, host.readyTitle)) {
                     confirm = PendingAction(title: host.readyTitle, message: "Mark \(host.reference(ref.number)) ready for review?") {
-                        await prs.perform(ref) { try await $0.markReady(ref) }
+                        await prs.perform(ref, .init(control: .ready, verb: "Marking ready…")) { try await $0.markReady(ref) }
                     }
                 }
+                .disabled(acting != nil)
             } else {
-                MergeSplitButton(host: host, method: prs.mergeMethod, enabled: status.canMerge) { method in
+                MergeSplitButton(host: host, method: prs.mergeMethod, enabled: status.canMerge,
+                                 busy: acting?.control == .merge ? acting?.verb : nil,
+                                 idle: acting == nil) { method in
                     confirmMerge(pr, method)
                 }
                 .help(status.mergeBlockedReason ?? "Merge into \(pr.baseRefName)")
                 if pr.autoMergeEnabled {
-                    Button(host.disableAutoMergeTitle) { Task { await prs.perform(ref) { try await $0.disableAutoMerge(ref) } } }
-                } else {
-                    Button(host.autoMergeTitle) {
-                        confirm = PendingAction(title: host.autoMergeTitle, message: "Merge \(host.reference(ref.number)) automatically when checks pass?") {
-                            await prs.perform(ref) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) }
+                    Button(title(.autoMerge, host.disableAutoMergeTitle)) {
+                        Task {
+                            await prs.perform(ref, .init(control: .autoMerge, verb: "Disabling…")) { try await $0.disableAutoMerge(ref) }
                         }
                     }
-                    .disabled(!status.canMerge)
+                    .disabled(acting != nil)
+                } else {
+                    Button(title(.autoMerge, host.autoMergeTitle)) {
+                        confirm = PendingAction(title: host.autoMergeTitle, message: "Merge \(host.reference(ref.number)) automatically when checks pass?") {
+                            await prs.perform(ref, .init(control: .autoMerge, verb: "Enabling…")) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) }
+                        }
+                    }
+                    .disabled(!status.canMerge || acting != nil)
                     .help(status.mergeBlockedReason ?? "Merge once the checks pass")
                 }
+            }
+            if let acting, acting.control != .merge {
+                ProgressView().controlSize(.small).scaleEffect(0.7)
             }
             Spacer(minLength: 0)
         }
         .controlSize(.small)
+        .animation(.easeInOut(duration: 0.15), value: acting)
         .padding(.horizontal, 11).padding(.vertical, 9)
         .background(art.palette.muted)
     }
@@ -267,7 +288,19 @@ struct PRPage: View {
     private func confirmMerge(_ pr: PullRequest, _ method: GitHubService.MergeMethod) {
         confirm = PendingAction(title: host.mergeTitle(method),
                                 message: "Merge \(host.reference(ref.number)) into \(pr.baseRefName) with \(host.mergeMethodTitle(method).lowercased())?") {
-            await prs.perform(ref) { try await $0.merge(ref, method: method, auto: false) }
+            await prs.perform(ref, .init(control: .merge, verb: mergingVerb(method))) {
+                try await $0.merge(ref, method: method, auto: false)
+            }
+        }
+    }
+
+    /// What the merge button calls itself while it runs. The method is named because the button was:
+    /// "Squashing…" after pressing "Squash and merge" is the same sentence in the progressive.
+    private func mergingVerb(_ method: GitHubService.MergeMethod) -> String {
+        switch method {
+        case .merge: "Merging…"
+        case .squash: "Squashing…"
+        case .rebase: "Rebasing…"
         }
     }
 
@@ -581,27 +614,44 @@ private struct ChecksFreshness: View {
 /// The service's merge button: its merge colour, white text, and a menu segment to pick the method for
 /// this merge (as on github.com) while the Settings method stays the default. Drawn by hand because
 /// macOS ignores `.borderedProminent` and `.tint` on a `Menu`.
+///
+/// While its own merge runs it *is* the progress indicator (ADR-129): a spinner and the method in the
+/// progressive replace the title, and the method menu goes with them — there is nothing to pick for a
+/// merge already on its way.
 private struct MergeSplitButton: View {
     let host: CodeHost
     let method: GitHubService.MergeMethod
     let enabled: Bool
+    /// Non-nil while this button's own merge is running: what to call it.
+    let busy: String?
+    /// Nothing in the footer is running. False while a *sibling* action runs, which disables this
+    /// button without dressing it as the one working.
+    let idle: Bool
     let merge: (GitHubService.MergeMethod) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            Button { merge(method) } label: {
-                Text(host.mergeTitle(method)).padding(.leading, 10).padding(.trailing, 9).frame(maxHeight: .infinity)
-            }
-            Rectangle().fill(.black.opacity(0.2)).frame(width: 1)
-            Menu {
-                ForEach(GitHubService.MergeMethod.allCases, id: \.self) { m in
-                    Button(host.mergeMethodTitle(m)) { merge(m) }
+            if let busy {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).scaleEffect(0.65).tint(.white).frame(width: 12, height: 12)
+                    Text(busy)
                 }
-            } label: {
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).frame(width: 22).frame(maxHeight: .infinity)
+                .padding(.leading, 9).padding(.trailing, 11).frame(maxHeight: .infinity)
+            } else {
+                Button { merge(method) } label: {
+                    Text(host.mergeTitle(method)).padding(.leading, 10).padding(.trailing, 9).frame(maxHeight: .infinity)
+                }
+                Rectangle().fill(.black.opacity(0.2)).frame(width: 1)
+                Menu {
+                    ForEach(GitHubService.MergeMethod.allCases, id: \.self) { m in
+                        Button(host.mergeMethodTitle(m)) { merge(m) }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).frame(width: 22).frame(maxHeight: .infinity)
+                }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
         }
         .buttonStyle(.plain)
         .font(.callout.weight(.semibold))
@@ -610,8 +660,10 @@ private struct MergeSplitButton: View {
         .background(host.art.palette.mergeButton, in: RoundedRectangle(cornerRadius: 6))
         .contentShape(RoundedRectangle(cornerRadius: 6))
         .fixedSize()
-        .opacity(enabled ? 1 : 0.5)
-        .disabled(!enabled)
+        // A merge in flight keeps full colour — it is the thing happening; a sibling's action dims it
+        // along with everything else it disables.
+        .opacity(busy != nil || (enabled && idle) ? 1 : 0.5)
+        .disabled(!enabled || !idle)
     }
 }
 

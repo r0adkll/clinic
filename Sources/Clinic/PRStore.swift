@@ -302,7 +302,29 @@ final class PRStore {
         Task { await loadDiff(ref) }
     }
 
-    func perform(_ ref: PullRequestRef, _ op: @escaping @Sendable (GitHubService) async throws -> Void) async {
+    /// A merge-box action the reader started and has not seen the end of (ADR-129): which control
+    /// they pressed, and what to call what it is doing while it runs.
+    struct Acting: Equatable {
+        enum Control: Equatable { case merge, ready, autoMerge }
+        let control: Control
+        let verb: String
+    }
+
+    /// The action in flight per pull request. One at a time: `gh pr merge` and `gh pr ready` both end
+    /// in a read of the same pull request, and two of them racing would show the reader whichever
+    /// landed last.
+    private(set) var acting: [String: Acting] = [:]
+
+    func acting(for ref: PullRequestRef) -> Acting? { acting[ref.id] }
+
+    /// Runs a write against the forge and re-reads the pull request, holding `acting` across both —
+    /// the merge is not done when `gh` returns but when the panel can show the state it produced, and
+    /// that whole span is what the button has to account for (ADR-129).
+    func perform(_ ref: PullRequestRef, _ action: Acting,
+                 _ op: @escaping @Sendable (GitHubService) async throws -> Void) async {
+        guard acting[ref.id] == nil else { return }
+        acting[ref.id] = action
+        defer { acting[ref.id] = nil }
         do { try await op(service); errors[ref.id] = nil } catch { errors[ref.id] = "\(error)" }
         await refresh(ref)
     }

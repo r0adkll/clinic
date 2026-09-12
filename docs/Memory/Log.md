@@ -3103,3 +3103,35 @@ removed.
 
 418 ClinicCore tests pass (12 new); `make build` passes. Smoke dir, stub `gh` and its scratch files
 deleted; `com.r0adkll.clinic` has no new keys (`ClinicPRShowTree` is at its default `1`).
+
+## 2026-09-11 (cont.) — A merge in flight says so
+
+User: *"On the PR panel when clicking merge on a PR there is no loading indication and it seems like
+it did take until it updates and reflects the merge state. Can we better show the processing time
+when using this action?"*
+
+Recorded as [[ADR-129 A Merge In Flight Says So]], linked from the design tree.
+
+- `PRStore.perform` now takes an `Acting` — which control was pressed and the verb for it — and holds
+  it across **both** the `gh` write and the read that follows (ADR-127), because the merge is done
+  when the panel can show what it produced, not when `gh` returns. A `@State` flag in `PRPage` could
+  not have spanned that, the store being what redraws the page.
+- The merge button *is* the indicator: same place, same size, same green, with a white spinner and the
+  method in the progressive — *Squashing…* / *Rebasing…* / *Merging…*, one tense on from the title
+  that was pressed. Its chevron goes while it runs.
+- Every other footer action is disabled for the duration, and the one running shows its own verb
+  (*Marking ready…*, *Enabling…*, *Disabling…*). `perform` refuses a second write per pull request
+  itself, so the rule does not live in the buttons.
+- No optimistic state: nothing claims *Merged* before GitHub says so. Failures still print under the
+  page as before.
+
+**Verified** in a smoke instance (`clinic-mrg`, its own App Support and `CLAUDE_CONFIG_DIR`, seeded
+with a `pr-link` to a fake `octocat/example#7`) against a **stubbed `gh`** on `PATH` whose
+`pr merge` sleeps six seconds and then flips `pr view` to `MERGED`. Guarded `.cghidEventTap` clicks:
+merge button, then the alert's *Squash and merge*.
+- t+2s and t+5s: the footer read *⟳ Squashing…* in green with *Enable auto-merge* dimmed;
+- t+10s: the merge box was *Merged into main / from merge-progress*, the footer gone with the PR
+  settled, and the header pill purple *Merged*.
+
+`make build` passes. Smoke dirs, stub `gh` and its scratch files deleted; `com.r0adkll.clinic` has no
+new keys (`ClinicPRShowTree` still at its default `1`).
