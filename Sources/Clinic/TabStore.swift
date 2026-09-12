@@ -934,9 +934,9 @@ final class TabStore {
 
     /// ⌘⇧I: the attachments pane.
     func toggleAttachments(_ tab: Tab? = nil) { showPane(.attachments, in: tab) }
-    /// Set when the *reader* opened the Grill pane — the one case where it may take the keyboard
-    /// (ADR-131's rule, kept by ADR-132). `ask_round` opens the pane through `showPane` directly and
-    /// never sets this, so a round arriving mid-sentence cannot eat the rest of it. The pane clears it.
+    /// Set whenever the Grill pane is opened — by the reader, or by a round arriving (ADR-139, which
+    /// reversed ADR-131's "never on arrival"). A round is the agent stopping and waiting, so the pane
+    /// takes the keyboard rather than making the reader reach for it every round. The pane clears it.
     var grillWantsKeyboard = false
 
     func toggleGrill(_ tab: Tab? = nil) {

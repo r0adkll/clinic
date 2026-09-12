@@ -3542,3 +3542,24 @@ removed rather than shipped.
 - `Logger.info` is **not persisted** to the log store, so `log show` returned nothing until the trace
   was raised to `.error`. Instrumenting early — which I failed to do for the arrow keys too — is what
   finally produced the `llo` evidence.
+
+## 2026-09-12 (cont.) — a round takes the keyboard
+
+User: *"One change to make from a previous decision is that the grill panel should take focus when
+shown."* Recorded as [[ADR-139 A Round Takes The Keyboard]], which supersedes that part of ADR-131.
+
+Worth noting because it reverses a decision **the user themselves chose** in the very first round:
+asked "when a round arrives while you're mid-sentence, should the pane take the keyboard?", they picked
+*"Never on arrival"*. Two rounds of real use later they want the opposite, and they are right — the
+friction is paid every single round, while the sentence-eating it avoided was hypothetical. A decision
+made before using a thing is a guess, however well argued; this is the argument that beat it.
+
+The two cases turned out to be less alike than ADR-131 assumed, which is the part worth keeping:
+`show_image` is the agent *showing* something while the reader may want to keep typing; `ask_round` is
+the agent **stopping and waiting** — it ends its turn immediately after, so there is no work in flight
+for a half-typed message to belong to.
+
+One line: the tool handler calls `toggleGrill` instead of `showPane`, so the pane opens exactly the way
+the reader's own ⌘⇧K opens it. Verified with the terminal deliberately holding focus first (the case
+the old rule protected): focus moved from the terminal to the pane, and ↓ then ⏎ answered a question
+with no click in between. `show_image` still leaves the keyboard alone, so ADR-107 is untouched.

@@ -107,7 +107,10 @@ final class MCPToolService {
             catch { return MCPToolSpec.textResult("Could not read the round: \(error)", isError: true) }
 
             sessions?.postGrillRound(round, to: sessionId)
-            tabs?.showPane(.grill, in: tab)
+            // Opens the pane **and takes the keyboard**, by the same path the reader's own ⌘⇧K takes
+            // (ADR-139, over ADR-131). A round is the agent stopping and waiting, not showing something
+            // in passing, so there is one way the pane opens and one thing that happens when it does.
+            tabs?.toggleGrill(tab)
             let count = round.questions.count
             let noun = count == 1 ? "question" : "questions"
             // Same attention path as `notify_user`: an unanswered round is the canonical "needs you".
