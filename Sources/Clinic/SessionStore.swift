@@ -177,6 +177,43 @@ final class SessionStore {
 
     func workItems(for id: SessionID) -> [WorkItemRef] { state.workItemLinks[id] ?? [] }
 
+    // MARK: Grill rounds (ADR-131)
+
+    /// Records a round the agent posted with `ask_round`. Capped at `GrillRound.maxPerSession`, oldest
+    /// dropped first: the history is there to be re-read during a grill, not kept forever.
+    func postGrillRound(_ round: GrillRound, to id: SessionID) {
+        update { s in s.postGrillRound(round, to: id) }
+    }
+
+    func grillRounds(for id: SessionID) -> [GrillRound] { state.grillRounds[id] ?? [] }
+
+    func discardGrillRound(_ roundId: UUID, in id: SessionID) {
+        update { s in s.discardGrillRound(roundId, in: id) }
+    }
+
+    /// The round still waiting for the reader — the newest one, since the frontier only moves forward.
+    func openGrillRound(for id: SessionID) -> GrillRound? { state.grillRounds[id]?.last(where: \.isOpen) }
+
+    /// Answering a question, or marking the round sent. A round that has gone is not recreated.
+    func updateGrillRound(_ roundId: UUID, in id: SessionID, _ mutate: @escaping @Sendable (inout GrillRound) -> Void) {
+        update { s in
+            guard var rounds = s.grillRounds[id], let i = rounds.firstIndex(where: { $0.id == roundId }) else { return }
+            mutate(&rounds[i])
+            s.grillRounds[id] = rounds
+        }
+    }
+
+    /// The reader answered in the terminal instead of the pane, so every open round becomes history
+    /// rather than a task the pane keeps claiming is waiting (ADR-131).
+    func markGrillRoundsAnsweredElsewhere(for id: SessionID, at date: Date = Date()) {
+        guard state.grillRounds[id]?.contains(where: \.isOpen) == true else { return }
+        update { s in
+            guard var rounds = s.grillRounds[id] else { return }
+            for i in rounds.indices where rounds[i].isOpen { rounds[i].outcome = .answeredElsewhere(date) }
+            s.grillRounds[id] = rounds
+        }
+    }
+
     /// Hides the project and its sessions until something re-registers the path (ADR-050).
     func removeProject(_ project: Project) {
         update { s in

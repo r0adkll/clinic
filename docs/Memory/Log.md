@@ -3171,3 +3171,286 @@ the shell tab closed it to the home screen.
 
 `make build` passes. Smoke dir deleted; `defaults read com.r0adkll.clinic` is byte-identical before
 and after the run.
+
+## 2026-09-12 — the Grill pane
+
+User: *"When using the grilling or grill-me skills, which I love, the question / answer format leaves a
+lot to be desired… rounds can be surfaced to the harness UI in a way where I can easily just accept the
+proposed answer to a question, or enter an answer of my own, answer with multiple choice, navigate
+through them with a keyboard."*
+
+Designed, not yet built. Recorded as [[ADR-131 The Grill Pane Answers A Round]], linked from the design
+tree. Four forks put to the user and settled: the parser is a **fallback** as well as the tool, the pane
+**never** takes focus when a round arrives, it is called **Grill**, and a question carries
+title/body/recommendation/**choices** (no design tree in the schema).
+
+- The shape that decided everything else: `ask_round` **posts and returns**; the answers go back as the
+  user's next message via `sendPaste` + Return. A blocking tool was rejected on ADR-056's 15 s
+  `tools/call` timeout *and* on shape — the session would sit busy while the user thinks, `⎋` would
+  abort the round, and the interview would live in a tool call instead of the JSONL that ADR-059
+  replays. The agent still prints the round as prose, so the terminal stays the record and the pane is
+  only the interface.
+- Grounded in the source before writing any of it down: `MCPToolService.call` already opens a pane from
+  a tool (`show_image` → `.attachments`) and notifies via `tabs?.notify(…, kind: .needsInput)`;
+  `GhosttySurfaceView.sendPaste` is bracketed-paste and `sendPastedLine` is proven by `RunStore`;
+  `TranscriptTurns` already yields `.assistant(text, date)`, so the fallback parser needs no new reader;
+  `Stop` is an installed hook (ADR-027), so turn-end is its trigger; `zoomPanel` (⌘⌥⇧J) already covers a
+  long round, so no new focus mode; `cmd+shift+k` is free in `ShortcutAction.defaultChord`.
+- The keyboard is **two modes** — this is the first pane that has to accept typing, so ADR-107's flat
+  keymap cannot carry it. ADR-107's measured constraints still bind: bare keys in one `NSView`'s
+  `keyDown`, `⌘⏎`/`⌘C` as menu key equivalents enabled only while the pane is in front, and
+  `panelHoldsKeyboard` to stop the agent surface reclaiming focus on re-render.
+- Flagged in the ADR rather than glossed: this is the first thing in Clinic that *composes* text for the
+  agent surface, which is the edge of what ADR-055 left standing — the next feature that wants to send
+  prose has to argue for itself rather than cite this one.
+
+Follow-up the same day: *"How does this actually hook into the grill skill(s)? Do we need to modify /
+replace them?"* — worth the elaboration, because the ADR's first pass had the weakest layer on record as
+the escalation. Rewrote that section:
+
+- **Nothing is modified.** `grilling` governs content and process (tree, frontier, numbering,
+  recommendations, wait for answers); Clinic governs presentation and return path. Orthogonal, so there
+  is no instruction to override.
+- **The channel already ships and is verified, not assumed.** `clinic-hook`'s `initialize` already
+  returns an `instructions` string (`Sources/clinic-hook/main.swift:110`) that already carries
+  *behavioural* direction about `notify_user` and `set_session_title` — and a Clinic-hosted session,
+  asked what it could see, held that sentence byte-identical under `# MCP Server Instructions / ##
+  clinic`. One sentence about `ask_round` joins it. This **demotes `--append-system-prompt`**: same
+  effect, but layer 2 is already shipping and needs no change to ADR-016's launch shape.
+- One real cost found: the shim answers `initialize` from a **hardcoded** string, while ADR-056 does not
+  list a disabled tool — so instructions naming a switched-off `ask_round` would lie. The shim must ask
+  Clinic for its instructions, falling back to the static string.
+- Two hook-ins rejected in writing: forking the skill into a `clinic-skills` marketplace plugin (legal
+  under ADR-084's amendment, but it forks a skill the user likes and `/grill-me` keeps pointing at the
+  unadapted one — kept as the escape hatch), and a `UserPromptSubmit` injection, which **cannot work as
+  installed**: ADR-015 chose `async: true` so the helper never delays the CLI, and an async hook's
+  stdout is never awaited, so making it inject means putting a socket round trip on every prompt the
+  user submits.
+
+No code written, no `make build` run — the ADR is the deliverable. Next: ClinicCore models + the answer
+composer (pure, unit-testable), then the tool handler, then the pane and its responder.
+
+## 2026-09-12 (cont.) — the Grill pane, built
+
+[[ADR-131 The Grill Pane Answers A Round]] implemented and marked accepted. Its Corrections and
+Verification sections carry the detail; what is worth remembering here:
+
+- **`ClinicCore/Grill/`** holds the models, the tolerant `ask_round` argument decoder and
+  `GrillAnswerComposer` — the answer block and the Markdown export are pure functions, because the
+  agent is their only reader and a screenshot cannot check them. 32 tests, 450 in the suite.
+- The decoder is **tolerant about shape, strict about substance**: `question`/`details`/`options`,
+  plain-string choices and a lone question object all decode; a round with nothing answerable is an
+  error, because an empty pane is worse than something the agent can retry.
+- **Three bugs found by running it**, all in the Corrections section: a click that did not bring the
+  keyboard (ADR-107's `focusViewer()` trap in a new place — `j` typed a `j` into the agent's prompt),
+  nested `ForEach`es colliding on `Q1` so round 4's header sat over round 3's questions, and the
+  discovery that two rounds could be open at once. The last one added a fourth outcome,
+  **superseded**, and moved the invariant into `ClinicState.postGrillRound` where a test can see it.
+- **`⌘C` had to be given up**: ADR-107 earned Edit ▸ Copy by owning an `NSView`; this pane's Navigate
+  keyboard is a SwiftUI `.focusable()`, which has no `copy(_:)` hook, and a Panel item taking `⌘C`
+  would shadow the terminal's. Copy a round with **⌘⌃C** or the header button.
+- Verified against a **shell, never a live agent turn** — the smoke instance resumes a real session, so
+  its `claude` was ended before pressing Send rather than posting a real message to the user's
+  transcript.
+
+Not built yet, deliberately: the `Stop`-hook transcript parser (ADR-131's safety net). It goes last so
+that a real grill can first say how often the model reaches for the tool on its own — which decides
+whether the parser is a rare rescue or the main path.
+
+## 2026-09-12 (cont.) — a real grill, and the pane becomes a wizard
+
+Ran the Grill pane on itself: four rounds, 23 questions, about what ADR-131 had deferred or left
+inconsistent. Recorded as [[ADR-132 The Grill Pane Is A Wizard]], superseding **ADR-131's pane shape
+only** — its transport, tool, schema, supersede rule and corrections all stand.
+
+**The count, which was the point of running it.** 23 questions, 21 accepted recommendations, 2
+overrides — and both overrides came back as choice ids, so nothing needed re-parsing. Zero malformed
+payloads, zero rounds lost, the tool reached for unprompted every round. The schema risk flagged before
+building ("if the model fills `choices` unreliably the pane is much less fun") did not materialise.
+**Adoption stays unmeasured**: I built the tool, so my reaching for it proves nothing about a fresh
+session. The parser was dropped in round 1 regardless, so that is now a confidence question, not a
+decision.
+
+**What the grill changed**, none of which I would have reached alone:
+
+- *"Show one question at a time"* — an override, and the expensive one. It retired the card scroll, the
+  flat row list, the body fold and the always-present Send, and opened a branch of questions the scroll
+  never had to answer (strip, review step, where Send lives, what Accept all does with you).
+- Two ADR-131 claims turned out to be **false and were caught by having to defend them**: the home
+  screen's *what needs you* never knew about rounds (claimed in Consequences, never built), and "the
+  terminal is the record" was only half true — checking the JSONL showed the `tool_use` input already
+  carries every body, so the prose is for human scrollback only. The terminal copy is now abbreviated,
+  which is why round 4's write-up is a third the size of round 1's.
+
+**Three bugs found by driving it, not reading it** (two in ADR-132's Corrections):
+
+- `⏎` contradicted the hint printed directly above it on a multi-select — the rule was *recommendation
+  or type*, with no case for "this question already has an answer, move on".
+- Picking a round from the rounds menu undid itself: `reset()` cleared `replayingRoundId` and also ran
+  from the `onChange` that fires when the round changes, so the selection cancelled itself in a loop.
+- Drafts were keyed by question id alone. Every round has a `Q1`, so a superseded round's half-written
+  paragraph would have leaked into the next round's first question. Keyed by round **and** question now.
+
+**A process note worth keeping**: the smoke driver's "guarded clicks" were a comment, not code, and a
+keystroke reached another app mid-run. It now refuses to post anything unless the smoke Clinic is
+frontmost. Also worth remembering — `-ClinicOpenSessionOnLaunch` *resumes* a real session, so its
+`claude` must be ended before testing Send, or the pane posts a real message into the user's transcript.
+
+`make build` clean, 450 ClinicCore tests pass. Smoke dir removed; `com.r0adkll.clinic` gained no keys.
+
+## 2026-09-12 (cont.) — history is a list, and a sample round
+
+User: *"For historical rounds, how do you navigate through the questions? For history should we stick to
+this wizard style? It would probably make more sense to display historical rounds as a list. Also it
+would be nice if I had an easy way to create a mock round of questions for testing."*
+
+The first question had an embarrassing answer, found by reading the code rather than guessing: **a
+historical round was unnavigable.** ADR-132 said a round you cannot answer is shown read-only, and the
+implementation did that by disabling the wizard — `ProgressStrip` got `.disabled(!actionable)`, the key
+handler `guard isActionable else { return .ignored }`, and the footer lost Back/Next. Six questions
+stored, one reachable. Recorded as [[ADR-133 History Is A List, And A Sample Round]].
+
+- **History is a list**, not a disabled wizard. Every argument for one-question-at-a-time is an argument
+  about *answering*; what is left over is reading, which wants everything visible. Rows carry the id,
+  title and `answerPhrase`, and open in place for the body, recommendation and picked choices. `j`/`k`
+  move, `⏎`/`Space` open — `Space` gets a meaning back, which ADR-132 had deliberately left unbound.
+- Review and history are now near-twins and **share `GrillAnswerRow`**; they differ only in what
+  pressing a row does (review jumps back to change, history opens to read).
+- **A sample round** (`GrillRound.sample()`, Panel ▸ Post a Sample Round, and a button on the empty
+  state) posts through the same `postGrillRound` the tool uses, so it exercises what it demonstrates.
+  One question of every shape: recommendation-only, single-select, multi-select, freeform.
+- That forced a third change nobody asked for: an unanswered sample would sit in the home screen's
+  *what needs you* forever, because **a round could only ever close by being sent or superseded**. So an
+  open round gains **Discard**, which removes it — "discarded" means gone, and the questions are still
+  in the terminal. It is the first thing in this pane that destroys state, so it has a plain name, sits
+  in the footer, and has no shortcut.
+
+**Verified, but not with pixels.** `screencapture` failed and the log gave the real reason —
+*"The user declined TCCs for application, window, display capture"*: **Screen Recording permission for
+Claude Code had been declined**, which also explains System Settings jumping forward. Worth recording
+honestly: synthetic Escape keypresses were being posted around that moment (dismissing a Clinic dialog,
+then Mission Control) and one of them may have landed on that prompt.
+
+So this was driven through the **accessibility tree** instead — a small tool that reads the window's
+labels and presses named controls. Deterministic rather than blind, and better suited to this change
+than screenshots were, because ADR-133 is about *which questions are reachable*:
+
+- the wizard's own shape read back from the tree (pips `1 2 3 4` + review, `Accept`/`Skip`, footer
+  `Back | Next | Accept all | Discard` with no Send);
+- **Panel ▸ Post a Sample Round** put all four shapes in the state file through the real path;
+- **Discard** removed the round with no empty entry left, and the empty state's button posted another;
+- Accept all → Skip → Skip → review → **Send 4 answers** recorded four answers and marked it sent;
+- **the fix**: all four question titles on screen at once, where exactly one used to be reachable; a
+  row revealed its own body and no other's, and collapsed again;
+- the history keyboard observed by *which row opens*: `j`+`⏎` → Q2, `j j`+`⏎` → Q4, `k k k`+Space → Q1.
+
+**Technique worth keeping**: AX-driving beats coordinate clicking for anything with a name — it cannot
+land on the wrong control, it needs no screenshot to aim, and a missing item fails loudly instead of
+clicking whatever is underneath. Only appearance still needs pixels.
+
+`make build` clean, 455 tests pass (five new).
+
+## 2026-09-12 (cont.) — the keymap was firing inside the reader's sentences
+
+User: *"The keyboard shortcuts interfere with direct text input… Also, if a question was skipped should
+we make it visually distinct in the bar? Also, if we navigate back to an answered question its hard to
+see in the timeline bar which one is selected."* All three real, recorded as
+[[ADR-134 The Answer Field Owns The Keyboard]].
+
+- **The serious one**: ADR-132 claimed the answer field being an `NSTextView` separated the two modes by
+  itself — the field takes AppKit's first responder, SwiftUI's focus goes false, `.onKeyPress` stops.
+  **It does not.** The two focus systems do not talk, so `navigating` stayed true and `navigate()` —
+  which had *no mode check at all* — kept answering keys while the reader typed. `s` skipped the very
+  question being answered. The mode was in the model the whole time and was never consulted. One guard.
+- **Skipped now reads apart from answered** (three pip fills: faint grey / solid grey / solid accent),
+  and **current is a halo outside the disc** — it used to be an accent ring drawn on an accent fill,
+  which is why selecting an answered question looked like nothing happened.
+
+**Arrows: six attempts, none worked, all reverted.** `.onKeyPress` on the scroll view, on its container,
+and with the four keys named explicitly; an `NSView` in `background` (never reached — `keyDown` walks
+*up* from the first responder); a guarded local `NSEvent` monitor; and `.focusable(false)` on the scroll
+view after the AX tree showed the focused element was an **`AXScrollArea`**. Focus moved to the
+container and arrows still did nothing. The real cause: this pane's keyboard is SwiftUI-focus-based
+while AppKit's first responder is elsewhere, and arrows resolve in AppKit first. Getting them needs the
+pane to own a real `NSView` responder — ADR-107's pattern for the Images pane — which is a refactor, not
+a bug fix. `j`/`k` work and are what the header now advertises.
+
+**Worth remembering about this session's technique**: pips carry their state in an accessibility label
+(`"Q3 — skipped"`), added for VoiceOver and immediately worth it — with Screen Recording still declined
+for Claude Code, that label is the only reason the strip could be verified at all. Putting state into
+accessibility labels makes UI checkable without pixels, and is the thing to do by default.
+
+`make build` clean, 455 tests pass. Appearance (the three fills, the halo) still unseen.
+
+## 2026-09-12 (cont.) — the arrow keys were arriving all along
+
+Did the responder refactor ADR-134 asked for. It worked, and it immediately proved ADR-134's diagnosis
+wrong. Recorded as [[ADR-135 The Grill Pane Owns Its Keyboard]], which supersedes ADR-134's arrows
+section; the rest of ADR-134 stands.
+
+**The actual bug was one line of mine, not a platform limit:**
+
+```swift
+guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
+```
+
+**An arrow key carries `.function` and `.numericPad`.** That guard threw every arrow away before
+anything read which key it was. It had sat at the top of this keymap since ADR-131 — which is why the
+`.upArrow`/`.downArrow` cases below it had never once fired — and I then reproduced it faithfully in the
+AppKit rewrite, so attempts 4–6 failed for the same reason as 1–3.
+
+**Six experiments against the wrong hypothesis, each failure read as confirmation.** Not one of them
+logged what actually arrived. A single print in `keyDown` would have ended it at the first attempt.
+Worth keeping as a rule: *"the platform will not deliver this event" needs the event proved absent, and
+"my handler did nothing" is not that proof.*
+
+The refactor is kept even though it was not needed for the arrows, because it fixes the thing ADR-134
+*did* get right: the pane's keyboard was SwiftUI `@FocusState` while the answer field's was AppKit's
+first responder, and the two never talk — which is how the keymap came to fire inside the reader's
+sentences. `model.hasKeyboard` is now set from `becomeFirstResponder`/`resignFirstResponder`, so there
+is one source of truth instead of a mode guard papering over two. Same shape as ADR-107's Images pane.
+
+Two smaller traps on the way, both in the new responder:
+- a background `NSView` never receives `keyDown` unless something calls `makeFirstResponder` — the chain
+  walks *up from* the first responder, so a view nobody focused is not on it (ADR-134's attempt 4);
+- `updateNSView` refused to take focus whenever an `NSTextView` held it, a guard protecting typing that
+  fired on exactly the case it existed for — after `⎋` the field still held first responder, so the
+  pane never got its keyboard back. The protection belongs in the `wants` condition, which already
+  requires Navigate mode.
+
+Verified through the accessibility tree: all four arrows navigate all three keyboards (wizard, review,
+history); typing *"skip just 1 second"* still changes nothing; `⎋` hands the keyboard back and `↓` moves
+again; `⇥` commits; `⌘⏎` still sends from a question. `make build` clean, 455 tests pass. Appearance
+(pip fills, halo) still unseen — Screen Recording is still declined for Claude Code.
+
+## 2026-09-12 (cont.) — a typed answer now counts as one
+
+User: *"its not obvious (or seems to even work) that typing in an answer to a question 'accepts' it or
+answers it. Also, we could improve the UI of this input box…"* Recorded as
+[[ADR-136 Typing An Answer Is Answering]].
+
+**The pane was contradicting itself**, which is worth stating exactly. A typed answer sat in
+`GrillPaneModel.drafts` until something committed it, and only `⇥` ever did — `⎋` and clicking away
+left it uncommitted. Meanwhile the strip, the badge and the header count read `round.answers` (so the
+question looked untouched) while the footer's *Send n of m* **and Send itself** read `withDrafts(round)`
+(so it was counted and sent). The reader typed a paragraph, the pane said nothing had been answered,
+and it went to the agent anyway.
+
+The cause was a good rule applied in the wrong place: ADR-131 kept drafts out of `ClinicState` because
+writing the state file per keystroke would be absurd — an argument about **persistence** that was
+allowed to become an argument about **display**. Now one round is computed for display with drafts
+folded in and everything visible reads it; persistence still waits until the reader leaves the field.
+
+Also: `⎋` commits (it means *done, stay here*, against `⇥`'s *done, move on*); the placeholder names the
+key that opens the box (*Press e to write your own answer*); the focused box shows *⇥ next · ⎋ done*
+under it; the border moved out of `NSScrollView.lineBorder` into SwiftUI so it can go accent on focus;
+and **Skip left the box's side** — it was reading as a peer of typing when it is the third of the three
+answers, so it sits below now as *Skip · s*.
+
+**A near-miss worth remembering**: restructuring `QuestionStep` cut by position between two markers and
+took `ReviewStep`, `HistoryList`, `GrillAnswerRow` and `ReadOnlyBanner` with it. The build caught it, but
+`GrillPane.swift` is still untracked — there was no history to restore from, only rewriting by hand.
+**Cut by the boundaries of the thing being replaced, not by span**, and especially in files git has
+never seen. Committing this work would remove the hazard entirely.
+
+`make build` clean, 455 tests pass. Appearance still unseen — Screen Recording remains declined.

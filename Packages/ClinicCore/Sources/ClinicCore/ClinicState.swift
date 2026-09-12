@@ -44,6 +44,10 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var watchedPullRequests: Set<String> = []
     /// The device each project's runs target, per platform (ADR-124): project → platform → `RunDevice.id`.
     public var runDeviceByProject: [String: [String: String]] = [:]
+    /// Rounds the agent posted with `ask_round`, newest last, capped at `GrillRound.maxPerSession`
+    /// (ADR-131). Persisted like `attachments` so a grill's decisions survive a relaunch — the pane
+    /// itself is not persisted (ADR-079), only what it shows.
+    public var grillRounds: [SessionID: [GrillRound]] = [:]
 
     public init() {}
 
@@ -53,6 +57,29 @@ public struct ClinicState: Codable, Sendable, Equatable {
         guard !path.isEmpty else { return }
         removedProjects.remove(path)
         if projectsAddedAt[path] == nil { projectsAddedAt[path] = date }
+    }
+
+    /// Records a round the agent posted (ADR-131).
+    ///
+    /// Two rules live here rather than in the app so they can be checked without a window: **only the
+    /// newest round is open** — the pane's footer acts on one round, and two open rounds would give it
+    /// two with no way to say which Send meant which — and the history is capped, oldest dropped first,
+    /// so a session someone grills all day cannot grow this file without bound.
+    public mutating func postGrillRound(_ round: GrillRound, to id: SessionID) {
+        var rounds = grillRounds[id] ?? []
+        for i in rounds.indices where rounds[i].isOpen { rounds[i].outcome = .superseded(round.postedAt) }
+        rounds.append(round)
+        if rounds.count > GrillRound.maxPerSession { rounds.removeFirst(rounds.count - GrillRound.maxPerSession) }
+        grillRounds[id] = rounds
+    }
+
+    /// Throws a round away (ADR-133). It **removes** rather than recording a fifth outcome: "discarded"
+    /// means gone, and the questions are still in the terminal and the transcript if they are wanted.
+    /// This is the one thing in the Grill pane that destroys state, so only an explicit action calls it.
+    public mutating func discardGrillRound(_ roundId: UUID, in id: SessionID) {
+        guard var rounds = grillRounds[id] else { return }
+        rounds.removeAll { $0.id == roundId }
+        grillRounds[id] = rounds.isEmpty ? nil : rounds
     }
 
     /// Drops the registration without hiding the project's sessions: it disappears from the
@@ -77,7 +104,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -108,6 +135,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         trustedRunCommands = (try? c.decodeIfPresent(Set<String>.self, forKey: .trustedRunCommands)) ?? []
         runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
         watchedPullRequests = (try? c.decodeIfPresent(Set<String>.self, forKey: .watchedPullRequests)) ?? []
+        grillRounds = (try? c.decodeIfPresent([SessionID: [GrillRound]].self, forKey: .grillRounds)) ?? [:]
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 

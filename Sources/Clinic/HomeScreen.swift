@@ -78,6 +78,18 @@ private struct ResumeHome: View {
             items.append(WaitingItem(sessionId: id, title: tab.title, projectPath: tab.projectPath,
                                      reason: state == .waitingForPermission ? "Waiting for permission" : "Waiting for your input"))
         }
+        // A round nobody has answered is a "needs you" the hooks cannot see: the session is idle, its
+        // turn ended when it posted (ADR-132). This is the only place an open round is findable after a
+        // relaunch, since rounds persist but ADR-079 restores no panes.
+        for tab in tabs.tabs {
+            guard let id = tab.sessionId, !items.contains(where: { $0.sessionId == id }),
+                  let round = sessions.openGrillRound(for: id) else { continue }
+            let waiting = round.questions.count - round.answeredCount
+            guard waiting > 0 else { continue }
+            items.append(WaitingItem(sessionId: id, title: tab.title, projectPath: tab.projectPath,
+                                     reason: "\(waiting) question\(waiting == 1 ? "" : "s") waiting",
+                                     opensGrill: true))
+        }
         for agent in background.background where agent.isRunning && agent.needsAttention {
             guard let id = agent.sessionId, tabs.tab(for: id) == nil, let summary = sessions.sessions[id] else { continue }
             items.append(WaitingItem(sessionId: id, title: sessions.displayName(for: summary),
@@ -103,6 +115,8 @@ private struct WaitingItem: Identifiable {
     let title: String
     let projectPath: String
     let reason: String
+    /// Clicking fronts the Grill pane and hands it the keyboard, rather than only revealing the session.
+    var opensGrill = false
     var id: SessionID { sessionId }
 }
 
@@ -133,9 +147,13 @@ private struct WaitingRow: View {
     let item: WaitingItem
 
     var body: some View {
-        Button { tabs.reveal(sessionId: item.sessionId) } label: {
+        Button {
+            tabs.reveal(sessionId: item.sessionId)
+            // User-initiated navigation is exactly the case where the pane may take focus (ADR-132).
+            if item.opensGrill, let tab = tabs.tab(for: item.sessionId) { tabs.toggleGrill(tab) }
+        } label: {
             HStack(spacing: 10) {
-                Image(systemName: "hand.raised")
+                Image(systemName: item.opensGrill ? "flame" : "hand.raised")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.orange)
                     .frame(width: 20, height: 20)

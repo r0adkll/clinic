@@ -97,6 +97,19 @@ final class MCPShim {
         return obj
     }
 
+    /// Claude Code puts this in the session's system prompt, so it is worth a round trip: Clinic builds
+    /// it from the tools that are actually enabled, and advertising one the user switched off would be a
+    /// lie (ADR-131). The constant is the fallback for the app not answering — the shim must always
+    /// produce a valid `initialize` result and exit cleanly (ADR-056).
+    static let fallbackInstructions = "Tools provided by Clinic, the macOS app hosting this session. Use set_session_title once you know what the session is about. Use notify_user when you need the user's attention."
+
+    func instructions() -> String {
+        guard let r = relay(method: "instructions", params: [:]),
+              let result = r["result"] as? [String: Any],
+              let text = result["instructions"] as? String, !text.isEmpty else { return Self.fallbackInstructions }
+        return text
+    }
+
     func handle(_ msg: [String: Any]) {
         let method = msg["method"] as? String ?? ""
         let id = msg["id"]
@@ -107,7 +120,7 @@ final class MCPShim {
                 "protocolVersion": requested,
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": "clinic", "version": "0.1.0"],
-                "instructions": "Tools provided by Clinic, the macOS app hosting this session. Use notify_user when you need the user's attention and set_session_title once you know what the session is about.",
+                "instructions": instructions(),
             ]))
         case "notifications/initialized", "notifications/cancelled":
             break

@@ -320,6 +320,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 tabs.showPane(.attachments, in: tab)
             }
         }
+        // `-ClinicPostGrillRoundOnLaunch <path-to-json>` (ADR-131): posts a round onto the front session
+        // and opens the Grill pane, which otherwise needs an agent to call `ask_round`. The JSON is the
+        // tool's own arguments, so the key exercises the real decoder rather than a second one.
+        if let path = UserDefaults.standard.string(forKey: "ClinicPostGrillRoundOnLaunch"), !path.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(4))   // after `-ClinicOpenSessionOnLaunch` has a tab
+                guard let tab = tabs.selectedTab, let id = tab.sessionId,
+                      let data = FileManager.default.contents(atPath: path),
+                      let args = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let round = try? GrillRound.from(arguments: args) else { return }
+                sessions.postGrillRound(round, to: id)
+                tabs.showPane(.grill, in: tab)
+            }
+        }
         // `-ClinicOpenImageWindowOnLaunch <path>` (ADR-106): pop an image straight out into its own window.
         if let path = UserDefaults.standard.string(forKey: "ClinicOpenImageWindowOnLaunch"), !path.isEmpty {
             Task {
@@ -621,11 +635,17 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.canToggleBrowserList)
             Button("Quick Look Image") { tabs.quickLookFrontImage() }
                 .keyboardShortcut(key(.quickLookImage)).disabled(!tabs.isImagesPaneFront)
+            Button("Copy Grill Round as Markdown") { tabs.copyFrontGrillRound() }
+                .keyboardShortcut(key(.copyGrillRound)).disabled(!tabs.isGrillPaneFront)
+            // ADR-133: the only way to look at the pane without an agent, and the way to test it.
+            Button("Post a Sample Round") { tabs.postSampleGrillRound() }
+                .disabled(!tabs.canPostSampleGrillRound)
             Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)
             Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
             Button("Images") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
+            Button("Grill") { tabs.toggleGrill() }.keyboardShortcut(key(.toggleGrill)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Pull Request") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()
             Button("Next Panel Tab") { tabs.cyclePanelTab(1) }.keyboardShortcut(key(.nextPanelTab)).disabled((tabs.selectedTab?.panel.panes.count ?? 0) < 2)

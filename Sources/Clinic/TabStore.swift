@@ -768,6 +768,30 @@ final class TabStore {
         ImageQuickLook.shared.toggle(paths: rows.map(\.path), showing: gallery.selection(in: rows)?.path)
     }
 
+    /// Panel ▸ Post a Sample Round, and the pane's empty state (ADR-133). Goes through the same
+    /// `postGrillRound` the tool does, so it exercises what it demonstrates. Opens the pane and takes
+    /// the keyboard, because the reader asked for it.
+    func postSampleGrillRound(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab, let id = tab.sessionId else { return }
+        sessions.postGrillRound(.sample(), to: id)
+        toggleGrill(tab)
+    }
+
+    var canPostSampleGrillRound: Bool { selectedTab?.sessionId != nil }
+
+    /// ⌘⌃C: the front Grill pane's newest round as Markdown. Deliberately not ⌘C — that is Edit ▸ Copy,
+    /// and claiming it here would shadow copying in the terminal window-wide (ADR-131).
+    func copyFrontGrillRound() {
+        guard let tab = selectedTab, tab.panel.isFront(.grill), let id = tab.sessionId,
+              let round = sessions.grillRounds(for: id).last else { return }
+        copyGrillRound(round)
+    }
+
+    func copyGrillRound(_ round: GrillRound) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(GrillAnswerComposer.markdown(round), forType: .string)
+    }
+
     /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
     var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
     var isImagesPaneFront: Bool { selectedTab?.panel.isFront(.attachments) ?? false }
@@ -818,7 +842,7 @@ final class TabStore {
     /// Pane kinds the panel's "+" menu can still add for this tab.
     func availablePanes(for tab: Tab) -> [PanelPane.Kind] {
         var kinds: [PanelPane.Kind] = [.terminal, .diff, .files]
-        if tab.sessionId != nil { kinds.append(.attachments) }
+        if tab.sessionId != nil { kinds += [.attachments, .grill] }
         kinds += pullRequests(for: tab).map { PanelPane.Kind.pr($0) }
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
@@ -834,6 +858,12 @@ final class TabStore {
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Images (\(count))" : "Images"
         case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
+        case .grill:
+            // The count on the chip is what still needs the reader, which is the only number that
+            // would make them open the pane (ADR-131).
+            let waiting = tab.sessionId.flatMap { sessions.openGrillRound(for: $0) }
+                .map { $0.questions.count - $0.answeredCount } ?? 0
+            return waiting > 0 ? "Grill (\(waiting))" : "Grill"
         default: return kind.defaultTitle
         }
     }
@@ -863,6 +893,9 @@ final class TabStore {
         case .attachments:
             guard tab.sessionId != nil else { return nil }
             pane.images = ImageGallery()
+        case .grill:
+            guard tab.sessionId != nil else { return nil }
+            pane.grill = GrillPaneModel()
         case .pr, .run:
             break
         }
@@ -901,6 +934,19 @@ final class TabStore {
 
     /// ⌘⇧I: the attachments pane.
     func toggleAttachments(_ tab: Tab? = nil) { showPane(.attachments, in: tab) }
+    /// Set when the *reader* opened the Grill pane — the one case where it may take the keyboard
+    /// (ADR-131's rule, kept by ADR-132). `ask_round` opens the pane through `showPane` directly and
+    /// never sets this, so a round arriving mid-sentence cannot eat the rest of it. The pane clears it.
+    var grillWantsKeyboard = false
+
+    func toggleGrill(_ tab: Tab? = nil) {
+        showPane(.grill, in: tab)
+        grillWantsKeyboard = true
+    }
+
+    /// Whether a Grill pane is the one on screen — the menu's Grill verbs are enabled only then, the
+    /// way ADR-107's image verbs are (ADR-131).
+    var isGrillPaneFront: Bool { selectedTab?.panel.isFront(.grill) ?? false }
 
     /// PR refs known for a tab's session (from the transcript).
     func pullRequests(for tab: Tab) -> [PullRequestRef] {
@@ -983,6 +1029,12 @@ final class TabStore {
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         let endedTurn = event.hookEventName == "Stop"
         if endedTurn { runs.turnEnded(in: tab, snapshots: snapshots) }
+        // The reader answered a round in the terminal rather than in the pane, so the pane's copy
+        // becomes history instead of going on claiming it is waiting (ADR-131). Send marks the round
+        // sent synchronously before the paste reaches the CLI, so a round still open here was not ours.
+        if event.hookEventName == "UserPromptSubmit" {
+            sessions.markGrillRoundsAnsweredElsewhere(for: event.sessionId)
+        }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }

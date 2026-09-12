@@ -122,11 +122,70 @@ public struct MCPToolSpec: Sendable, Identifiable, Hashable {
         MCPToolSpec(name: "run_in_terminal", description: "Type a shell command into the user's shell panel beside this session (not your own tool shell). The user sees it run. Returns immediately.", schema: #"{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"#, defaultEnabled: false),
         MCPToolSpec(name: "attach_pr", description: "Attach a GitHub pull request URL to this session so Clinic shows its status and page.", schema: #"{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"#, defaultEnabled: true),
         MCPToolSpec(name: "start_session", description: "Start a sibling Claude Code session in Clinic (background tab) with an initial prompt, optionally in another directory.", schema: #"{"type":"object","properties":{"prompt":{"type":"string"},"directory":{"type":"string"},"model":{"type":"string"}},"required":["prompt"]}"#, defaultEnabled: true),
+        // ADR-131. The description carries the trigger *and* the two ways this gets used wrongly:
+        // one call per question instead of per round, and treating the tool as a replacement for
+        // writing the round out (which would leave the transcript, and so replay, empty).
+        MCPToolSpec(
+            name: "ask_round",
+            description: """
+                Post a round of questions to the user as a form in Clinic's Grill pane, where they can accept your recommended answer with one key, pick from choices, or type their own.
+                Use this whenever you are about to ask the user a round of numbered questions that each carry a recommended answer — the grilling and grill-me skills work exactly this way.
+                Call it ONCE PER ROUND with every question of the round in `questions`, not once per question. Also write an ABBREVIATED round in the conversation — each question's title and your recommendation, without the bodies — so the terminal stays readable; the full text is already in this call.
+                Returns as soon as the round is posted — it does not wait. End your turn after calling it; the user's answers arrive as their next message.
+                """,
+            schema: #"""
+                {"type":"object","properties":{
+                  "topic":{"type":"string","description":"What is being decided, for the pane's header, e.g. \"Grill panel design\""},
+                  "roundIndex":{"type":"integer","minimum":1,"description":"Which round this is, if you are numbering them"},
+                  "questions":{"type":"array","minItems":1,"items":{"type":"object","properties":{
+                    "id":{"type":"string","description":"Your own label for the question, e.g. \"Q1\" — the answers name it back"},
+                    "title":{"type":"string","description":"The question in a few words"},
+                    "body":{"type":"string","description":"The question in full. Markdown; may be several paragraphs"},
+                    "recommendation":{"type":"string","description":"What you would do, and why. The user accepts this with one key, so write it as the answer itself"},
+                    "choices":{"type":"array","items":{"type":"object","properties":{
+                      "label":{"type":"string"},
+                      "detail":{"type":"string","description":"What picking this means"},
+                      "recommended":{"type":"boolean"}},"required":["label"]},
+                      "description":"Offer these when the question really is a choice between known options; omit for open questions"},
+                    "allowsMultiple":{"type":"boolean","description":"Whether more than one choice may be picked"}},
+                    "required":["title"]}}},
+                 "required":["questions"]}
+                """#,
+            defaultEnabled: true),
         // Run configurations (ADR-122): the project's own `.clinic/run.json`, in this session's checkout.
         MCPToolSpec(name: "list_run_configurations", description: "List this project's run configurations (from .clinic/run.json) with each one's state in this session's checkout: not started, running, succeeded, failed or stopped.", schema: #"{"type":"object","properties":{}}"#, defaultEnabled: true),
         MCPToolSpec(name: "run", description: "Start (or restart) one of this project's run configurations in this session's checkout, e.g. to launch the app after a change. Returns at once; poll read_run_output for the result. Only commands the user has run or saved in Clinic are allowed.", schema: #"{"type":"object","properties":{"name":{"type":"string","description":"The configuration's name or id"}},"required":["name"]}"#, defaultEnabled: true),
         MCPToolSpec(name: "read_run_output", description: "Read a run's state (running, succeeded, failed with its exit code, stopped), how long it ran, and the last `lines` lines of its output.", schema: #"{"type":"object","properties":{"name":{"type":"string"},"lines":{"type":"integer","minimum":1,"maximum":1000}},"required":["name"]}"#, defaultEnabled: true),
         MCPToolSpec(name: "stop_run", description: "Stop a running run configuration in this session's checkout.", schema: #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#, defaultEnabled: true),
+    ]
+
+    /// The MCP server's `instructions`, which Claude Code puts into the session's system prompt.
+    ///
+    /// This is the one channel Clinic owns into *how* the agent behaves, and it already carried
+    /// behavioural direction about `notify_user` and `set_session_title` as a hardcoded string in the
+    /// shim. It is built here instead so that it can only ever mention tools that are actually offered:
+    /// `tools/list` omits a tool the user switched off (ADR-056), and instructions naming a tool the
+    /// agent cannot call would be a lie it would waste a turn discovering (ADR-131).
+    public static func instructions(for enabled: [MCPToolSpec]) -> String {
+        let offered = Set(enabled.map(\.name))
+        var out = ["Tools provided by Clinic, the macOS app hosting this session."]
+        out += all.compactMap { offered.contains($0.name) ? instructionByTool[$0.name] : nil }
+        return out.joined(separator: " ")
+    }
+
+    /// What to say about a tool beyond its own description — the behavioural nudge rather than the
+    /// signature. Only tools that need one appear here.
+    private static let instructionByTool: [String: String] = [
+        "set_session_title": "Use set_session_title once you know what the session is about.",
+        "notify_user": "Use notify_user when you need the user's attention.",
+        "ask_round": """
+            When you are about to ask the user a round of numbered questions that each carry your \
+            recommended answer — which is exactly what the grilling and grill-me skills do — post the \
+            round with ask_round, and write an abbreviated version in the conversation — each question's \
+            title and your recommendation, without the bodies — so the user can accept, choose or type \
+            each answer as a form in Clinic while the terminal stays readable. It returns immediately; \
+            end your turn after it and their answers arrive as their next message.
+            """,
     ]
 
     public static func textResult(_ text: String, isError: Bool = false) -> [String: Any] {

@@ -167,6 +167,11 @@ struct TabFooter: View {
                 if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
                     PaneToggle(tab: tab, kind: .attachments, help: "Attachments (⌘⇧I)")
                 }
+                // Like the Images chip: the footer only grows a Grill chip once there is a round to
+                // answer, so a session that never gets grilled never carries the control (ADR-131).
+                if let id = tab.sessionId, !sessions.grillRounds(for: id).isEmpty {
+                    PaneToggle(tab: tab, kind: .grill, help: "Grill — the agent's questions (⌘⇧K)")
+                }
                 ForEach(tabs.pullRequests(for: tab)) { ref in
                     PRChip(ref: ref, active: tab.panel.isFront(.pr(ref)), open: tab.panel.isOpen(.pr(ref))) { tabs.togglePRPage(tab, ref: ref) }
                 }

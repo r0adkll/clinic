@@ -13,6 +13,8 @@ final class PanelPane: Identifiable {
     /// pane it already opened; PRs are distinguished by their ref, so each PR gets its own tab.
     enum Kind: Hashable {
         case terminal, diff, files, attachments
+        /// A round of the agent's questions, answered as a form (ADR-131).
+        case grill
         case pr(PullRequestRef)
         /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
         case run(RunKey)
@@ -23,6 +25,7 @@ final class PanelPane: Identifiable {
             case .diff: "plus.forwardslash.minus"
             case .files: "doc.text.magnifyingglass"
             case .attachments: "photo.on.rectangle"
+            case .grill: "flame"
             case .pr: PullRequestMark.symbol
             case .run: "play.fill"
             }
@@ -49,6 +52,7 @@ final class PanelPane: Identifiable {
             case .diff: "Diff"
             case .files: "Files"
             case .attachments: "Images"
+            case .grill: "Grill"
             case .pr(let ref): ref.codeHost.reference(ref.number)
             case .run(let key): key.configId
             }
@@ -67,6 +71,9 @@ final class PanelPane: Identifiable {
             // stays a constant deliberately: a minimum that tracked the live tree width would move the
             // panel's own divider while the tree divider was being dragged, and the two would fight.
             case .files: EditorPrefs.shared.showTree ? 500 : 360
+            // A question's body runs to paragraphs and its choices to full sentences, so this is the
+            // widest minimum in the panel. A long round widens further with `zoomPanel` (ADR-131).
+            case .grill: 460
             }
         }
     }
@@ -77,6 +84,9 @@ final class PanelPane: Identifiable {
     var editor: EditorModel?
     var terminal: GhosttySurfaceView?
     var images: ImageGallery?
+    /// The round on screen and the reader's answers to it (ADR-131). Long-lived, so switching panes
+    /// never loses a half-typed answer.
+    var grill: GrillPaneModel?
 
     init(kind: Kind) { self.kind = kind }
 

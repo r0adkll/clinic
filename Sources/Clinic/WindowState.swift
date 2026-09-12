@@ -167,6 +167,7 @@ struct TerminalStack: NSViewRepresentable {
         case .diff: page = pane.diff.map { self.page(DiffPanel(tab: tab, model: $0)) }
         case .files: page = pane.editor.map { self.page(EditorPanel(tab: tab, model: $0)) }
         case .attachments: page = pane.images.map { self.page(AttachmentsPanel(tab: tab, gallery: $0)) }
+        case .grill: page = pane.grill.map { self.page(GrillPane(tab: tab, model: $0)) }
         case .pr(let ref): page = self.page(PRPage(tab: tab, ref: ref))
         case .run(let key):
             // Only the tab holding the run shows its surface; any other shows why not (ADR-122).

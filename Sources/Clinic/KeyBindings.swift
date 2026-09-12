@@ -7,8 +7,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
-    case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, togglePRPage
-    case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
+    case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
+    case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     case run, stopRun, chooseRunConfiguration
 
     var id: String { rawValue }
@@ -43,11 +43,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleDiffPage: "Diff Panel Tab"
         case .toggleEditor: "Files Panel Tab"
         case .toggleAttachments: "Images Panel Tab"
+        case .toggleGrill: "Grill Panel Tab"
         case .togglePRPage: "Pull Request Panel Tab"
         case .togglePanelVisibility: "Show / Hide Panel"
         case .zoomPanel: "Zoom Panel"
         case .toggleFileTree: "Show / Hide Browser List"
         case .quickLookImage: "Quick Look Image"
+        case .copyGrillRound: "Copy Grill Round as Markdown"
         case .nextPanelTab: "Next Panel Tab"
         case .previousPanelTab: "Previous Panel Tab"
         case .closePanelTab: "Close Panel Tab"
@@ -64,8 +66,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
-        case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .togglePRPage,
-             .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage,
+        case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
+             .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
         case .nextTab, .previousTab: "Tabs"
         case .run, .stopRun, .chooseRunConfiguration: "Run"
@@ -104,6 +106,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleDiffPage: "cmd+shift+g"
         case .toggleEditor: "cmd+shift+e"
         case .toggleAttachments: "cmd+shift+i"
+        // ADR-131. ⌘⇧G/E/I/P are the other pane openers; K was the only free letter beside them.
+        case .toggleGrill: "cmd+shift+k"
         case .togglePRPage: "cmd+shift+p"
         case .togglePanelVisibility: "cmd+opt+j"
         case .zoomPanel: "cmd+opt+shift+j"
@@ -111,6 +115,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         // Finder's own equivalent for the panel space opens, and the one path to it that works
         // without clicking into the pane first (ADR-107).
         case .quickLookImage: "cmd+y"
+        // Not ⌘C: that is Edit ▸ Copy, and a Panel item claiming it would shadow copying in the
+        // terminal window-wide. ⌃ keeps it out of the way (ADR-131).
+        case .copyGrillRound: "cmd+ctrl+c"
         case .nextPanelTab: "cmd+ctrl+]"
         case .previousPanelTab: "cmd+ctrl+["
         case .closePanelTab: "cmd+ctrl+w"

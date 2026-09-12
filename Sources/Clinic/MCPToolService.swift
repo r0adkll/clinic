@@ -56,6 +56,10 @@ final class MCPToolService {
         case "tools/list":
             Self.log.info("tools/list from session \(req.sessionId.rawValue, privacy: .public)")
             return ["result": ["tools": enabledTools.map(\.listEntry)]]
+        case "instructions":
+            // The shim asks at `initialize` rather than answering from a constant, so a tool the user
+            // has switched off is never advertised (ADR-131).
+            return ["result": ["instructions": MCPToolSpec.instructions(for: enabledTools)]]
         case "tools/call":
             guard let name = req.toolName, let spec = MCPToolSpec.all.first(where: { $0.name == name }) else {
                 return MCPToolSpec.textResult("Unknown tool", isError: true)
@@ -93,6 +97,27 @@ final class MCPToolService {
             sessions?.update { s in s.attachments[sessionId, default: []].append(ClinicState.Attachment(path: path, caption: caption)) }
             tabs?.showPane(.attachments, in: tab)
             return MCPToolSpec.textResult("Image shown in Clinic's attachments panel.")
+
+        case "ask_round":
+            // ADR-131: post and return. The reader's answers come back as their next message, so this
+            // must never block — a round takes minutes and `tools/call` has a 15 s budget (ADR-056).
+            let round: GrillRound
+            do { round = try GrillRound.from(arguments: args) }
+            catch let error as GrillArgumentError { return MCPToolSpec.textResult(error.message, isError: true) }
+            catch { return MCPToolSpec.textResult("Could not read the round: \(error)", isError: true) }
+
+            sessions?.postGrillRound(round, to: sessionId)
+            tabs?.showPane(.grill, in: tab)
+            let count = round.questions.count
+            let noun = count == 1 ? "question" : "questions"
+            // Same attention path as `notify_user`: an unanswered round is the canonical "needs you".
+            tabs?.notify(tab, sessionId: sessionId, title: round.topic ?? tab.title,
+                         body: "\(count) \(noun) waiting in the Grill pane", kind: .needsInput)
+            return MCPToolSpec.textResult("""
+                Posted \(count) \(noun) to the Grill pane. End your turn now — the user's answers \
+                will arrive as their next message. Write the round out in the conversation as well if \
+                you have not already, so it stays in the transcript.
+                """)
 
         case "read_terminal":
             let lines = max(1, min(500, args["lines"] as? Int ?? 60))
