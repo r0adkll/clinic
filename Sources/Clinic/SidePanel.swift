@@ -129,6 +129,10 @@ final class SidePanel {
         if selectedId == pane.id {
             selectedId = panes[safe: index]?.id ?? panes.last?.id
         }
+        // The panel goes with its last pane (ADR-130, over ADR-079): an empty panel is a column of
+        // chrome around nothing, and the reader who closed the thing they were reading wants the
+        // session back. The empty state is still reachable — showing the panel with no panes.
+        if panes.isEmpty { isVisible = false }
     }
 
     func closeAll(except keep: PanelPane? = nil) {
@@ -205,6 +209,11 @@ struct SidePanelTabBar: View {
         .padding(.horizontal, PaneMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(.bar)
+        .contentShape(Rectangle())
+        // ⇧-click anywhere the chips are not hides the panel (ADR-130): the same gesture that closes
+        // a tab, aimed at the strip, closes the thing the strip belongs to. A plain click on the bar
+        // still does nothing. The strip only exists while the panel shows, so this is hide, not toggle.
+        .onTapGesture { if NSEvent.modifierFlags.contains(.shift) { tabs.hidePanel(tab) } }
     }
 
     private func chips(compact: Bool) -> some View {
@@ -300,7 +309,7 @@ struct SidePanelTabChip: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(hovering || selected ? 1 : 0)
-                .help("Close this panel tab" + (selected ? " (⌘⌃W)" : ""))
+                .help("Close this panel tab" + (selected ? " (⌘⌃W)" : "") + ", or ⇧-click the tab")
             }
         }
         .padding(.leading, compact ? 6 : 8)
@@ -312,11 +321,17 @@ struct SidePanelTabChip: View {
             .strokeBorder(selected ? Color.accentColor.opacity(0.55) : .clear))
         .foregroundStyle(selected ? Color.accentColor : Color.primary)
         .contentShape(Rectangle())
-        .onTapGesture { tabs.selectPane(pane, in: tab) }
+        // ⇧-click closes (ADR-130). A panel pane closes without asking — nothing is running in it
+        // that the tab does not already own — and this is the compact chip's only pointer-driven
+        // close, since there is no room there for an ✕.
+        .onTapGesture {
+            if NSEvent.modifierFlags.contains(.shift) { tabs.closePane(pane, in: tab) }
+            else { tabs.selectPane(pane, in: tab) }
+        }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.1), value: hovering)
         // The compact chip has no room for its name, so the tooltip is where the name lives.
-        .help(compact ? title : "")
+        .help(compact ? title + " — ⇧-click to close" : "")
         .contextMenu {
             Button("Close") { tabs.closePane(pane, in: tab) }
             Button("Close Others") { tabs.closeOtherPanes(pane, in: tab) }

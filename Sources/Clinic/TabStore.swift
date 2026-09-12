@@ -719,6 +719,14 @@ final class TabStore {
         focusPanel(tab)
     }
 
+    /// ⇧-click on the panel's own tab strip (ADR-130). The strip only exists while the panel shows,
+    /// so this is hide rather than toggle — a ⇧-click there can never bring the panel back.
+    func hidePanel(_ tab: Tab) {
+        guard tab.panel.isVisible else { return }
+        tab.panel.isVisible = false
+        focusPanel(tab)
+    }
+
     /// ⌘⌥⇧J: the panel fills the tab, with the agent surface hidden behind it (ADR-081). Zooming a
     /// hidden panel shows it, so the action always lands somewhere.
     func togglePanelZoom(_ tab: Tab? = nil) {

@@ -33,7 +33,7 @@ struct TabBarView: View {
                 }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 8)
-                .help(tab.panel.isVisible ? "Hide the panel" + bindings.hint(.togglePanelVisibility)
+                .help(tab.panel.isVisible ? "Hide the panel" + bindings.hint(.togglePanelVisibility) + ", or ⇧-click its tab bar"
                                           : "Show the panel" + bindings.hint(.togglePanelVisibility))
             }
         }
@@ -55,14 +55,17 @@ struct TabChip: View {
             else { StateGlyph(tab: tab) }
             Text(tab.title).lineLimit(1).font(.callout)
             Button { tabs.close(tab) } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
-                .buttonStyle(.borderless).opacity(hovering || selected ? 1 : 0).help("Close (⌘W)")
+                .buttonStyle(.borderless).opacity(hovering || selected ? 1 : 0).help("Close (⌘W), or ⇧-click the tab")
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
         .frame(maxWidth: 220)
         .background(selected ? Color.accentColor.opacity(0.18) : (hovering ? Color.primary.opacity(0.06) : .clear), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? Color.accentColor.opacity(0.5) : .clear))
         .contentShape(Rectangle())
-        .onTapGesture { tabs.select(tab) }
+        // ⇧-click closes the tab (ADR-130). It goes through `close`, not around it, so a running
+        // session still asks before its child is killed (ADR-037) — the modifier is a shortcut to
+        // the ✕, not a way past what the ✕ would have asked.
+        .onTapGesture { if NSEvent.modifierFlags.contains(.shift) { tabs.close(tab) } else { tabs.select(tab) } }
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Close Tab") { tabs.close(tab) }

@@ -3135,3 +3135,39 @@ merge button, then the alert's *Squash and merge*.
 
 `make build` passes. Smoke dirs, stub `gh` and its scratch files deleted; `com.r0adkll.clinic` has no
 new keys (`ClinicPRShowTree` still at its default `1`).
+
+## 2026-09-11 (cont.) — ⇧-click closes a tab
+
+User: *"It would be a nice shortcut that Shift + clicking on tabs just 'closes' them (though for
+sessions we'll need to reconcile states or prompt to confirm. For the side panel we should just close
+them. Then on the side panel if we close the last open one it should hide the side panel. Additionally,
+shift clicking the toolbar of the sidepanel should hide it."*
+
+Recorded as [[ADR-130 Shift-Click Closes A Tab]], linked from the design tree.
+
+- ⇧-click on a chip closes it in **both** strips. A session tab goes through `TabStore.close`, so
+  ADR-037's prompt still runs for a tab with Claude in it — the modifier is a shortcut to the ✕, not
+  a way past what the ✕ would have asked. A panel pane closes outright.
+- This gives ADR-104's **compact** panel chip the pointer close it deliberately lacked: a modifier
+  puts nothing destructive under a pointer that came to select, which was the objection to a hover ✕.
+- `SidePanel.close` now clears `isVisible` when the last pane goes (over ADR-079). `SidePanelEmptyState`
+  stays and is still reachable by *showing* an empty panel — it is now only ever asked for.
+- ⇧-click on the panel's tab strip hides the panel (`TabStore.hidePanel`, deliberately not the
+  toggle: the strip only exists while the panel shows). Plain clicks on the bar still do nothing.
+- Modifiers read with `NSEvent.modifierFlags` inside `.onTapGesture` — the codebase's existing idiom —
+  rather than `TapGesture().modifiers(.shift)`, which would put the ordinary click in a priority race.
+- Tooltips carry it: both ✕ helps gain "or ⇧-click the tab", the compact chip's tooltip becomes
+  "*name* — ⇧-click to close", and the hide button says "or ⇧-click its tab bar".
+- Stops at the sidebar, where ⇧-click is range selection (ADR-074).
+
+**Verified** twice. A `swiftc` harness with the chip-inside-a-strip structure copied from the source,
+logging every tap: plain click selects, ⇧-click on either chip closes, ⇧-click on the bar hides, plain
+click on the bar ignored — which also proves the strip's gesture does not steal its chips' clicks.
+Then a smoke instance (`clinic-shft`, own App Support, shell tab via `-ClinicOpenShellOnLaunch`,
+guarded `.cghidEventTap` clicks with `.maskShift`): ⇧-click on the strip hid the panel with its
+Terminal pane still open (footer chip outlined); ⇧-click on the lone chip closed the pane *and* hid the
+panel (footer chip plain); with two panes, ⇧-click on one left the panel showing the other; ⇧-click on
+the shell tab closed it to the home screen.
+
+`make build` passes. Smoke dir deleted; `defaults read com.r0adkll.clinic` is byte-identical before
+and after the run.
