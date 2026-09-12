@@ -10,6 +10,9 @@ public enum PullRequestRefresh {
     public static let watching: Duration = .seconds(15)
     /// On screen and settled. Comments and reviews still arrive from other people.
     public static let foreground: Duration = .seconds(60)
+    /// Watched (ADR-128) with a result still coming, but nobody looking at it: fast enough that the
+    /// notification arrives while the reader still cares, slow enough to be running in the background.
+    public static let watched: Duration = .seconds(30)
     /// Open in a pane nobody is looking at, or the whole app in the background. ADR-053's cadence.
     public static let background: Duration = .seconds(300)
 
@@ -33,11 +36,15 @@ public enum PullRequestRefresh {
     ///   - pr: the cached pull request; nil means nothing is known yet and the caller should fetch.
     ///   - isFront: its pane is the one on screen, in the selected tab of the active window.
     ///   - appActive: Clinic is the active application.
-    public static func interval(for pr: PullRequest?, isFront: Bool, appActive: Bool) -> Duration? {
+    ///   - isWatched: the reader asked to be told how this one ends (ADR-128), so it never drops to
+    ///     the background cadence — a watch nobody polls is a watch that reports the news late.
+    public static func interval(for pr: PullRequest?, isFront: Bool, appActive: Bool,
+                                isWatched: Bool = false) -> Duration? {
         guard let pr else { return .zero }
         guard !pr.isSettled else { return nil }
-        guard isFront, appActive else { return background }
-        return pr.isAwaitingResult ? watching : foreground
+        if isFront, appActive { return pr.isAwaitingResult ? watching : foreground }
+        guard isWatched else { return background }
+        return pr.isAwaitingResult ? watched : foreground
     }
 
     /// Whether a read that has just landed is due for GitHub's rendering of the bodies too (ADR-090).

@@ -39,6 +39,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// Fingerprints (`RunTrust`) of commands the user has run from the UI or saved in the editor: the
     /// only ones Claude's `run` tool may execute (ADR-122).
     public var trustedRunCommands: Set<String> = []
+    /// Pull requests the reader asked to be told about, by `PullRequestRef.id` (ADR-128). Persisted,
+    /// so a watch outlives a relaunch; polling still only happens while the PR's session tab is open.
+    public var watchedPullRequests: Set<String> = []
     /// The device each project's runs target, per platform (ADR-124): project → platform → `RunDevice.id`.
     public var runDeviceByProject: [String: [String: String]] = [:]
 
@@ -74,7 +77,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -104,6 +107,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         runSelectionByProject = (try? c.decodeIfPresent([String: String].self, forKey: .runSelectionByProject)) ?? [:]
         trustedRunCommands = (try? c.decodeIfPresent(Set<String>.self, forKey: .trustedRunCommands)) ?? []
         runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
+        watchedPullRequests = (try? c.decodeIfPresent(Set<String>.self, forKey: .watchedPullRequests)) ?? []
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 

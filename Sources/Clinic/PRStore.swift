@@ -24,6 +24,9 @@ final class PRStore {
         let directory: String?
         /// This pane is the front pane of the selected tab of the active window.
         let isFront: Bool
+        /// Whose session this pull request belongs to. A watch notification is addressed from it, so it
+        /// obeys that session's mute and reveals it when clicked (ADR-033, ADR-128).
+        let sessionId: SessionID?
     }
 
     /// Whether a read also re-fetches GitHub's rendering of the bodies. `.auto` lets
@@ -47,6 +50,10 @@ final class PRStore {
     /// When a read was last attempted, successful or not, so a repository `gh` cannot read is retried
     /// on the slow cadence instead of on every tick.
     private var attemptedAt: [String: Date] = [:]
+    /// Automatic reads in flight, by ref. Opening a pane asks twice — the footer chip's
+    /// `ensureLoaded` and the page's own `attach` — and two concurrent reads would not only pay for
+    /// `gh` twice but split a check transition between them, so neither sees it end (ADR-128).
+    private var reads: [String: Task<Void, Never>] = [:]
     private var pollTask: Task<Void, Never>?
     private var bumpTasks: [String: Task<Void, Never>] = [:]
     /// One watcher per repository behind an open pane, keyed by its git common directory.
@@ -56,6 +63,13 @@ final class PRStore {
     private var commonDirs: [String: String?] = [:]
     private var activeObserver: (any NSObjectProtocol)?
     var openPRsProvider: (() -> [OpenPR])?
+    /// Set by the app: where the watch list is persisted (ADR-128).
+    weak var sessions: SessionStore?
+    /// Set by the app to route through `TabStore.notify` (ADR-066), as the background agents do.
+    var router: ((SessionID?, String, String, NotificationStore.Entry.Kind, PullRequestRef) -> Void)?
+    /// Which session each open pull request belongs to, refreshed on every poll, so a verdict landing
+    /// between polls still knows who to tell.
+    private var sessionIds: [String: SessionID] = [:]
 
     func start() {
         Task { await refreshAvailability() }
@@ -80,6 +94,8 @@ final class PRStore {
         pollTask?.cancel(); pollTask = nil
         for task in bumpTasks.values { task.cancel() }
         bumpTasks.removeAll()
+        for task in reads.values { task.cancel() }
+        reads.removeAll()
         for watcher in watchers.values { watcher.stop() }
         watchers.removeAll()
         if let activeObserver { NotificationCenter.default.removeObserver(activeObserver) }
@@ -103,8 +119,35 @@ final class PRStore {
         PullRequestMark.aggregate(refs.compactMap { mark(for: $0) })
     }
 
+    // MARK: Watching (ADR-128)
+
+    /// The reader asked to be told how this pull request's checks end.
+    func isWatched(_ ref: PullRequestRef) -> Bool {
+        sessions?.state.watchedPullRequests.contains(ref.id) ?? false
+    }
+
+    /// Turns the watch on or off. Switching it on reads the pull request straight away — a watch that
+    /// waits out an interval before its first look would miss a run that finishes in the meantime.
+    func setWatched(_ ref: PullRequestRef, _ watched: Bool) {
+        sessions?.update { state in
+            if watched { state.watchedPullRequests.insert(ref.id) } else { state.watchedPullRequests.remove(ref.id) }
+        }
+        if watched { Task { await read(ref) } }
+    }
+
     func ensureLoaded(_ refs: [PullRequestRef]) {
-        for ref in refs where pullRequests[ref.id] == nil && !loading.contains(ref.id) { Task { await refresh(ref) } }
+        for ref in refs where pullRequests[ref.id] == nil { Task { await read(ref) } }
+    }
+
+    /// One read at a time per pull request: a second caller joins the one already running instead of
+    /// starting another. The ⟳ button and `perform` deliberately go straight to `refresh` — an
+    /// explicit gesture should not be answered by someone else's in-flight read.
+    private func read(_ ref: PullRequestRef) async {
+        if let existing = reads[ref.id] { await existing.value; return }
+        let task = Task { await refresh(ref) }
+        reads[ref.id] = task
+        await task.value
+        reads[ref.id] = nil
     }
 
     // MARK: The clock
@@ -129,9 +172,11 @@ final class PRStore {
         guard availability?.isReady != false else { return }
         let appActive = NSApp.isActive
         let now = Date()
+        for item in open { sessionIds[item.ref.id] = item.sessionId }
         for item in open where staleAfter == nil || item.isFront {
             let pr = pullRequests[item.ref.id]
-            guard let interval = PullRequestRefresh.interval(for: pr, isFront: item.isFront, appActive: appActive) else { continue }
+            guard let interval = PullRequestRefresh.interval(for: pr, isFront: item.isFront, appActive: appActive,
+                                                             isWatched: isWatched(item.ref)) else { continue }
             let due = item.isFront ? (staleAfter ?? interval.seconds) : interval.seconds
             if let pr {
                 guard now.timeIntervalSince(pr.fetchedAt) >= due else { continue }
@@ -141,8 +186,7 @@ final class PRStore {
                 // cadence rather than re-running `gh` every tick.
                 continue
             }
-            guard !loading.contains(item.ref.id) else { continue }
-            await refresh(item.ref)
+            await read(item.ref)
         }
     }
 
@@ -151,12 +195,11 @@ final class PRStore {
     func attach(_ ref: PullRequestRef) async {
         await syncWatchers(openPRsProvider?() ?? [])
         let pr = pullRequests[ref.id]
-        guard !loading.contains(ref.id) else { return }
         if pr == nil {
             if let last = attemptedAt[ref.id], Date().timeIntervalSince(last) < PullRequestRefresh.staleOnReturn { return }
-            await refresh(ref)
+            await read(ref)
         } else if let pr, !pr.isSettled, Date().timeIntervalSince(pr.fetchedAt) >= PullRequestRefresh.staleOnReturn {
-            await refresh(ref)
+            await read(ref)
         }
     }
 
@@ -167,10 +210,10 @@ final class PRStore {
         for ref in refs where !(pullRequests[ref.id]?.isSettled ?? false) {
             bumpTasks[ref.id]?.cancel()
             bumpTasks[ref.id] = Task { [weak self] in
-                await self?.refresh(ref)
+                await self?.read(ref)
                 try? await Task.sleep(for: PullRequestRefresh.pushSettle)
                 guard !Task.isCancelled else { return }
-                await self?.refresh(ref)
+                await self?.read(ref)
             }
         }
     }
@@ -189,6 +232,7 @@ final class PRStore {
             if let html = renderedHTML[ref.id] { pr = pr.applying(html) }
             pullRequests[ref.id] = pr
             errors[ref.id] = nil
+            announceChecks(ref, previous: cached, fresh: pr)
             reloadDiffIfHeadMoved(ref, pr)
             let html = policy == .force || PullRequestRefresh.needsRenderedHTML(fresh: pr, cached: cached,
                                                                                 htmlFetchedAt: htmlFetchedAt[ref.id])
@@ -234,6 +278,20 @@ final class PRStore {
         } catch {
             errors[ref.id] = "\(error)"
         }
+    }
+
+    /// Tells the reader how a watched run of checks ended (ADR-128), and stops watching a pull request
+    /// that has been merged or closed — there is nothing left for it to report.
+    ///
+    /// `PullRequestWatch.completion` decides whether this read is news at all; the rules that keep a
+    /// relaunch from replaying last week's green build live there, where they are tested.
+    private func announceChecks(_ ref: PullRequestRef, previous: PullRequest?, fresh: PullRequest) {
+        guard isWatched(ref) else { return }
+        if fresh.isSettled { setWatched(ref, false); return }
+        guard let verdict = PullRequestWatch.completion(previous: previous, fresh: fresh) else { return }
+        let body = PullRequestWatch.sentence(verdict, host: ref.codeHost, number: ref.number)
+        Self.log.info("pr watch \(ref.url.absoluteString, privacy: .public): \(body, privacy: .public)")
+        router?(sessionIds[ref.id], fresh.title, body, .checks(passed: !verdict.isFailure), ref)
     }
 
     /// A push moves the head commit, which makes the diff the Files tab cached a diff of an older

@@ -99,9 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let directory = tab.pwd ?? tab.projectPath
                 return self.tabs.pullRequests(for: tab).map { ref in
                     PRStore.OpenPR(ref: ref, directory: directory,
-                                   isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab))
+                                   isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab),
+                                   sessionId: tab.sessionId)
                 }
             }
+        }
+        prs.sessions = sessions
+        // A watched pull request's verdict reaches the reader the way an agent's does (ADR-128):
+        // through TabStore, so it obeys the session's mute and the front-tab rule.
+        prs.router = { [weak self] sid, title, body, kind, ref in
+            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body,
+                              kind: kind, pullRequest: ref)
         }
         prs.start()
         tabs.prs = prs

@@ -3058,3 +3058,48 @@ with a `pr-link` to a live open PR with four running checks — swiftlang/swift#
 406 ClinicCore tests pass (14 new for the policy, 2 for the push signal over real git — init, push to
 a bare remote, assert the watcher emits a path `isRefUpdate` accepts — and the worktree common dir);
 `make build` passes. Smoke dir and probe ref removed; `ClinicPRShowTree` is at its default `1`.
+
+## 2026-09-11 (cont.) — Watching a pull request
+
+User: *"Thinking about notifications. It would be nice if the user has a toggle on the PR panel to
+enable "Watching" and to send notifications when an inflight PR fails or succeeds."*
+
+The thing ADR-127 listed as *not now*, done the same day. Recorded as
+[[ADR-128 Watching A Pull Request]], linked from the design tree, with ADR-127's deferral pointing at it.
+
+- **A bell in the service strip**, filled and in Clinic's accent while watching (Clinic's accent, not
+  the service's — being told is a thing Clinic does for you, ADR-116). Hidden on a merged or closed
+  pull request. The flag persists in `ClinicState.watchedPullRequests` and is dropped automatically
+  when the PR settles.
+- **A watch aims the cadence**: never the five-minute background tier; 30s off screen while a result
+  is still coming, and its own pane on screen still wins with 15s.
+- **`PullRequestWatch` (pure, ClinicCore) decides what is news.** `verdict` reduces a rollup to passed
+  or failed — cancelled and neutral are neither, because the merge box does not call them failing
+  either. `completion` adds the three silences: the first read of a PR announces nothing (else every
+  relaunch replays last week's green build), only a run seen *in flight* completes, and only on the
+  commit that was being watched. A re-run therefore announces again, which is right.
+- **It knocks through `TabStore.notify`**, so it obeys the session's mute, is a card while Clinic is
+  active and a system notification when it is not. The entry wears the PR glyph in green or red and
+  reads *«title» / #7 · build failed*; clicking it opens that PR's pane (the ref rides in the entry and
+  in the system notification's `userInfo`).
+- **Reads are now coalesced per pull request.** Opening a pane asked twice — the footer chip's
+  `ensureLoaded` and the page's own `attach` — which paid for `gh` twice and could split a check
+  transition across two concurrent reads so neither saw it end. Confirmed: one read per open now.
+
+**Verified** in a smoke instance against a **stubbed `gh`** on `PATH` (`--env PATH=<fakebin>:…` plus
+`--env SHELL=/nonexistent-shell` to defeat ADR-086's login-shell PATH), answering `auth status`,
+`api user` and `pr view` with one pull request whose single check runs for 40 seconds and then ends:
+- clicking the bell wrote `watchedPullRequests` into the smoke `state.json` and triggered an
+  immediate read; on the next launch the bell came up filled;
+- green run: `pr watch … #7 · Check passed` at 21:35:35, one read after the flip, with the app in the
+  background — reads 30s apart, the watched tier;
+- red run (stub flipped to `FAILURE`): `pr watch … #7 · build failed`, and the notification panel
+  showed the row with a red PR glyph.
+
+A first attempt looked like a bug — the transition was read and nothing announced. It was not: the
+click enabling the watch landed *after* the stub's flip, so that read was the PR's first with a
+verdict, which the rules deliberately keep quiet. A temporary `PROBE` log line settled it and was
+removed.
+
+418 ClinicCore tests pass (12 new); `make build` passes. Smoke dir, stub `gh` and its scratch files
+deleted; `com.r0adkll.clinic` has no new keys (`ClinicPRShowTree` is at its default `1`).

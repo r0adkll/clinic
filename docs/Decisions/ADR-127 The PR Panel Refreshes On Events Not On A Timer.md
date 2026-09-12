@@ -95,6 +95,7 @@ only place that decides whether one happens.
   rendering (`com.r0adkll.clinic:github`, debug), so the cadence can be read off `log stream` rather
   than inferred from the screen ([[ADR-038 Preferences and Diagnostics]]).
 - The sidebar and footer marks are read from the same store, so they sharpen with the panel.
-- **Not now**: notifying when a watched check fails (the panel updates, it does not knock);
+- **Not now**: notifying when a watched check fails (the panel updates, it does not knock) — *done the
+  same day by [[ADR-128 Watching A Pull Request]]*;
   `gh pr checks --watch`, whose long-lived process buys nothing over a 15-second read; and check
   *failure output*, still the thing this layout most wants ([[ADR-087 Pull Request Panel Is Status-First]]).

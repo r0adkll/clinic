@@ -98,6 +98,13 @@ struct PRPage: View {
                 .font(.callout)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 8)
+            // Clinic's accent, not the service's (ADR-116): being told about this pull request is a
+            // thing Clinic does for you, not a thing GitHub knows about.
+            if let pr = prs.pullRequest(for: ref), !pr.isSettled {
+                WatchToggle(watching: prs.isWatched(ref), verdict: PullRequestWatch.verdict(for: pr)) {
+                    prs.setWatched(ref, !prs.isWatched(ref))
+                }
+            }
             // Spinning for the reader's own press only. An automatic read every fifteen seconds
             // (ADR-127) would otherwise blink the header at them; the Checks tab says the panel is
             // watching in words instead.
@@ -482,6 +489,34 @@ struct PRPage: View {
 }
 
 // MARK: - Pieces
+
+/// The bell that turns *Watching* on (ADR-128): filled and in Clinic's accent while it is on, hollow
+/// and secondary while it is off. It says what it will do, in the tense it will do it in — a run in
+/// flight promises news about *this* run, a settled one promises news about the next.
+private struct WatchToggle: View {
+    let watching: Bool
+    let verdict: PullRequestWatch.Verdict?
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: watching ? "bell.fill" : "bell")
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(watching ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+        .help(helpText)
+        .accessibilityLabel(watching ? "Stop watching checks" : "Watch checks")
+    }
+
+    private var helpText: String {
+        guard watching else {
+            return verdict == nil ? "Watch · tell me how these checks end" : "Watch · tell me how the next checks end"
+        }
+        return verdict == nil ? "Watching · you will be told how these checks end"
+                              : "Watching · you will be told how the next checks end"
+    }
+}
 
 /// ⟳, spinning while a read is in flight, with what it last read in its tooltip. The panel refreshes
 /// itself (ADR-127); this says so, and says when, so pressing it is a choice rather than a reflex.

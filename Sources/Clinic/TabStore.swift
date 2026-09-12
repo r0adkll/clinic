@@ -216,8 +216,10 @@ final class TabStore {
 
     /// Single router for attention (ADR-066): history always; then by focus — looking at it: nothing more;
     /// app active elsewhere: in-app card (+ sound pref); app inactive: system notification. Muted sessions get history only.
-    func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind, url: URL? = nil) {
-        let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url)
+    func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind,
+                url: URL? = nil, pullRequest: PullRequestRef? = nil) {
+        let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url,
+                                   pullRequest: pullRequest)
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
@@ -225,7 +227,8 @@ final class TabStore {
             sounds.playForCard()
         } else {
             let silent = sounds.playForSystemNotification()
-            notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body, silent: silent)
+            notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body,
+                               silent: silent, pullRequest: pullRequest?.url)
         }
         tab?.unread = true
         updateBadge()
@@ -255,7 +258,7 @@ final class TabStore {
             // (ADR-095). Kept out of `handle` because it is not part of tab state.
             self?.automations?.handle(hookEvent: event)
         }
-        notifications.onActivate = { [weak self] id in self?.reveal(sessionId: id) }
+        notifications.onActivate = { [weak self] id, ref in self?.reveal(sessionId: id, pullRequest: ref) }
         // ADR-080 retention: once the launch has settled, so restored sessions count as live.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
@@ -605,9 +608,13 @@ final class TabStore {
         if activeWindowId != w.id || w.nsWindow?.isKeyWindow == false { w.nsWindow?.makeKeyAndOrderFront(nil) }
     }
 
-    func reveal(sessionId: SessionID) {
+    /// Brings a session to the front. `pullRequest` also opens that PR's pane, so clicking a checks
+    /// notification lands on the checks rather than on whatever the tab was showing (ADR-128).
+    func reveal(sessionId: SessionID, pullRequest: PullRequestRef? = nil) {
         if let tab = tab(for: sessionId) { select(tab) }
         else if let summary = sessions.sessions[sessionId] { open(session: summary) }
+        guard let ref = pullRequest, let tab = tab(for: sessionId) else { return }
+        showPane(.pr(ref), in: tab)
     }
 
     func selectNext(_ delta: Int) {

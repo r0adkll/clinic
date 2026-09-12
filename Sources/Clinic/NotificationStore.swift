@@ -7,7 +7,11 @@ import ClinicCore
 @Observable
 final class NotificationStore {
     struct Entry: Identifiable, Hashable {
-        enum Kind: Hashable { case finished, needsPermission, needsInput, error, bell, update }
+        enum Kind: Hashable {
+            case finished, needsPermission, needsInput, error, bell, update
+            /// A watched pull request's checks finished (ADR-128).
+            case checks(passed: Bool)
+        }
         let id = UUID()
         let date: Date
         let sessionId: SessionID?
@@ -15,6 +19,8 @@ final class NotificationStore {
         let body: String
         let kind: Kind
         var url: URL? = nil
+        /// The pull request this is about, so clicking opens its pane rather than the browser (ADR-128).
+        var pullRequest: PullRequestRef? = nil
         var read = false
     }
 
@@ -43,9 +49,11 @@ final class NotificationStore {
 
     /// Bells from the same session within 5 s collapse into one row.
     @discardableResult
-    func record(sessionId: SessionID?, title: String, body: String, kind: Entry.Kind, url: URL? = nil) -> Entry {
+    func record(sessionId: SessionID?, title: String, body: String, kind: Entry.Kind, url: URL? = nil,
+                pullRequest: PullRequestRef? = nil) -> Entry {
         if kind == .bell, let last = entries.first, last.kind == .bell, last.sessionId == sessionId, Date().timeIntervalSince(last.date) < 5 { return last }
-        let e = Entry(date: Date(), sessionId: sessionId, title: title, body: body, kind: kind, url: url)
+        let e = Entry(date: Date(), sessionId: sessionId, title: title, body: body, kind: kind, url: url,
+                      pullRequest: pullRequest)
         entries.insert(e, at: 0)
         if entries.count > Self.maxEntries { entries.removeLast(entries.count - Self.maxEntries) }
         return e

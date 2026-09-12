@@ -73,14 +73,17 @@ struct NotificationPanel: View {
     private func open(_ e: NotificationStore.Entry) {
         store.markRead(e.id)
         if let url = e.url { NSWorkspace.shared.open(url) }
-        else if let sid = e.sessionId { tabs.reveal(sessionId: sid) }
+        else if let sid = e.sessionId { tabs.reveal(sessionId: sid, pullRequest: e.pullRequest) }
     }
 
     private func icon(for kind: NotificationStore.Entry.Kind) -> String {
-        switch kind { case .finished: "checkmark.circle"; case .needsPermission: "hand.raised"; case .needsInput: "questionmark.circle"; case .error: "exclamationmark.triangle"; case .bell: "bell"; case .update: "arrow.down.circle" }
+        switch kind { case .finished: "checkmark.circle"; case .needsPermission: "hand.raised"; case .needsInput: "questionmark.circle"; case .error: "exclamationmark.triangle"; case .bell: "bell"; case .update: "arrow.down.circle"
+        // The pull request glyph rather than a tick or a cross: the verdict is in the colour, and what
+        // this row is *about* is the thing worth recognising in a list (ADR-128).
+        case .checks: PullRequestMark.symbol }
     }
     private func color(for kind: NotificationStore.Entry.Kind) -> Color {
-        switch kind { case .finished: .green; case .needsPermission, .needsInput: .orange; case .error: .red; case .bell: .secondary; case .update: .blue }
+        switch kind { case .finished: .green; case .needsPermission, .needsInput: .orange; case .error: .red; case .bell: .secondary; case .update: .blue; case .checks(let passed): passed ? .green : .red }
     }
 }
 
@@ -113,7 +116,8 @@ struct NotificationCard: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 store.markRead(e.id); store.dismissCard()
-                if let url = e.url { NSWorkspace.shared.open(url) } else if let sid = e.sessionId { tabs.reveal(sessionId: sid) }
+                if let url = e.url { NSWorkspace.shared.open(url) }
+                else if let sid = e.sessionId { tabs.reveal(sessionId: sid, pullRequest: e.pullRequest) }
             }
             .transition(.move(edge: .top).combined(with: .opacity))
             .padding(12)
