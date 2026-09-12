@@ -112,7 +112,14 @@ final class GrillPaneModel {
         }
     }
 
-    func toggleHistory(_ question: GrillQuestion) {
+    /// A row is open when the reader is on it, or when they pinned it open. Walking the list therefore
+    /// reads it, rather than costing `⏎` per question (ADR-137).
+    func isHistoryExpanded(_ question: GrillQuestion, at index: Int) -> Bool {
+        historyFocus == index || expandedHistory.contains(question.id)
+    }
+
+    /// `⏎`/`Space`: keep this one open after the focus moves on.
+    func pinHistory(_ question: GrillQuestion) {
         if expandedHistory.contains(question.id) { expandedHistory.remove(question.id) }
         else { expandedHistory.insert(question.id) }
     }
@@ -230,7 +237,6 @@ struct GrillPane: View {
     @ViewBuilder
     private func body(for round: GrillRound) -> some View {
         VStack(spacing: 0) {
-            if let note = readOnlyNote(round) { ReadOnlyBanner(text: note) }
             ScrollView {
                 Group {
                     if !isActionable {
@@ -295,7 +301,7 @@ struct GrillPane: View {
                     tabs.copyGrillRound(round)
                 }
             }
-            if let round = shown, GrillPaneModel.hasWizardChrome(round) {
+            if let round = shown, isActionable, GrillPaneModel.hasWizardChrome(round) {
                 Text("\(round.answeredCount) of \(round.questions.count)")
                     .font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
                     .foregroundStyle(round.isFullyAnswered ? Color.accentColor : Color.secondary)
@@ -454,7 +460,7 @@ struct GrillPane: View {
             case .down, .right, .character("j"): model.historyFocus = min(model.historyFocus + 1, last); return true
             case .up, .left, .character("k"): model.historyFocus = max(model.historyFocus - 1, 0); return true
             case .enter, .space:
-                model.toggleHistory(round.questions[min(model.historyFocus, last)])
+                model.pinHistory(round.questions[min(model.historyFocus, last)])
                 return true
             default: return false
             }
@@ -758,7 +764,7 @@ private struct QuestionStep: View {
                 .font(.system(size: 15, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            if let answer { AnswerBadge(answer: answer) }
+            if answer != nil { AnswerBadge(answer: answer) }
         }
     }
 
@@ -896,8 +902,7 @@ private struct ReviewStep: View {
             ForEach(Array(round.questions.enumerated()), id: \.element.id) { index, question in
                 GrillAnswerRow(
                     question: question,
-                    phrase: GrillAnswerComposer.answerPhrase(for: question, answer: round.answers[question.id]),
-                    answered: round.answers[question.id]?.isMeaningful == true,
+                    answer: round.answers[question.id],
                     focused: actionable && model.reviewFocus == index
                 ) { jump(index) } detail: { EmptyView() }
             }
@@ -920,19 +925,20 @@ private struct HistoryList: View {
     @Bindable var model: GrillPaneModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HistoryHeader(round: round)
             ForEach(Array(round.questions.enumerated()), id: \.element.id) { index, question in
-                let expanded = model.expandedHistory.contains(question.id)
+                let expanded = model.isHistoryExpanded(question, at: index)
                 GrillAnswerRow(
                     question: question,
-                    phrase: GrillAnswerComposer.answerPhrase(for: question, answer: round.answers[question.id]),
-                    answered: round.answers[question.id]?.isMeaningful == true,
+                    answer: round.answers[question.id],
                     focused: model.historyFocus == index,
                     leading: expanded ? "chevron.down" : "chevron.right",
+                    expanded: expanded,
                     help: expanded ? "Collapse — ⏎" : "Show the question — ⏎"
                 ) {
                     model.historyFocus = index
-                    model.toggleHistory(question)
+                    model.pinHistory(question)
                 } detail: {
                     if expanded { detail(for: question) }
                 }
@@ -971,8 +977,10 @@ private struct HistoryList: View {
                 }
             }
         }
-        .padding(.top, 6)
-        .padding(.leading, 33)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+        .padding(.leading, 39)
+        .padding(.trailing, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -984,47 +992,59 @@ private struct HistoryList: View {
 
 /// One question with the answer it carries — the row the review step and the history list share, since
 /// both list every question with its answer and differ only in what pressing one does (ADR-133).
+///
+/// The kind of answer is a badge and the second line is only what is distinctive about it, so four rows
+/// no longer read as one block of grey (ADR-137).
 private struct GrillAnswerRow<Detail: View>: View {
     let question: GrillQuestion
-    let phrase: String
-    let answered: Bool
+    let answer: GrillAnswer?
     let focused: Bool
     var leading: String?
+    /// True while the detail below is showing: the summary is the collapsed form of what the detail
+    /// spells out, so showing both prints the recommendation twice in the same row.
+    var expanded = false
     var help: String = "Go back and change this answer"
     let action: () -> Void
     @ViewBuilder var detail: Detail
 
     @State private var hovering = false
 
+    private var summary: String? { GrillAnswerSummary.of(answer, in: question) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: action) {
-                HStack(alignment: .top, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if let leading {
                         Image(systemName: leading)
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 10)
-                            .padding(.top, 4)
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 9)
                     }
                     Text(question.id)
                         .font(.system(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 26, alignment: .leading)
-                        .padding(.top, 1)
-                    VStack(alignment: .leading, spacing: 2) {
+                        .frame(minWidth: 22, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(question.title)
                             .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(phrase)
-                            .font(.system(size: 11))
-                            .foregroundStyle(answered ? .secondary : .tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        // Absent for skipped and unanswered: the badge has said everything, and the
+                        // row is a single line as a result.
+                        if let summary, !expanded {
+                            Text(summary)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 8)
+                    AnswerBadge(answer: answer)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -1032,13 +1052,96 @@ private struct GrillAnswerRow<Detail: View>: View {
             .help(help)
             detail
         }
-        .background(hovering ? Color.primary.opacity(0.07) : Color.primary.opacity(0.03),
-                    in: RoundedRectangle(cornerRadius: 5))
+        .background(hovering ? Color.primary.opacity(0.09) : Color.primary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: 7))
         .overlay {
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 7)
                 .strokeBorder(focused ? Color.accentColor.opacity(0.75) : .clear, lineWidth: 1.5)
         }
         .onHover { hovering = $0 }
+    }
+}
+
+/// What became of this round and what its shape was, above the rows (ADR-137).
+///
+/// The bare sentence it replaces said only *why* the round was read-only. A record wants the same three
+/// things a commit does: what happened, when, and how much.
+private struct HistoryHeader: View {
+    let round: GrillRound
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(outcome)
+                    .font(.system(size: 12, weight: .medium))
+                Text(age)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            Text(shape)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var symbol: String {
+        switch round.outcome {
+        case .open: "hourglass"
+        case .sent: "paperplane"
+        case .answeredElsewhere: "text.cursor"
+        case .superseded: "arrow.turn.down.right"
+        }
+    }
+
+    private var outcome: String {
+        switch round.outcome {
+        case .open: "Waiting for you"
+        case .sent: "Sent"
+        case .answeredElsewhere: "Answered in the terminal"
+        case .superseded: "Superseded — not sent"
+        }
+    }
+
+    private var age: String {
+        let when: Date = switch round.outcome {
+        case .open: round.postedAt
+        case .sent(let d), .answeredElsewhere(let d), .superseded(let d): d
+        }
+        // "in 0 seconds" is what the formatter says about something that just happened, which is both
+        // wrong and odd; under a minute the honest word is "just now".
+        let elapsed = Date().timeIntervalSince(when)
+        guard elapsed >= 60 else { return "just now" }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        f.dateTimeStyle = .named
+        return f.localizedString(for: when, relativeTo: Date())
+    }
+
+    /// Counts by kind, naming only the kinds this round actually has.
+    private var shape: String {
+        var accepted = 0, chosen = 0, yours = 0, skipped = 0, none = 0
+        for question in round.questions {
+            switch round.answers[question.id] {
+            case .acceptedRecommendation: accepted += 1
+            case .choices: chosen += 1
+            case .text: yours += 1
+            case .skipped: skipped += 1
+            case .none: none += 1
+            }
+        }
+        let parts = [(accepted, "accepted"), (chosen, "chosen"), (yours, "in your words"),
+                     (skipped, "skipped"), (none, "unanswered")]
+            .filter { $0.0 > 0 }
+            .map { "\($0.0) \($0.1)" }
+        return parts.isEmpty ? "\(round.questions.count) questions" : parts.joined(separator: " · ")
     }
 }
 
@@ -1063,19 +1166,31 @@ private struct ReadOnlyBanner: View {
 }
 
 /// What the reader has said about a question, in the smallest thing that can say it.
-private struct AnswerBadge: View {
-    let answer: GrillAnswer
+///
+/// **Skipped and unanswered are different badges** (ADR-137). `answerPhrase` calls both "skipped, you
+/// decide." because an unanswered question *is* sent as skipped — right for the agent, wrong for a
+/// record, where "I decided you should decide" and "I never got to this" are different things to have
+/// done.
+struct AnswerBadge: View {
+    let answer: GrillAnswer?
 
     private var word: String {
         switch answer {
         case .acceptedRecommendation: "Accepted"
         case .choices: "Chosen"
-        case .text: "Your answer"
+        case .text: "Yours"
         case .skipped: "Skipped"
+        case .none: "No answer"
         }
     }
 
-    private var isDecision: Bool { if case .skipped = answer { false } else { true } }
+    /// A decision the reader made, as against passing on one.
+    private var isDecision: Bool {
+        switch answer {
+        case .acceptedRecommendation, .choices, .text: true
+        case .skipped, .none: false
+        }
+    }
 
     var body: some View {
         Text(word)
@@ -1084,6 +1199,26 @@ private struct AnswerBadge: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background((isDecision ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
+            .fixedSize()
+    }
+}
+
+/// What a row shows under the title: the distinctive part of the answer and nothing else (ADR-137).
+///
+/// Not `answerPhrase`, whose every accepted row begins "accepted your recommendation:" — the head
+/// repeats down the list and the tail is the part worth reading. Skipped and unanswered return nil, so
+/// those rows are a single line and the list gets its rhythm: what you settled is taller than what you
+/// passed on.
+enum GrillAnswerSummary {
+    static func of(_ answer: GrillAnswer?, in question: GrillQuestion) -> String? {
+        switch answer {
+        case .acceptedRecommendation: question.recommendation
+        case .choices(let ids):
+            ids.compactMap { id in question.choices.first { $0.id == id }?.label }
+                .joined(separator: " · ")
+        case .text(let text): text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .skipped, .none: nil
+        }
     }
 }
 

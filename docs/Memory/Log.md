@@ -3480,3 +3480,28 @@ Two things that made the re-test honest rather than another guess:
   exactly the failures worth seeing.**
 
 `make build` clean, 455 tests pass. Clicking, `e`, `⎋`, arrows and digits all re-verified.
+
+## 2026-09-12 (cont.) — history reads like a record, and I could finally see it
+
+User: *"Let's do a UI/UX pass on the Round history part of the pane."* Asked what specifically:
+**"Too cramped, visually noisy"** — and they restored Screen Recording, so this is the first change to
+this pane made **with the pane on screen**. Recorded as [[ADR-137 History Reads Like A Record]].
+
+- The kind of answer is a **badge** (Accepted / Chosen / Yours / Skipped / **No answer**), and the second
+  line keeps only the distinctive part. Rows were rendering `answerPhrase` — prose written for the agent
+  — so every accepted row began "accepted your recommendation:" and four rows read as one block of grey.
+- **A skipped question and an unanswered one were identical**, both rendering "skipped, you decide.",
+  because an unanswered question *is* sent as skipped. Right for the agent, wrong for a record. Found by
+  looking at it; the accessibility tree had been reporting the same string for both all along.
+- Rows with nothing to add are one line, so the list has rhythm; a round header says what became of it,
+  when, and its shape by kind; the wizard's *n of m* goes once a round cannot be answered.
+- Walking the list now reads it: the focused row expands, `⏎`/`Space` pin one open.
+
+**Three bugs only a screenshot could have caught**, all fixed after seeing them: a just-sent round read
+*"Sent in 0 seconds"*; an expanded row printed its recommendation twice (summary *and* detail); the
+detail sat against the focus ring with no bottom padding.
+
+**And one that was not the pane at all**: two runs recorded every answer as unanswered because a **TCC
+dialog was sitting over the window eating keystrokes**. A screenshot showed it instantly; the
+accessibility tree had shown a plausible-looking focused text area and no hint of the modal. Worth
+keeping: *the AX tree tells you what the app thinks; only a screenshot tells you what is in front of it.*
