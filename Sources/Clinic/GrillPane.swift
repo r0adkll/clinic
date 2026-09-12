@@ -147,6 +147,9 @@ final class GrillPaneModel {
     func beginAnswering(_ round: GrillRound, _ question: GrillQuestion, existing: GrillAnswer?) {
         if drafts[key(round, question)] == nil, case .text(let t)? = existing { drafts[key(round, question)] = t }
         mode = .answering
+        // Cancels any claim the pane's responder had queued: the reader is in the field now, and a
+        // claim that fired after this would take the keyboard back out from under them (ADR-138).
+        wantsKeyboard = false
     }
 }
 
@@ -261,14 +264,7 @@ struct GrillPane: View {
         // The pane's keyboard is an `NSView`, not SwiftUI focus (ADR-135). It draws nothing and takes
         // no clicks; it exists so that arrows arrive at all and so that "who has the keyboard" has one
         // answer, held by AppKit.
-        .background(
-            GrillKeyboard(wants: model.wantsKeyboard && model.mode == .navigate,
-                          onKey: { navigate($0, in: round) },
-                          onFocusChange: { has in
-                              model.hasKeyboard = has
-                              if has { model.wantsKeyboard = false }
-                          })
-        )
+        .background(GrillKeyboard(model: model, onKey: { navigate($0, in: round) }))
     }
 
     /// Why this round cannot be answered, in the words that are true of it.
@@ -852,24 +848,6 @@ private struct QuestionStep: View {
                             .allowsHitTesting(false)
                     }
                 }
-
-            HStack(spacing: 6) {
-                if focused {
-                    Text("⇥ next · ⎋ done")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-                if answer != .skipped {
-                    // Not a peer of typing: the third of the three answers a question takes, which is
-                    // why it no longer sits against the box.
-                    Button("Skip · s") { skip() }
-                        .buttonStyle(.borderless)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .help("You decide — the agent picks")
-                }
-            }
         }
     }
 

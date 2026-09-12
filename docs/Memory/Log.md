@@ -3505,3 +3505,40 @@ detail sat against the focus ring with no bottom padding.
 dialog was sitting over the window eating keystrokes**. A screenshot showed it instantly; the
 accessibility tree had shown a plausible-looking focused text area and no hint of the modal. Worth
 keeping: *the AX tree tells you what the app thinks; only a screenshot tells you what is in front of it.*
+
+## 2026-09-12 (cont.) — the answer box was never given a size
+
+User: *"I did find some weird input/focus bugs when trying to answer those questions."* In the round
+they were answering, Q1 came back as the single character **`f`**. Recorded as
+[[ADR-138 The Answer Box Was Never Given A Size]].
+
+**Reproduced exactly**: click the box, type `hello`, and `llo` lands — the `h` goes nowhere, the **`e`
+is read as the keymap's "write your own answer"** and opens the field mid-word, and the rest types. The
+reader's letters are being read as shortcuts because the click never put the keyboard in the box. That
+is the `f`.
+
+**The cause, fixed**: `GrillAnswerField` built its `NSTextView` with a bare `GrillTextView()` and gave
+it **no frame, no resizable flags, no autoresizing mask and no text-container size**. Such a view is
+effectively zero-sized: keys still reach it (a first responder receives them wherever it is), the mouse
+cannot (nothing under the pointer), and **typed text did not render at all**. Every check until today
+went through the accessibility tree, which happily reported a text area with the right frame and the
+right value while nothing was drawn.
+
+Also fixed: ADR-135's keyboard claim was not one-shot — `wantsKeyboard` stayed true until the pane's
+responder gained focus, so every re-render re-claimed the keyboard, including the re-render caused by a
+click that had just put it elsewhere. And it called `makeFirstResponder` from inside `updateNSView`,
+mutating observed state mid-update.
+
+**Still open, and the ADR says so**: clicking the box is *still* unreliable. Narrowed — sibling controls
+take clicks every time; a `simultaneousGesture` on the box never fires, so SwiftUI is not hit-testing
+that subtree either; removing the key-catcher entirely changes nothing; the overlays already carry
+`allowsHitTesting(false)`. Six hypotheses tried and discarded in one sitting. The non-firing gesture was
+removed rather than shipped.
+
+**Two process lessons, both mine:**
+- A fresh smoke instance shows a **TCC dialog that is app-modal and eats every click and keystroke**.
+  Three runs were misread as product bugs before a screenshot showed it. *Screenshot before believing a
+  driver result.*
+- `Logger.info` is **not persisted** to the log store, so `log show` returned nothing until the trace
+  was raised to `.error`. Instrumenting early — which I failed to do for the arrow keys too — is what
+  finally produced the `llo` evidence.

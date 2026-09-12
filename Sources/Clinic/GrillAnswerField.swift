@@ -25,6 +25,10 @@ struct GrillAnswerField: NSViewRepresentable {
         let view = GrillTextView()
         view.delegate = context.coordinator
         view.font = .systemFont(ofSize: 12)
+        // Set outright rather than trusted to the default: without these the box renders and takes
+        // keys when focused programmatically, and ignores the mouse (ADR-138).
+        view.isEditable = true
+        view.isSelectable = true
         view.isRichText = false
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
@@ -36,13 +40,30 @@ struct GrillAnswerField: NSViewRepresentable {
         view.onExit = onExit
 
         let scroll = NSScrollView()
-        scroll.documentView = view
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        // **The text view has to be given a size.** `NSTextView()` with no frame, handed straight to
+        // `documentView`, ends up effectively zero-sized: typing still works, because a first responder
+        // receives keys wherever it is, but **clicking does not — there is nothing under the pointer**.
+        // That is what made the box refuse the mouse while `e` opened it perfectly well, and why a
+        // reader who clicked and typed had their first letters read as shortcuts (ADR-138).
+        view.frame = NSRect(origin: .zero, size: scroll.contentSize)
+        view.minSize = NSSize(width: 0, height: scroll.contentSize.height)
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        view.textContainer?.containerSize = NSSize(width: scroll.contentSize.width,
+                                                   height: CGFloat.greatestFiniteMagnitude)
+        view.textContainer?.widthTracksTextView = true
+        scroll.documentView = view
         // Both drawn in SwiftUI instead: a border that has to change with focus cannot be
         // `NSScrollView.lineBorder` (ADR-136).
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
+        // A scroll view that does not draw its background still has to be hit-testable, and its clip
+        // view is what the pointer meets first.
+        scroll.contentView.drawsBackground = false
         return scroll
     }
 
@@ -87,6 +108,11 @@ final class GrillTextView: NSTextView {
         return accepted
     }
 
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        return ok
+    }
+
     override func insertTab(_ sender: Any?) { onExit?(.next) }
     override func insertBacktab(_ sender: Any?) { onExit?(.previous) }
     override func cancelOperation(_ sender: Any?) { onExit?(.cancel) }
@@ -116,31 +142,41 @@ enum GrillKey: Equatable {
 /// keyboard, AppKit makes this view resign — so "who has the keyboard" has exactly one answer, held by
 /// AppKit rather than inferred from SwiftUI's separate focus state.
 struct GrillKeyboard: NSViewRepresentable {
-    /// True when the pane should hold the keyboard. The view claims it on the next update.
-    let wants: Bool
+    @Bindable var model: GrillPaneModel
     /// Handles a key; false lets AppKit carry on with it.
     let onKey: (GrillKey) -> Bool
-    /// Whether this view currently holds the keyboard, so the header can stop advertising keys that
-    /// would go to the terminal instead.
-    let onFocusChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> GrillKeyView {
         let view = GrillKeyView()
-        view.onKey = onKey
-        view.onFocusChange = onFocusChange
+        wire(view)
         return view
     }
 
     func updateNSView(_ view: GrillKeyView, context: Context) {
+        wire(view)
+        guard model.wantsKeyboard, model.mode == .navigate else { return }
+        // **One shot, next runloop turn.** Both halves matter and both were missing:
+        //
+        // `wantsKeyboard` used to stay true until this view *gained* focus, so every re-render
+        // re-claimed the keyboard — including the re-render caused by the click that had just put it
+        // in the answer field. The reader clicked the box, the pane took the keyboard straight back,
+        // and their first keystrokes went to the keymap instead: `s` skipped the question being
+        // answered and `e` opened the field part-way through a word (ADR-138).
+        //
+        // And claiming from inside `updateNSView` mutates observed state during a view update, via
+        // `becomeFirstResponder`. Deferring makes the request re-checkable against what the reader has
+        // done since.
+        model.wantsKeyboard = false
+        DispatchQueue.main.async {
+            guard model.mode == .navigate, !model.wantsKeyboard,
+                  let window = view.window, window.firstResponder !== view else { return }
+            window.makeFirstResponder(view)
+        }
+    }
+
+    private func wire(_ view: GrillKeyView) {
         view.onKey = onKey
-        view.onFocusChange = onFocusChange
-        // Asked for, never stolen. `wants` is already false while the reader is typing — it requires
-        // Navigate mode — so this may take the keyboard back **from the answer field**, which is the
-        // whole point of `⎋`. An earlier version also refused whenever an `NSTextView` held it, and
-        // that refusal fired on exactly the case it was meant to serve: after `⎋` the field still held
-        // first responder, so the pane never got its keyboard back (ADR-135).
-        guard wants, let window = view.window, window.firstResponder !== view else { return }
-        window.makeFirstResponder(view)
+        view.onFocusChange = { has in model.hasKeyboard = has }
     }
 }
 
@@ -201,3 +237,4 @@ final class GrillKeyView: NSView {
         return .character(first)
     }
 }
+
