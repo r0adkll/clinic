@@ -45,7 +45,9 @@ final class GrillPaneModel {
     /// Which row of the history list has the keyboard, and which rows are opened (ADR-133). A round you
     /// cannot answer is read, not walked, so it keeps its own focus rather than borrowing the wizard's.
     var historyFocus = 0
-    var expandedHistory: Set<String> = []
+    /// The one open row, by question id. Focus and openness are the same idea rather than two that a
+    /// single click had to drive at once (ADR-140).
+    var historyOpenId: String?
     /// A prior round the reader asked to see again. Nil means the round the pane would show anyway.
     var replayingRoundId: UUID?
     /// True while Send is writing into the surface, so the button cannot fire twice.
@@ -112,16 +114,19 @@ final class GrillPaneModel {
         }
     }
 
-    /// A row is open when the reader is on it, or when they pinned it open. Walking the list therefore
-    /// reads it, rather than costing `⏎` per question (ADR-137).
-    func isHistoryExpanded(_ question: GrillQuestion, at index: Int) -> Bool {
-        historyFocus == index || expandedHistory.contains(question.id)
+    func isHistoryExpanded(_ question: GrillQuestion) -> Bool { historyOpenId == question.id }
+
+    /// Moving the focus opens what it lands on and closes what it left — this is what makes walking the
+    /// list read it (ADR-137), now the only way a row opens by moving.
+    func focusHistory(_ index: Int, _ question: GrillQuestion) {
+        historyFocus = index
+        historyOpenId = question.id
     }
 
-    /// `⏎`/`Space`: keep this one open after the focus moves on.
-    func pinHistory(_ question: GrillQuestion) {
-        if expandedHistory.contains(question.id) { expandedHistory.remove(question.id) }
-        else { expandedHistory.insert(question.id) }
+    /// `⏎`, `Space`, or clicking the row already focused. The gesture that was missing: before this
+    /// there was no reliable way to close anything (ADR-140).
+    func toggleHistory(_ question: GrillQuestion) {
+        historyOpenId = historyOpenId == question.id ? nil : question.id
     }
 
     /// Puts the wizard back at the first question. Deliberately does **not** touch `replayingRoundId`:
@@ -131,7 +136,7 @@ final class GrillPaneModel {
         step = .question(0)
         reviewFocus = 0
         historyFocus = 0
-        expandedHistory = []
+        historyOpenId = nil
         mode = .navigate
     }
 
@@ -453,10 +458,16 @@ struct GrillPane: View {
             let last = round.questions.count - 1
             guard last >= 0 else { return false }
             switch key {
-            case .down, .right, .character("j"): model.historyFocus = min(model.historyFocus + 1, last); return true
-            case .up, .left, .character("k"): model.historyFocus = max(model.historyFocus - 1, 0); return true
+            case .down, .right, .character("j"):
+                let next = min(model.historyFocus + 1, last)
+                model.focusHistory(next, round.questions[next])
+                return true
+            case .up, .left, .character("k"):
+                let next = max(model.historyFocus - 1, 0)
+                model.focusHistory(next, round.questions[next])
+                return true
             case .enter, .space:
-                model.pinHistory(round.questions[min(model.historyFocus, last)])
+                model.toggleHistory(round.questions[min(model.historyFocus, last)])
                 return true
             default: return false
             }
@@ -906,7 +917,7 @@ private struct HistoryList: View {
         VStack(alignment: .leading, spacing: 8) {
             HistoryHeader(round: round)
             ForEach(Array(round.questions.enumerated()), id: \.element.id) { index, question in
-                let expanded = model.isHistoryExpanded(question, at: index)
+                let expanded = model.isHistoryExpanded(question)
                 GrillAnswerRow(
                     question: question,
                     answer: round.answers[question.id],
@@ -915,8 +926,10 @@ private struct HistoryList: View {
                     expanded: expanded,
                     help: expanded ? "Collapse — ⏎" : "Show the question — ⏎"
                 ) {
-                    model.historyFocus = index
-                    model.pinHistory(question)
+                    // Clicking a different row moves there and opens it; clicking the row you are on
+                    // closes it. One gesture, one meaning, wherever the reader is (ADR-140).
+                    if model.historyFocus == index { model.toggleHistory(question) }
+                    else { model.focusHistory(index, question) }
                 } detail: {
                     if expanded { detail(for: question) }
                 }

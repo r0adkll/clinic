@@ -3563,3 +3563,35 @@ One line: the tool handler calls `toggleGrill` instead of `showPane`, so the pan
 the reader's own ⌘⇧K opens it. Verified with the terminal deliberately holding focus first (the case
 the old rule protected): focus moved from the terminal to the pane, and ↓ then ⏎ answered a question
 with no click in between. `show_image` still leaves the keyboard alone, so ADR-107 is untouched.
+
+## 2026-09-12 (cont.) — collapsing history rows had two masters
+
+User: *"the collapsing logic on the round history panel for its questions is very buggy, clicking to
+collapse some questions collapses different, and expanding will also collapse."* Reproduced exactly,
+fixed, recorded as [[ADR-140 One Row Open At A Time]].
+
+**First, a thing to notice about this session**: HEAD was `edd797f (ADR-139)` while my last commit was
+`bf4b960 (ADR-136)` — ADRs 137, 138 and 139 landed **outside this conversation**, and `GrillKeyboard`
+had been refactored under me. Reading the file rather than trusting memory is what caught it; the
+signature in my head (`wants:onKey:onFocusChange:`) no longer existed. *Check HEAD against your own last
+commit before reasoning about code you think you wrote.*
+
+**The bug.** ADR-137 gave a row two sources of openness — transient from focus ("walking the list reads
+it") and sticky from pinning with `⏎`. Two keys drive those two mechanisms, so the keyboard is coherent.
+**The pointer has one gesture**, and the row's action drove both at once (`historyFocus = index` then
+`pinHistory(question)`), so clicking a row collapsed the previously focused one, and clicking the row
+you were already on toggled a pin that focus still held open — which looks like nothing happening.
+Whether a row stayed open depended on how many times you had clicked it.
+
+Now `historyOpenId: String?` is the single source: moving the focus opens what it lands on, and `⏎`,
+`Space` or clicking the row you are on toggles it. Pinning is gone — ADR-137 made the *collapsed* row
+carry the answer, so two open bodies buy very little.
+
+**Process, twice in one turn**: I again redirected the driver's output to `/dev/null` and so missed that
+`Post a Sample Round` had silently done nothing, and my compact rewrite of the menu tool had dropped the
+`AXEnabled` check I wrote earlier — so a disabled item reported `pressed`. Both are the same failure:
+**a tool that cannot fail loudly will waste a debugging cycle.** The menu tool now refuses a disabled
+item, and the round is posted in a poll loop that waits for the session tab rather than guessing at a
+sleep.
+
+`make build` clean, 455 tests pass. Appearance still unseen — Screen Recording remains declined.
