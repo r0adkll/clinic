@@ -829,6 +829,11 @@ private struct QuestionStep: View {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(focused ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.12),
                                       lineWidth: focused ? 1.5 : 1)
+                        // Decoration only. An overlay sits *above* the `NSViewRepresentable`, and a
+                        // shape hit-tests, so without this the border swallowed every click into the
+                        // box and the text view never became first responder: the reader could type
+                        // only by pressing `e`, and clicking did nothing at all.
+                        .allowsHitTesting(false)
                 }
                 .overlay(alignment: .topLeading) {
                     // A prompt and a caret in the same box is noise, so it goes once the field is live.

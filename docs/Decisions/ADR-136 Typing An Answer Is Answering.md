@@ -95,12 +95,26 @@ Driven through the accessibility tree (Screen Recording is still declined for Cl
   longer a pair flanking the text box.
 - Nothing else moved: arrows navigate, a digit picks, `s` skips, `⏎` reaches the review step, `⌘⏎` sent
   the round (`sent | 4 answers`), and the history list still walks and opens.
+- **Clicking into the box works** (verified after the correction below, by locating the text area's frame
+  through the accessibility tree and clicking its centre rather than guessing coordinates): the hint
+  appeared, the typed text landed, and the pip went to *answered*.
 
 455 ClinicCore tests pass and `make build` is clean. Smoke instance and its App Support removed.
 
 **Appearance unverified**, as with ADR-133 onward: the new border, height and spacing have not been seen.
 
 ## Corrections
+**The new border made the box untypeable.** Moving it out of `NSScrollView` and into a SwiftUI
+`.overlay` put a hit-testing shape *above* the `NSViewRepresentable`, so every click into the box landed
+on the border and the `NSTextView` never became first responder. The reader could type only by pressing
+`e`; clicking did nothing at all. The placeholder overlay three lines below it carries
+`.allowsHitTesting(false)` and the border did not.
+
+It survived verification because every check in this ADR reached the field with `e` — the keyboard path
+was the thing being tested, and the pointer path was never tried. A pane meant to be worked from the
+keyboard still has to answer the mouse, and "I verified it" means the way a reader would do it, not the
+way the test was convenient to write.
+
 Restructuring `QuestionStep` deleted `ReviewStep`, `HistoryList`, `GrillAnswerRow` and `ReadOnlyBanner`
 along with the code it meant to replace — a cut taken by position between two markers rather than by
 the boundaries of what it was replacing. The build caught it immediately and they were restored intact,

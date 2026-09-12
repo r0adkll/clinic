@@ -3454,3 +3454,29 @@ took `ReviewStep`, `HistoryList`, `GrillAnswerRow` and `ReadOnlyBanner` with it.
 never seen. Committing this work would remove the hazard entirely.
 
 `make build` clean, 455 tests pass. Appearance still unseen — Screen Recording remains declined.
+
+## 2026-09-12 (cont.) — the new border ate every click
+
+User: *"On the test/sample grill is it expected that the input box won't let me type into it?"* No — a
+bug, and one introduced by the change meant to make the box look more typeable.
+
+ADR-136 moved the field's border out of `NSScrollView.lineBorder` into a SwiftUI `.overlay` so it could
+go accent on focus. **An overlay sits above the `NSViewRepresentable`, and a shape hit-tests**, so every
+click into the box landed on the border and the `NSTextView` never became first responder. One
+`.allowsHitTesting(false)` — which the placeholder overlay three lines below already had, and the border
+did not. Recorded as a Correction in [[ADR-136 Typing An Answer Is Answering]].
+
+**Why verification missed it, which is the useful part**: every check in that ADR reached the field with
+`e`, because the keyboard is what the pane is for and what I was testing. The pointer path was never
+tried. *Verify the way a reader would do it, not the way the harness makes convenient* — and for a text
+box that means clicking it.
+
+Two things that made the re-test honest rather than another guess:
+- the answer box was located by reading its **frame from the accessibility tree** (`AXTextArea`, 644×56)
+  instead of estimating coordinates — the first attempt clicked at a guessed point that turned out to be
+  inside the terminal, which would have "confirmed" the bug was still there;
+- the first `Post a Sample Round` silently did nothing because it raced the app's startup; pressing it
+  with output visible showed `pressed` vs nothing. **Redirecting a driver's output to /dev/null hides
+  exactly the failures worth seeing.**
+
+`make build` clean, 455 tests pass. Clicking, `e`, `⎋`, arrows and digits all re-verified.
