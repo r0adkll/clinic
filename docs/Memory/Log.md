@@ -3722,3 +3722,37 @@ before writing it down.*
 
 `make build` clean, 456 tests pass. The capsule, its fills and the 7 pt chevron are still unseen:
 Screen Recording remains declined.
+
+## 2026-09-13 — code review of the Grill pane, and what it found
+
+Ran `/code-review 449d3bd..77e72a4 high` over the ten commits that went to main. **Five of six findings
+were real**; I verified each in the source before touching anything.
+
+- **Skipping did not clear the draft.** `accept` and `pick` both cleared it; `skip` did not, and the
+  draft fold overwrote the skip — in the pips, the badge, the review *and* in what was sent. A reader
+  who typed, changed their mind and pressed `s` sent the text anyway.
+- **`⏎` on a multi-select that also carried a recommendation wiped the ticks**, because the branch
+  tested `recommendation != nil` first — while the choice list's own hint says to press ⏎ when done.
+  "Already answered" now wins over "has a recommendation".
+- **`⌘⌃C` copied the newest round, not the one on screen** (`rounds.last` vs the pane's `current`). The
+  header's copy button was right, so the two disagreed. The rule now lives in one place,
+  `GrillPaneModel.currentRound(in:)`, shared by both.
+- **`grillWantsKeyboard` was one app-wide flag**, so a round arriving in one window made *every* open
+  Grill pane grab focus. It now names the tab it was meant for.
+- **Accept all navigated off the raw round**, sending the reader back to a question the pips, counter
+  and review all already called answered. It uses the drafts-folded round now.
+
+**The sixth was wrong**, and worth recording as a caution about review output: it claimed `toggleGrill`
+cannot reveal a hidden panel because `showPane` only sets `isVisible` when it *creates* a pane. But
+`SidePanel.select` — which the existing-pane branch calls — sets `isVisible = true` itself. The reviewer
+read one function and not the one it called. *Verify findings in the source; a confident report is still
+a report.*
+
+**A harness failure worth remembering.** I could not reproduce the skip bug through synthetic input:
+`e` sometimes did not focus the answer field, so "use a socket" was interpreted as *keys* (`s` skipping,
+`e` opening the field mid-word), and `drive activate` between a click and typing resets first responder.
+Rather than keep fighting it, the draft fold moved into `ClinicCore` as
+`GrillRound.applying(drafts:)` — a pure function with four tests, including the exact shape of the bug.
+**When the UI harness cannot create a precondition, move the rule somewhere a test can reach it.**
+
+`make build` clean, 460 tests pass (four new).

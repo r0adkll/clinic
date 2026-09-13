@@ -54,6 +54,9 @@ final class GrillPaneModel {
     var viewingRoundId: UUID?
     /// True while Send is writing into the surface, so the button cannot fire twice.
     var sending = false
+    /// Set when a *specific* tab's pane should take the keyboard. It was a single app-wide flag, so a
+    /// round arriving in one window made every open Grill pane grab focus — including one in another
+    /// window, pulling it out of that session's terminal mid-sentence.
     /// Whether the pane's own responder holds the keyboard. Set by AppKit from
     /// `becomeFirstResponder`/`resignFirstResponder`, not inferred from SwiftUI's focus state —
     /// inferring it is what let the keymap fire inside the reader's sentences (ADR-134, ADR-135).
@@ -116,6 +119,15 @@ final class GrillPaneModel {
         }
     }
 
+    /// Which round is on screen: the one the reader chose, else the newest still open, else the newest
+    /// there is. It lives here rather than in the view because `copyFrontGrillRound` needs the same
+    /// answer — it used to take `rounds.last`, so ⌘⌃C copied a different round from the one being read
+    /// whenever the reader had picked an older one.
+    func currentRound(in rounds: [GrillRound]) -> GrillRound? {
+        if let viewingRoundId, let match = rounds.first(where: { $0.id == viewingRoundId }) { return match }
+        return rounds.last(where: \.isOpen) ?? rounds.last
+    }
+
     func isHistoryExpanded(_ question: GrillQuestion) -> Bool { historyOpenId == question.id }
 
     /// Moving the focus opens what it lands on and closes what it left — this is what makes walking the
@@ -176,10 +188,7 @@ struct GrillPane: View {
     /// The round on screen: one the reader asked to see again, else the open one, else the newest —
     /// because a pane that says "nothing here" the moment you press Send erases what you just did
     /// (ADR-132).
-    private var current: GrillRound? {
-        if let id = model.viewingRoundId, let match = rounds.first(where: { $0.id == id }) { return match }
-        return rounds.last(where: \.isOpen) ?? rounds.last
-    }
+    private var current: GrillRound? { model.currentRound(in: rounds) }
 
     private var openRound: GrillRound? { rounds.last(where: \.isOpen) }
 
@@ -253,8 +262,9 @@ struct GrillPane: View {
         }
         // The reader opened this pane themselves, so it may have the keyboard (ADR-132). A round
         // arriving never sets the flag, so it can still never eat a half-typed sentence.
-        .onChange(of: tabs.grillWantsKeyboard) { _, wants in if wants { takeKeyboard() } }
-        .onAppear { if tabs.grillWantsKeyboard { takeKeyboard() } }
+        // Only when the request names *this* tab.
+        .onChange(of: tabs.grillKeyboardRequest) { _, wanted in if wanted == tab.id { takeKeyboard() } }
+        .onAppear { if tabs.grillKeyboardRequest == tab.id { takeKeyboard() } }
     }
 
     private func takeKeyboard() {
@@ -262,7 +272,7 @@ struct GrillPane: View {
         // observed state mid-body.
         DispatchQueue.main.async {
             model.wantsKeyboard = true
-            tabs.grillWantsKeyboard = false
+            tabs.grillKeyboardRequest = nil
         }
     }
 
@@ -284,7 +294,7 @@ struct GrillPane: View {
                                      actionable: isActionable,
                                      accept: { accept(round.questions[index], in: round) },
                                      pick: { pick($0, for: round.questions[index], in: round) },
-                                     skip: { answer(.skipped, for: round.questions[index], in: round, advance: true) },
+                                     skip: { skip(round.questions[index], in: round) },
                                      exit: { exit($0, for: round.questions[index], in: round) })
                     }
                 }
@@ -565,16 +575,18 @@ struct GrillPane: View {
         case .tab(let shift): model.move(by: shift ? -1 : 1, in: round); return true
 
         case .enter:
-            // ⏎ means "I am done with this question", in whichever way this question can be done: take
-            // the recommendation, or move on from an answer already given — which is what a
-            // multi-select needs, since ticking boxes deliberately does not advance. Only a question
-            // with neither falls through to typing (ADR-132).
-            if question.recommendation != nil {
-                accept(question, in: round)
-            } else if round.answers[question.id]?.isMeaningful == true {
+            // ⏎ means "I am done with this question", in whichever way this question can be done.
+            // **Already answered wins over the recommendation**: testing the recommendation first meant
+            // ⏎ on a multi-select that also carried one replaced the reader's ticks with
+            // `.acceptedRecommendation` — while the choice list's own hint told them to press ⏎ when
+            // they were done. Drafts count as answers here, the same as everywhere else (ADR-136).
+            let given = (shown ?? round).answers[question.id]
+            if given?.isMeaningful == true {
                 model.advance(in: round)
+            } else if question.recommendation != nil {
+                accept(question, in: round)
             } else {
-                model.beginAnswering(round, question, existing: round.answers[question.id])
+                model.beginAnswering(round, question, existing: given)
             }
             return true
 
@@ -582,7 +594,7 @@ struct GrillPane: View {
             model.beginAnswering(round, question, existing: round.answers[question.id])
             return true
         case .character("s"):
-            answer(.skipped, for: question, in: round, advance: true)
+            skip(question, in: round)
             return true
         case .character(let c) where c.isNumber && c != "0":
             guard let n = c.wholeNumberValue, question.choices.indices.contains(n - 1) else { return true }
@@ -601,6 +613,14 @@ struct GrillPane: View {
         model.mode = .navigate
         // A complete answer advances; an incomplete one does not (ADR-132).
         if advance { model.advance(in: round) }
+    }
+
+    /// Skipping has to clear the draft, exactly as accepting and picking do. Without it `withDrafts`
+    /// put the abandoned text back over the skip — in the pips, the badge, the review *and* in what was
+    /// sent — so a reader who typed, changed their mind and pressed `s` sent the text anyway.
+    private func skip(_ question: GrillQuestion, in round: GrillRound) {
+        model.clearDraft(round, question)
+        answer(.skipped, for: question, in: round, advance: true)
     }
 
     private func accept(_ question: GrillQuestion, in round: GrillRound) {
@@ -648,7 +668,9 @@ struct GrillPane: View {
     private func acceptAll(_ round: GrillRound) {
         guard let session = tab.sessionId else { return }
         sessions.updateGrillRound(round.id, in: session) { $0.acceptAllRecommendations() }
-        var filled = round
+        // From the round *as shown*, drafts folded in: navigating off the raw round sent the reader
+        // back to a question the pips, the counter and the review all already called answered.
+        var filled = withDrafts(round)
         filled.acceptAllRecommendations()
         model.goToFirstUnanswered(in: filled)
     }
@@ -656,12 +678,10 @@ struct GrillPane: View {
     /// The round as it would be sent: every uncommitted draft folded in, so Send never loses what the
     /// reader was in the middle of typing.
     private func withDrafts(_ round: GrillRound) -> GrillRound {
-        var copy = round
-        for question in round.questions {
-            let text = model.draft(round, question).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { copy.answers[question.id] = .text(text) }
-        }
-        return copy
+        // The rule itself lives on `GrillRound` so it can be tested without a window; this only maps
+        // the pane's per-round draft keys onto it.
+        let drafts = Dictionary(uniqueKeysWithValues: round.questions.map { ($0.id, model.draft(round, $0)) })
+        return round.applying(drafts: drafts)
     }
 
     private func discard(_ round: GrillRound) {

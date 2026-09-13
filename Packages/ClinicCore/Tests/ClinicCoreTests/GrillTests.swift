@@ -343,6 +343,41 @@ import Testing
         #expect(rounds.last?.index == GrillRound.maxPerSession + 3)
     }
 
+    // MARK: Drafts folded into what the reader sees (ADR-136)
+
+    @Test func aDraftStandsInForAnAnswer() {
+        let r = round([q("Q1", "A"), q("Q2", "B")])
+        let shown = r.applying(drafts: ["Q1": "my words"])
+        #expect(shown.answers["Q1"] == .text("my words"))
+        #expect(shown.answers["Q2"] == nil)
+        #expect(shown.answeredCount == 1)
+    }
+
+    @Test func blankDraftsAreNothing() {
+        let r = round([q("Q1", "A")])
+        #expect(r.applying(drafts: ["Q1": "   \n "]).answers["Q1"] == nil)
+        #expect(r.applying(drafts: [:]).answers["Q1"] == nil)
+    }
+
+    /// Typing into a question you already accepted must show what you are typing.
+    @Test func aDraftOverridesACommittedAnswerWhileTyping() {
+        var r = round([q("Q1", "A", recommendation: "x")])
+        r.answers["Q1"] = .acceptedRecommendation
+        #expect(r.applying(drafts: ["Q1": "actually, no"]).answers["Q1"] == .text("actually, no"))
+    }
+
+    /// The bug the review found: a reader typed, changed their mind and skipped, and the abandoned text
+    /// came back over the skip — in the pips, the badge, the review *and* in what was sent. The fix is
+    /// that skipping clears the draft, so by the time this runs there is nothing to fold in.
+    @Test func aSkipSurvivesOnceItsDraftIsCleared() {
+        var r = round([q("Q1", "A")])
+        r.answers["Q1"] = .skipped
+        #expect(r.applying(drafts: ["Q1": ""]).answers["Q1"] == .skipped)
+        // And the shape of the bug, for the record: a draft left behind does override the skip, which
+        // is why clearing it is the caller's job and why every commit path now does it.
+        #expect(r.applying(drafts: ["Q1": "stale"]).answers["Q1"] == .text("stale"))
+    }
+
     // MARK: The sample round and discarding (ADR-133)
 
     /// The sample exists to show what the pane can draw, so it has to contain one of each shape — and

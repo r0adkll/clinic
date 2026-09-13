@@ -782,8 +782,13 @@ final class TabStore {
     /// ⌘⌃C: the front Grill pane's newest round as Markdown. Deliberately not ⌘C — that is Edit ▸ Copy,
     /// and claiming it here would shadow copying in the terminal window-wide (ADR-131).
     func copyFrontGrillRound() {
-        guard let tab = selectedTab, tab.panel.isFront(.grill), let id = tab.sessionId,
-              let round = sessions.grillRounds(for: id).last else { return }
+        guard let tab = selectedTab, tab.panel.isFront(.grill), let id = tab.sessionId else { return }
+        // The round the reader is *looking at*, by the pane's own rule. `rounds.last` copied the newest
+        // instead, so picking an older round and pressing ⌘⌃C put a different round on the pasteboard —
+        // while the header's copy button, which passes what it shows, was right.
+        let rounds = sessions.grillRounds(for: id)
+        guard let model = tab.panel.pane(.grill)?.grill,
+              let round = model.currentRound(in: rounds) else { return }
         copyGrillRound(round)
     }
 
@@ -938,11 +943,15 @@ final class TabStore {
     /// Set whenever the Grill pane is opened — by the reader, or by a round arriving (ADR-139, which
     /// reversed ADR-131's "never on arrival"). A round is the agent stopping and waiting, so the pane
     /// takes the keyboard rather than making the reader reach for it every round. The pane clears it.
-    var grillWantsKeyboard = false
+    /// The tab whose Grill pane should take the keyboard. Named rather than a bare flag: a single
+    /// app-wide one made a round arriving in one window pull focus in *every* window with a Grill pane
+    /// open, out of a terminal someone was typing into.
+    var grillKeyboardRequest: Tab.ID?
 
     func toggleGrill(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
         showPane(.grill, in: tab)
-        grillWantsKeyboard = true
+        grillKeyboardRequest = tab.id
     }
 
     /// Whether a Grill pane is the one on screen — the menu's Grill verbs are enabled only then, the

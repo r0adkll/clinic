@@ -66,6 +66,25 @@ public struct GrillRound: Codable, Sendable, Equatable, Identifiable {
 
     public func answer(for question: GrillQuestion) -> GrillAnswer? { answers[question.id] }
 
+    /// The round as the reader sees it, with text they are still typing folded in (ADR-136).
+    ///
+    /// A non-empty draft stands in for that question's answer, so a question typed into reads as
+    /// answered everywhere — pip, badge, count, review — before it reaches the state file. Blank and
+    /// whitespace-only drafts are nothing at all.
+    ///
+    /// **This overrides a committed answer on purpose**: typing into a question you had already
+    /// accepted must show what you are typing. The invariant that makes it safe is that anything which
+    /// commits a *non-text* answer — accept, pick, skip — clears the draft first. A skip that forgot to
+    /// do so was silently overridden by the abandoned text, in the display and in what was sent.
+    public func applying(drafts: [String: String]) -> GrillRound {
+        var copy = self
+        for question in questions {
+            let text = drafts[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !text.isEmpty { copy.answers[question.id] = .text(text) }
+        }
+        return copy
+    }
+
     /// Fills every *unanswered* question that has a recommendation — the pane's "Accept all
     /// recommendations". Questions the reader has already answered are left alone, so this is safe to
     /// press halfway through a round.
