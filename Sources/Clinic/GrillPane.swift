@@ -417,6 +417,9 @@ struct GrillPane: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        // Hug the label rather than fill the header. Safe now that the label's own ideal is bounded by
+        // its text; it was not the villain ADR-144 first took it for.
+        .fixedSize()
         .help("This round — pick another")
     }
 
@@ -691,25 +694,51 @@ struct GrillPane: View {
 /// `.fixedSize()`, which overrode its own `lineLimit`/`truncationMode` and let a long topic widen the
 /// header until the mode hint and the counter had nowhere to go (ADR-143).
 private struct RoundPickerLabel: View {
+    /// What the title may take before it truncates — a tab chip's cap ([[ADR-079]]).
+    static let cap: CGFloat = 220
+
     let title: String
     @State private var hovering = false
 
+    /// The title, shortened with an ellipsis until it fits `cap`.
+    ///
+    /// The **string** is bounded rather than the view, because nothing applied to the view held: on the
+    /// padded stack `.frame(maxWidth:)` made the control 220 pt wide whatever the title said; on the
+    /// text it did nothing, since `maxWidth` clamps only against a *proposed* width and a `Menu` sizes
+    /// its label by the label's ideal; and an exact `.frame(width:)` under the text was ignored too —
+    /// measured at 449 pt, then 606 pt with `.fixedSize()`. A `Menu` takes its label's ideal size and
+    /// there is no reliable way to argue with it from inside, so the ideal is made small instead.
+    /// Every layout path agrees about a string that is simply shorter (ADR-144).
+    static func fitted(_ title: String) -> String {
+        let font = NSFont.systemFont(ofSize: PaneMetrics.label, weight: .medium)
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        guard width(title) > cap else { return title }
+        var low = 0, high = title.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if width(String(title.prefix(mid)) + "…") <= cap { low = mid } else { high = mid - 1 }
+        }
+        return String(title.prefix(low)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
     var body: some View {
-        HStack(spacing: 3) {
-            Text(title)
+        HStack(spacing: 4) {
+            Text(Self.fitted(title))
                 .font(.system(size: PaneMetrics.label, weight: .medium))
                 .lineLimit(1)
-                .truncationMode(.tail)
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
+                // A hint that the title opens something, not a control of its own. At 8 pt beside 12 pt
+                // text it competed with the words.
+                .font(.system(size: 7, weight: .bold))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 5)
+        .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .frame(maxWidth: 220, alignment: .leading)
-        .background(hovering ? Color.primary.opacity(0.09) : .clear,
-                    in: RoundedRectangle(cornerRadius: PaneMetrics.radius))
-        .contentShape(RoundedRectangle(cornerRadius: PaneMetrics.radius))
+        // Always drawn, not only on hover: this is the pane's primary navigation and it was bare text
+        // that a reader had to discover by pointing at it. Hover lifts it rather than creating it.
+        .background(Color.primary.opacity(hovering ? 0.12 : 0.06), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(hovering ? 0.12 : 0.07)))
+        .contentShape(Capsule())
         .onHover { hovering = $0 }
     }
 }

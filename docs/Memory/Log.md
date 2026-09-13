@@ -3685,3 +3685,40 @@ every other control in that header already had.
 `make build` clean, 456 tests pass. The checkmark, the hover and the truncation are pixels and remain
 unseen: Screen Recording is still declined for Claude Code, which is now the standing limit on every
 visual request in this feature.
+
+## 2026-09-12 (cont.) — the picker becomes a pill, after three wrong fixes
+
+User: *"Could we add a little more decoration (like a box/pill) around the round title and chevron drop
+down. I also feel like we could use a smaller dropdown glyph and it could be located to the right of the
+text."* Recorded as [[ADR-144 The Round Picker Is A Pill]].
+
+The third note was the tell. The chevron **was** already right of the text — but ADR-143 put
+`.frame(maxWidth: 220)` on the *padded stack* with `.background` applied after it, so the control was
+220 pt wide whatever the title said, the content sat in its left end, and the hover fill stretched well
+past the chevron. A cap meant to truncate a long title was stretching a short one.
+
+**The fix took four attempts and three of them were wrong**, each written down confidently before being
+measured:
+
+| Attempt | Long title measured |
+|---|---|
+| `maxWidth` on the padded stack (the bug) | 220 pt regardless |
+| `maxWidth` on the `Text` | 449 pt |
+| exact `.frame(width:)` on the `Text` | 449 pt |
+| …plus `.fixedSize()` on the `Menu` | 606 pt |
+| truncating the **string** | 237 pt, and 105 pt short |
+
+`maxWidth` clamps only against a *proposed* width; a `Menu` sizes its label by the label's **ideal**, so
+an unspecified proposal passes the ideal through — and a fixed frame under it is not honoured either.
+**You cannot argue with a `Menu` about its label's size from inside it; bound the content instead.**
+Same shape as ADR-107's `.onKeyPress` finding: the framework has a path it will not be talked out of.
+
+Also: `.fixedSize()` was blamed and removed, wrongly. On its own it hugs; it only produced a slab because
+the frame beneath it made the ideal 220. It is back and correct.
+
+**The habit to fix**: I reasoned about SwiftUI layout three times and measured once. The measurement —
+reading the control's frame from the accessibility tree — took seconds. *Put a number on a layout claim
+before writing it down.*
+
+`make build` clean, 456 tests pass. The capsule, its fills and the 7 pt chevron are still unseen:
+Screen Recording remains declined.
