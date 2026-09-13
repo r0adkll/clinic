@@ -9,11 +9,16 @@ struct OpenInTarget: Identifiable, Hashable {
         case ghostty(binary: String)
         case app(URL)
     }
+    /// The app's path on disk, so two installs of one app are two targets (ADR-146). Finder and
+    /// Ghostty keep their fixed ids.
     var id: String
     var name: String
     var kind: Kind
     /// File the icon is read from; Ghostty and Finder resolve to their bundles.
     var iconPath: String
+    /// Bundle id this app was found under; nil for Finder and Ghostty. Only used to re-resolve a
+    /// default picked before ADR-146, when the stored id *was* the bundle id.
+    var bundleId: String? = nil
 }
 
 /// Installed "Open In" destinations plus their app icons and the user's default choice (ADR-078).
@@ -69,10 +74,52 @@ final class OpenInApps {
             found.append(OpenInTarget(id: "ghostty", name: "Ghostty", kind: .ghostty(binary: binary), iconPath: bundle.path))
         }
         for editor in Self.editors {
-            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleId) else { continue }
-            found.append(OpenInTarget(id: editor.bundleId, name: editor.name, kind: .app(app), iconPath: app.path))
+            // Every install, not the one Launch Services prefers: Android Studio and its Preview share
+            // a bundle id, as do Xcode and Xcode-beta, so the singular lookup can only ever offer one
+            // of each pair — and picks the wrong one (ADR-146).
+            let urls = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: editor.bundleId)
+            for (url, name) in Self.named(urls, fallback: editor.name) {
+                found.append(OpenInTarget(id: url.path, name: name, kind: .app(url), iconPath: url.path, bundleId: editor.bundleId))
+            }
         }
         if found != targets { targets = found }
+        adoptPreAppPathDefault()
+    }
+
+    /// Names for one bundle id's installs, in menu order.
+    ///
+    /// The name is the `.app`'s file name, which is what Finder shows and the only thing that tells the
+    /// two Android Studios apart — `CFBundleName` is "Android Studio" for both, so the bundle's own idea
+    /// of its name would draw the list twice with one label. Installs that collide on the file name too
+    /// take their directory as a suffix. Sorted by name so the menu does not reshuffle when Launch
+    /// Services changes its mind about which install it prefers.
+    private static func named(_ urls: [URL], fallback: String) -> [(URL, String)] {
+        func fileName(_ url: URL) -> String {
+            let name = url.deletingPathExtension().lastPathComponent
+            return name.isEmpty ? fallback : name
+        }
+        let counts = urls.reduce(into: [String: Int]()) { $0[fileName($1), default: 0] += 1 }
+        return urls.map { url in
+            let name = fileName(url)
+            guard (counts[name] ?? 0) > 1 else { return (url, name) }
+            return (url, "\(name) (\(abbreviatingHome(url.deletingLastPathComponent().path)))")
+        }
+        .sorted { ($0.1, $0.0.path) < ($1.1, $1.0.path) }
+    }
+
+    private static func abbreviatingHome(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard path == home || path.hasPrefix(home + "/") else { return path }
+        return "~" + path.dropFirst(home.count)
+    }
+
+    /// A default picked before ADR-146 was stored as a bundle id. Now that targets are keyed by path,
+    /// rewrite it to the install it resolves to, so the pick survives rather than silently falling back
+    /// to Finder.
+    private func adoptPreAppPathDefault() {
+        guard let id = defaultTargetId, !targets.contains(where: { $0.id == id }) else { return }
+        guard let match = targets.first(where: { $0.bundleId == id }) else { return }
+        defaultTargetId = match.id
     }
 
     /// The target's app icon at `size` points, cached. Nil when the app has gone away since it was resolved.
