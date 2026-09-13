@@ -3756,3 +3756,31 @@ Rather than keep fighting it, the draft fold moved into `ClinicCore` as
 **When the UI harness cannot create a precondition, move the rule somewhere a test can reach it.**
 
 `make build` clean, 460 tests pass (four new).
+
+## 2026-09-13 (cont.) — the answer box wrote into the wrong question
+
+User: *"The inputs for this panel are still broken. I can't type in any text input box for any question,
+sometimes when navigating over to the 4th panel and then back some letters make it into the 4th panel,
+even though i'm on the second."*
+
+**One line, both symptoms.** `GrillAnswerField.makeCoordinator()` runs once per *view identity*, and the
+wizard draws every question in the same structural position — so SwiftUI reuses the representable as the
+reader moves between questions. The coordinator captured `$text` in its initialiser and kept writing
+into the draft of whichever question it was first bound to.
+
+So typing on Q2 went into Q4's draft; the resulting state change ran `updateNSView`, which saw
+`view.string != text` and reset the box to Q2's empty draft — wiping the keystroke just after it
+arrived. Hence "letters land in the 4th" *and* "I can't type at all". The binding is now assigned in
+`updateNSView` and never captured.
+
+**I had seen this twice and blamed my tools.** While verifying ADR-143 and again during the review
+fixes, synthetic typing did not land and stray characters appeared in Q4. I wrote *"my synthetic input
+muddled that"* and moved on — twice. The rig was reporting the defect accurately.
+**When the harness misbehaves the same way twice, suspect the program before the rig.** It also cost the
+review fix real time: I could not reproduce the skip-versus-draft precondition precisely *because* of
+this bug, and concluded the harness could not create it.
+
+Verified by the reported sequence: walk to Q4, back to Q2, click the box, type — Q2 fills and Q4 stays
+empty; then type on Q4 and both keep their own text (`Q2: "typed on Q2"`, `Q4: "typed on Q4"`).
+
+`make build` clean, 460 tests pass.

@@ -69,6 +69,8 @@ struct GrillAnswerField: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? GrillTextView else { return }
+        // Rebound every update, because this view is reused across questions. See `Coordinator`.
+        context.coordinator.text = $text
         view.onFocus = onFocus
         view.onExit = onExit
         // Asked for, never taken: only when the pane has decided this question is being answered, and
@@ -82,15 +84,26 @@ struct GrillAnswerField: NSViewRepresentable {
         if view.string != text { view.string = text }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
+    /// Writes what the reader types back into **the question on screen now**.
+    ///
+    /// The binding is refreshed on every `updateNSView` and deliberately *not* captured in `init`.
+    /// `makeCoordinator()` runs once per view identity, and the wizard shows each question in the same
+    /// structural position — so SwiftUI reuses this representable as the reader moves between
+    /// questions, and a coordinator that captured `$text` at creation went on writing into the draft of
+    /// whichever question happened to be first.
+    ///
+    /// That single mistake produced both halves of the reported bug: letters typed on Q2 landed in Q4's
+    /// draft, and the box appeared not to accept typing at all — because the state change ran
+    /// `updateNSView`, which found `view.string != text` and reset the box to the *displayed* question's
+    /// (empty) draft, wiping the keystroke a moment after it arrived.
     final class Coordinator: NSObject, NSTextViewDelegate {
-        private let text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
+        var text: Binding<String>?
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
-            text.wrappedValue = view.string
+            text?.wrappedValue = view.string
         }
     }
 }

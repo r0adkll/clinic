@@ -104,6 +104,23 @@ Driven through the accessibility tree (Screen Recording is still declined for Cl
 **Appearance unverified**, as with ADR-133 onward: the new border, height and spacing have not been seen.
 
 ## Corrections
+**The field wrote into the wrong question's draft, and so appeared not to accept typing at all.**
+`makeCoordinator()` runs once per view identity; the wizard shows every question in the same structural
+position, so SwiftUI reuses this representable as the reader moves between questions. The coordinator
+captured `$text` at creation and went on writing into whichever question's draft it was first bound to.
+
+Both halves of what the reader reported come from that one line. Letters typed on Q2 landed in Q4's
+draft — and the box looked dead, because the resulting state change ran `updateNSView`, which found
+`view.string != text` and reset the box to the *displayed* question's empty draft, wiping the keystroke
+a moment after it arrived. The binding is now refreshed on every update and never captured.
+
+**It was in front of me twice and I called it a harness fault.** Verifying ADR-143 and the review fixes,
+synthetic typing failed to land and stray characters turned up in Q4; I wrote "my synthetic input
+muddled that" and moved on. The harness was reporting the bug faithfully. *When the test rig
+misbehaves in the same way twice, suspect the program before the rig.*
+
+### Earlier
+
 **The new border made the box untypeable.** Moving it out of `NSScrollView` and into a SwiftUI
 `.overlay` put a hit-testing shape *above* the `NSViewRepresentable`, so every click into the box landed
 on the border and the `NSTextView` never became first responder. The reader could type only by pressing
