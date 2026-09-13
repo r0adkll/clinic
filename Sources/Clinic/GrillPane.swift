@@ -49,7 +49,9 @@ final class GrillPaneModel {
     /// single click had to drive at once (ADR-140).
     var historyOpenId: String?
     /// A prior round the reader asked to see again. Nil means the round the pane would show anyway.
-    var replayingRoundId: UUID?
+    /// The round the reader chose to look at — open or not. A new round does not change it while they
+    /// are part way through the one on screen (ADR-142).
+    var viewingRoundId: UUID?
     /// True while Send is writing into the surface, so the button cannot fire twice.
     var sending = false
     /// Whether the pane's own responder holds the keyboard. Set by AppKit from
@@ -129,7 +131,7 @@ final class GrillPaneModel {
         historyOpenId = historyOpenId == question.id ? nil : question.id
     }
 
-    /// Puts the wizard back at the first question. Deliberately does **not** touch `replayingRoundId`:
+    /// Puts the wizard back at the first question. Deliberately does **not** touch `viewingRoundId`:
     /// this runs whenever the round on screen changes, and a replay *is* such a change — clearing the
     /// replay here made picking a round from the menu undo itself on the very next render.
     func reset() {
@@ -175,11 +177,18 @@ struct GrillPane: View {
     /// because a pane that says "nothing here" the moment you press Send erases what you just did
     /// (ADR-132).
     private var current: GrillRound? {
-        if let id = model.replayingRoundId, let match = rounds.first(where: { $0.id == id }) { return match }
+        if let id = model.viewingRoundId, let match = rounds.first(where: { $0.id == id }) { return match }
         return rounds.last(where: \.isOpen) ?? rounds.last
     }
 
     private var openRound: GrillRound? { rounds.last(where: \.isOpen) }
+
+    /// Whether the reader has put anything into this round yet — a committed answer or a draft. A round
+    /// they have begun is not taken away from them (ADR-142).
+    private func hasBegun(_ round: GrillRound) -> Bool {
+        if round.answers.values.contains(where: \.isMeaningful) { return true }
+        return round.questions.contains { !model.draft(round, $0).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
 
     /// Whether the round on screen can still be answered. A replayed, sent or superseded round cannot.
     private var isActionable: Bool { current?.isOpen == true }
@@ -222,7 +231,22 @@ struct GrillPane: View {
         .onChange(of: current?.id) { _, _ in model.reset() }
         // A round that needs the reader pulls them out of history: the pane's job is to show what is
         // waiting, and staying in a replay would hide it.
-        .onChange(of: openRound?.id) { _, id in if id != nil { model.replayingRoundId = nil } }
+        // A newly posted round takes the view only when the reader has not begun the one they are on.
+        // Interrupting a half-answered round is what superseding used to do, and it is what this rule
+        // exists to prevent (ADR-142).
+        .onChange(of: openRound?.id) { previousId, id in
+            guard id != nil else { return }
+            // Which round was on screen *before* this one arrived? `current` is no use here: with no
+            // explicit choice it falls through to "newest open", so by the time this runs it already
+            // names the new round. The previous newest-open is what the reader was looking at.
+            let before = model.viewingRoundId ?? previousId
+            if let before, let shown = rounds.first(where: { $0.id == before }), shown.isOpen, hasBegun(shown) {
+                // Pin it, or the fallback drifts to the new round on the next render.
+                model.viewingRoundId = shown.id
+                return
+            }
+            model.viewingRoundId = nil
+        }
         // Leaving the answer field hands the keyboard back to the pane's responder.
         .onChange(of: model.mode) { _, mode in
             if mode == .navigate, !model.sending { model.wantsKeyboard = true }
@@ -357,7 +381,7 @@ struct GrillPane: View {
             ForEach(rounds.reversed()) { round in
                 Button {
                     // The open round is "no replay", so picking it is the same gesture as leaving one.
-                    model.replayingRoundId = round.isOpen ? nil : round.id
+                    model.viewingRoundId = round.isOpen ? nil : round.id
                 } label: {
                     let name = round.index.map { "Round \($0)" } ?? "Questions"
                     let state = round.isOpen ? "waiting" : outcomeWord(round)
@@ -397,7 +421,7 @@ struct GrillPane: View {
         HStack(spacing: 8) {
             if !isActionable {
                 if openRound != nil {
-                    Button("Back to the open round") { model.replayingRoundId = nil }
+                    Button("Back to the open round") { model.viewingRoundId = nil }
                         .help("⎋")
                 }
                 Spacer(minLength: 0)
@@ -462,8 +486,8 @@ struct GrillPane: View {
         guard model.mode == .navigate else { return false }
 
         // ⎋ leaves a replay, the one key that works on a round you cannot answer.
-        if key == .escape, model.replayingRoundId != nil {
-            model.replayingRoundId = nil
+        if key == .escape, model.viewingRoundId != nil {
+            model.viewingRoundId = nil
             return true
         }
 
@@ -615,7 +639,7 @@ struct GrillPane: View {
     private func discard(_ round: GrillRound) {
         guard let session = tab.sessionId else { return }
         sessions.discardGrillRound(round.id, in: session)
-        model.replayingRoundId = nil
+        model.viewingRoundId = nil
         model.reset()
     }
 

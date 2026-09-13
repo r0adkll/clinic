@@ -295,22 +295,34 @@ import Testing
 
     let session = SessionID("11111111-2222-3333-4444-555555555555")
 
-    /// The footer acts on one round; two open rounds would give it two, with no way to say which Send
-    /// meant which.
-    @Test func postingARoundClosesTheOneBefore() {
+    /// A new round no longer closes the ones before it: superseding cost a reader the round they were
+    /// part way through answering, and the footer acts on the round on screen rather than on "the one
+    /// open round" (ADR-142).
+    @Test func postingARoundLeavesTheOneBeforeOpen() {
         var state = ClinicState()
         state.postGrillRound(round([q("Q1", "A")], index: 1), to: session)
         state.postGrillRound(round([q("Q1", "B")], index: 2), to: session)
 
         let rounds = state.grillRounds[session] ?? []
         #expect(rounds.count == 2)
-        #expect(!rounds[0].isOpen)
-        if case .superseded = rounds[0].outcome {} else { Issue.record("round 1 should be superseded, got \(rounds[0].outcome)") }
-        #expect(rounds[1].isOpen)
-        #expect(rounds.filter(\.isOpen).count == 1)
+        #expect(rounds.filter(\.isOpen).count == 2)
+        #expect(rounds.compactMap(\.index) == [1, 2])
     }
 
-    /// A round the reader already sent is history, not something to supersede again.
+    /// Answers the reader had already given survive a later round arriving — the whole point.
+    @Test func aPartAnsweredRoundKeepsItsAnswersWhenAnotherArrives() {
+        var state = ClinicState()
+        var first = round([q("Q1", "A", recommendation: "x"), q("Q2", "B")], index: 1)
+        first.answers["Q1"] = .acceptedRecommendation
+        state.postGrillRound(first, to: session)
+        state.postGrillRound(round([q("Q1", "C")], index: 2), to: session)
+
+        let kept = state.grillRounds[session]?.first
+        #expect(kept?.isOpen == true)
+        #expect(kept?.answers["Q1"] == .acceptedRecommendation)
+    }
+
+    /// A round the reader already sent stays sent when another arrives.
     @Test func aSentRoundKeepsItsOutcome() {
         var state = ClinicState()
         var first = round([q("Q1", "A")], index: 1)
@@ -361,11 +373,11 @@ import Testing
         #expect(Set(r.questions.map(\.id)).count == r.questions.count)
     }
 
-    @Test func aSampleRoundSupersedesLikeAnyOther() {
+    @Test func aSampleRoundIsPostedLikeAnyOther() {
         var state = ClinicState()
         state.postGrillRound(round([q("Q1", "A")], index: 1), to: session)
         state.postGrillRound(.sample(now: now), to: session)
-        #expect(state.grillRounds[session]?.filter(\.isOpen).count == 1)
+        #expect(state.grillRounds[session]?.filter(\.isOpen).count == 2)
         #expect(state.grillRounds[session]?.last?.topic == "Sample round")
     }
 
@@ -378,9 +390,10 @@ import Testing
         state.postGrillRound(drop, to: session)
 
         state.discardGrillRound(drop.id, in: session)
-        #expect(state.grillRounds[session]?.map(\.index) == [1])
-        // The one that stayed keeps the outcome it had; discarding is not a way to reopen a round.
-        #expect(state.grillRounds[session]?[0].isOpen == false)
+        #expect(state.grillRounds[session]?.compactMap(\.index) == [1])
+        // The one that stayed is untouched — and stays open, since rounds no longer close each other
+        // (ADR-142). Discarding one round is not a way to change another.
+        #expect(state.grillRounds[session]?[0].isOpen == true)
     }
 
     @Test func discardingTheLastRoundLeavesNoEmptyEntry() {

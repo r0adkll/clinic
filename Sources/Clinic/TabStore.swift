@@ -861,8 +861,9 @@ final class TabStore {
         case .grill:
             // The count on the chip is what still needs the reader, which is the only number that
             // would make them open the pane (ADR-131).
-            let waiting = tab.sessionId.flatMap { sessions.openGrillRound(for: $0) }
-                .map { $0.questions.count - $0.answeredCount } ?? 0
+            // Sums across open rounds: several can be waiting at once (ADR-142).
+            let waiting = tab.sessionId.map { sessions.openGrillRounds(for: $0) }?
+                .reduce(0) { $0 + ($1.questions.count - $1.answeredCount) } ?? 0
             return waiting > 0 ? "Grill (\(waiting))" : "Grill"
         default: return kind.defaultTitle
         }
@@ -1029,12 +1030,6 @@ final class TabStore {
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         let endedTurn = event.hookEventName == "Stop"
         if endedTurn { runs.turnEnded(in: tab, snapshots: snapshots) }
-        // The reader answered a round in the terminal rather than in the pane, so the pane's copy
-        // becomes history instead of going on claiming it is waiting (ADR-131). Send marks the round
-        // sent synchronously before the paste reaches the CLI, so a round still open here was not ours.
-        if event.hookEventName == "UserPromptSubmit" {
-            sessions.markGrillRoundsAnsweredElsewhere(for: event.sessionId)
-        }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }

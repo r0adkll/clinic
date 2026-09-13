@@ -61,13 +61,13 @@ public struct ClinicState: Codable, Sendable, Equatable {
 
     /// Records a round the agent posted (ADR-131).
     ///
-    /// Two rules live here rather than in the app so they can be checked without a window: **only the
-    /// newest round is open** — the pane's footer acts on one round, and two open rounds would give it
-    /// two with no way to say which Send meant which — and the history is capped, oldest dropped first,
-    /// so a session someone grills all day cannot grow this file without bound.
+    /// A new round no longer closes the ones before it (ADR-142). ADR-132 made it supersede them because
+    /// "the footer acts on one round", and ADR-141's title picker dissolved that: the footer acts on the
+    /// round on screen, and the picker chooses it. Superseding cost a reader the round they were part
+    /// way through answering. The history is still capped, oldest dropped first, so a session someone
+    /// grills all day cannot grow this file without bound.
     public mutating func postGrillRound(_ round: GrillRound, to id: SessionID) {
         var rounds = grillRounds[id] ?? []
-        for i in rounds.indices where rounds[i].isOpen { rounds[i].outcome = .superseded(round.postedAt) }
         rounds.append(round)
         if rounds.count > GrillRound.maxPerSession { rounds.removeFirst(rounds.count - GrillRound.maxPerSession) }
         grillRounds[id] = rounds

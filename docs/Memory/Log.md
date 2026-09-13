@@ -3622,3 +3622,34 @@ the boundaries are in the expected order, which this one now has. Checking `grep
 edit afterwards is what revealed nothing had applied at all.
 
 `make build` clean, 455 tests pass. Appearance still unseen.
+
+## 2026-09-12 (cont.) — the pane was closing rounds nobody had answered
+
+User: *"Often when doing grilling sessions background agent work is kicked off and subsequent sets of
+questions or new rounds come in while you might be answering another round of questions. Currently, the
+pane detects this and 'closes' the pane as sent even though it never was."* Two causes, both mine from
+ADR-131. Recorded as [[ADR-142 Only The Reader Closes A Round]].
+
+1. **`UserPromptSubmit` → answered-elsewhere.** Wired to *any* prompt in the session. The comment
+   preserved the faulty step: *"Send marks the round sent synchronously … so a round still open here was
+   not ours."* True — and it does **not** follow that the reader answered it. A background agent, an
+   automation, `/model`, a run's *Fix with Claude*, the PR panel's send-to-session, or typing anything
+   unrelated all closed the round being worked on and claimed the reader had answered it.
+2. **Supersede.** ADR-132 made a new round close the ones before it because *"the footer acts on one
+   round"*. **ADR-141's title picker dissolved that premise** — the footer already acts on the round on
+   screen — and nobody went back to check. A decision outliving its reason is worth watching for: when
+   a later ADR removes a constraint, the things justified by that constraint are now unjustified.
+
+Now: a round closes only on Send or Discard; several may be open; and a newly posted round does not take
+the view from a round the reader has begun (any answer or draft).
+
+**A subtle thing the first attempt got wrong**: the stay-put guard read `current`, which with no explicit
+choice falls through to "newest open" — so by the time the handler ran it *already named the new round*
+and the guard always passed. It needs `onChange`'s **old** value to know what was on screen before, and
+then has to pin the view explicitly or the fallback drifts back on the next render.
+
+Also: three ClinicCore tests asserted the supersede behaviour. They failed, correctly, and were rewritten
+rather than deleted — a test that encodes a removed decision should be *restated*, since the new rule
+deserves the same coverage the old one had.
+
+`make build` clean, 456 tests pass. Appearance still unseen.

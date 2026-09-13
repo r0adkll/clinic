@@ -82,9 +82,10 @@ private struct ResumeHome: View {
         // turn ended when it posted (ADR-132). This is the only place an open round is findable after a
         // relaunch, since rounds persist but ADR-079 restores no panes.
         for tab in tabs.tabs {
-            guard let id = tab.sessionId, !items.contains(where: { $0.sessionId == id }),
-                  let round = sessions.openGrillRound(for: id) else { continue }
-            let waiting = round.questions.count - round.answeredCount
+            guard let id = tab.sessionId, !items.contains(where: { $0.sessionId == id }) else { continue }
+            // Across every open round: more than one can be waiting (ADR-142).
+            let waiting = sessions.openGrillRounds(for: id)
+                .reduce(0) { $0 + ($1.questions.count - $1.answeredCount) }
             guard waiting > 0 else { continue }
             items.append(WaitingItem(sessionId: id, title: tab.title, projectPath: tab.projectPath,
                                      reason: "\(waiting) question\(waiting == 1 ? "" : "s") waiting",

@@ -191,7 +191,11 @@ final class SessionStore {
         update { s in s.discardGrillRound(roundId, in: id) }
     }
 
-    /// The round still waiting for the reader — the newest one, since the frontier only moves forward.
+    /// Every round still waiting for the reader. More than one can be open: a new round no longer
+    /// closes the ones before it (ADR-142).
+    func openGrillRounds(for id: SessionID) -> [GrillRound] { (state.grillRounds[id] ?? []).filter(\.isOpen) }
+
+    /// The newest round still waiting, for the places that show one.
     func openGrillRound(for id: SessionID) -> GrillRound? { state.grillRounds[id]?.last(where: \.isOpen) }
 
     /// Answering a question, or marking the round sent. A round that has gone is not recreated.
@@ -199,17 +203,6 @@ final class SessionStore {
         update { s in
             guard var rounds = s.grillRounds[id], let i = rounds.firstIndex(where: { $0.id == roundId }) else { return }
             mutate(&rounds[i])
-            s.grillRounds[id] = rounds
-        }
-    }
-
-    /// The reader answered in the terminal instead of the pane, so every open round becomes history
-    /// rather than a task the pane keeps claiming is waiting (ADR-131).
-    func markGrillRoundsAnsweredElsewhere(for id: SessionID, at date: Date = Date()) {
-        guard state.grillRounds[id]?.contains(where: \.isOpen) == true else { return }
-        update { s in
-            guard var rounds = s.grillRounds[id] else { return }
-            for i in rounds.indices where rounds[i].isOpen { rounds[i].outcome = .answeredElsewhere(date) }
             s.grillRounds[id] = rounds
         }
     }
