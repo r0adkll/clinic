@@ -3653,3 +3653,35 @@ rather than deleted — a test that encodes a removed decision should be *restat
 deserves the same coverage the old one had.
 
 `make build` clean, 456 tests pass. Appearance still unseen.
+
+## 2026-09-12 (cont.) — polishing the round picker turned up a third stale assumption
+
+User: *"The round dropdown in the topbar on the grill panel could use some polish."* Recorded as
+[[ADR-143 The Round Picker Says Which Round]] — and the first thing reading it found was not polish:
+
+```swift
+model.viewingRoundId = round.isOpen ? nil : round.id
+```
+
+Written under ADR-141, when exactly one round could be open, so "open" and "what the view falls back to"
+were the same thing. **ADR-142 made several rounds open and did not revisit this line**, so picking an
+older open round set the id to nil and the view fell through to the *newest* open one — the reader
+landed on a round they had not chosen. Now: always `round.id`.
+
+**That is three times in this feature.** ADR-141 dissolved ADR-132's reason for superseding and nobody
+rechecked; ADR-142 invalidated this line and nobody rechecked. Worth treating as a standing rule:
+*when an ADR removes a constraint, grep for the code written under it — it is not wrong yet, it is
+unjustified, and unjustified code goes stale silently.*
+
+The polish itself, all of it traceable to the picker having been designed for few, singular rounds:
+items now carry a checkmark for the round on screen, an outcome glyph, the round's **name** (from a
+shared `name(_:)`, so header and menu cannot disagree, and falling back to the topic rather than every
+unnumbered round reading *Questions*), and **progress** for an open one (*not started* / *3 of 6
+answered* / *ready to send*). Waiting rounds sit above a divider, history below. The label lost
+`.fixedSize()` — which had been overriding its own `lineLimit` and `truncationMode`, letting a long
+topic widen the header until the mode hint and counter had nowhere to go — and gained the hover fill
+every other control in that header already had.
+
+`make build` clean, 456 tests pass. The checkmark, the hover and the truncation are pixels and remain
+unseen: Screen Recording is still declined for Claude Code, which is now the standing limit on every
+visual request in this feature.

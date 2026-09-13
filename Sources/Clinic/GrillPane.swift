@@ -343,11 +343,38 @@ struct GrillPane: View {
         }
     }
 
-    private var title: String {
-        guard let round = current else { return "Grill" }
-        let number = round.index.map { "Round \($0)" } ?? "Questions"
-        guard let topic = round.topic, !topic.isEmpty else { return number }
-        return "\(number) · \(topic)"
+    private var title: String { current.map(Self.name) ?? "Grill" }
+
+    /// What a round is called, shared by the header and the picker so the two cannot disagree. Prefers
+    /// the number and the topic together; falls back to whichever it has (ADR-143). "Questions" is the
+    /// last resort, not the default — several unnumbered rounds all reading "Questions" is what made
+    /// the old picker impossible to choose from.
+    static func name(_ round: GrillRound) -> String {
+        let topic = round.topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return switch (round.index, topic.flatMap { $0.isEmpty ? nil : $0 }) {
+        case (let n?, let t?): "Round \(n) · \(t)"
+        case (let n?, nil): "Round \(n)"
+        case (nil, let t?): t
+        case (nil, nil): "Questions"
+        }
+    }
+
+    /// An open round's state is how far through it is — the thing you choose on when more than one is
+    /// waiting. A finished one keeps the word for what became of it.
+    private func pickerState(_ round: GrillRound) -> String {
+        guard round.isOpen else { return outcomeWord(round) }
+        let done = round.answeredCount, total = round.questions.count
+        if done == 0 { return "not started" }
+        return done == total ? "ready to send" : "\(done) of \(total) answered"
+    }
+
+    private func outcomeSymbol(_ round: GrillRound) -> String {
+        switch round.outcome {
+        case .open: round.isFullyAnswered ? "paperplane" : "hourglass"
+        case .sent: "checkmark.circle"
+        case .answeredElsewhere: "text.cursor"
+        case .superseded: "arrow.turn.down.right"
+        }
     }
 
     /// Which of the two keyboards is live. Not decoration: `⏎` accepts a recommendation in one mode and
@@ -377,32 +404,30 @@ struct GrillPane: View {
     /// Replays an earlier round read-only. The round the pane would show anyway is listed first, so
     /// getting back is the same gesture as leaving (ADR-132).
     private var roundsMenu: some View {
-        Menu {
-            ForEach(rounds.reversed()) { round in
-                Button {
-                    // The open round is "no replay", so picking it is the same gesture as leaving one.
-                    model.viewingRoundId = round.isOpen ? nil : round.id
-                } label: {
-                    let name = round.index.map { "Round \($0)" } ?? "Questions"
-                    let state = round.isOpen ? "waiting" : outcomeWord(round)
-                    Text("\(name) — \(state) · \(round.questions.count)")
-                }
-            }
+        // Waiting rounds above the line, history below: with several open at once (ADR-142) the
+        // reader's work and their record are two different lists.
+        let waiting = rounds.filter(\.isOpen).reversed()
+        let done = rounds.filter { !$0.isOpen }.reversed()
+        return Menu {
+            ForEach(Array(waiting)) { item(for: $0) }
+            if !waiting.isEmpty && !done.isEmpty { Divider() }
+            ForEach(Array(done)) { item(for: $0) }
         } label: {
-            HStack(spacing: 3) {
-                Text(title)
-                    .font(.system(size: PaneMetrics.label, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
+            RoundPickerLabel(title: title)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
         .help("This round — pick another")
+    }
+
+    private func item(for round: GrillRound) -> some View {
+        // Always the round that was picked. The old `isOpen ? nil : id` was written when only one round
+        // could be open, and after ADR-142 it sent the reader to the newest open one instead (ADR-143).
+        Button { model.viewingRoundId = round.id } label: {
+            let mark = current?.id == round.id ? "checkmark" : ""
+            Label("\(Self.name(round)) — \(pickerState(round))",
+                  systemImage: mark.isEmpty ? outcomeSymbol(round) : mark)
+        }
     }
 
     private func outcomeWord(_ round: GrillRound) -> String {
@@ -656,6 +681,36 @@ struct GrillPane: View {
         }
         model.mode = .navigate
         model.sending = false
+    }
+}
+
+/// The picker's own chrome: the round's name, a chevron, and the hover fill every other control in
+/// this header has (ADR-103's rule, applied to the one control that lacked it).
+///
+/// Capped at 220 pt — a tab chip's cap (ADR-079) — and truncating past it. It used to carry
+/// `.fixedSize()`, which overrode its own `lineLimit`/`truncationMode` and let a long topic widen the
+/// header until the mode hint and the counter had nowhere to go (ADR-143).
+private struct RoundPickerLabel: View {
+    let title: String
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title)
+                .font(.system(size: PaneMetrics.label, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .frame(maxWidth: 220, alignment: .leading)
+        .background(hovering ? Color.primary.opacity(0.09) : .clear,
+                    in: RoundedRectangle(cornerRadius: PaneMetrics.radius))
+        .contentShape(RoundedRectangle(cornerRadius: PaneMetrics.radius))
+        .onHover { hovering = $0 }
     }
 }
 
