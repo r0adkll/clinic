@@ -3784,3 +3784,42 @@ Verified by the reported sequence: walk to Q4, back to Q2, click the box, type �
 empty; then type on Q4 and both keep their own text (`Q2: "typed on Q2"`, `Q4: "typed on Q4"`).
 
 `make build` clean, 460 tests pass.
+
+## 2026-09-13 — Android Studio died on a worktree, and it was Clinic's fault
+
+User: *"Attempting to open my Campfire project (at a worktree) results in Android Studio crashing."*
+
+**The worktree was a red herring.** Four crash reports, one stack: Skia's Metal backend →
+`_MTLDebugValidateRenderPassDescriptorAndTrackAttachments` → `__assert_rtn` → `abort`, on
+`AWT-EventQueue-0`, three to five seconds after launch. `MetalTools` and `GPUToolsCapture` in the frames,
+four `Xcode.app` dylibs in the loaded images. Android Studio was running under **Metal API validation**,
+and the validation layer — not Studio, not Skia, not the project — is what called `abort()`.
+
+The validation layer was ours. Clinic was running from Xcode, so its environment holds
+`DYLD_INSERT_LIBRARIES` (main-thread checker, view debugger), `DYLD_*_PATH` into DerivedData, and
+`METAL_DEVICE_WRAPPER_TYPE=1`. Shells libghostty spawns inherit Clinic's environment — [[ADR-016 Launch
+Shape]] wants that — and so does anything those shells launch. Read from inside this very session, my own
+`fish` carried `METAL_DEVICE_WRAPPER_TYPE=1`. [[ADR-145 Clinic's Terminals Do Not Inherit Xcode's
+Debugger]] unsets the whole injection set at `applicationDidFinishLaunching`, beside the Claude scrub that
+has been doing the same job for `CLAUDECODE` since ADR-016.
+
+**The same defect twice, found two different ways.** `scrubInheritedClaudeEnvironment` exists because
+Clinic mis-*read* an inherited variable. This one hid for so long because Clinic never reads `METAL_*` or
+`DYLD_*` — it only passes them on, to programs that do. *A variable you never read is still a variable you
+export.* The first list should have been written as a rule, not as three names.
+
+**`ps eww` is not the check.** It prints a process's environment as it was at `exec`; `unsetenv` rewrites
+`environ` on the heap and leaves that copy alone. My first verification "failed" and said the fix did
+nothing. What actually matters — and what I measured instead — is what a *child* inherits: a smoke
+instance of the fixed build, launched with the injection set via `open -n --env` and
+`-ClinicOpenShellOnLaunch YES`, spawned a shell carrying `CLINIC=1` and no `DYLD_`, `METAL_`, `MTL_`,
+`__XCODE` or `__XPC_DYLD` variable at all. The old build's shell, same machine, same minute, carried seven.
+
+I did not pin down which hop launched the crashed Studio, and said so in the ADR rather than assert the
+shell chain: `/usr/bin/login` is setuid and drops `DYLD_*`, yet Studio had them, so **Open In**
+([[ADR-078 Open In Targets and Quick Action]]) via `NSWorkspace.open` — LaunchServices reviving `DYLD_*`
+from `__XPC_DYLD_*` across the launchd handoff — fits better and matches `launchd` as Studio's parent.
+Every route starts at Clinic, so the scrub goes at the source.
+
+`make build` clean, 460 tests pass. Smoke instance and its App Support removed. **Confirmed by the user**
+on a Clinic restarted onto this build: the Campfire worktree opens in Android Studio and stays open.

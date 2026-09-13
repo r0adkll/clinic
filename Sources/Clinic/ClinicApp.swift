@@ -76,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
+        scrubInheritedDebuggerEnvironment()
         // Resolve the login shell's PATH now, off the main thread, so the first `gh`/`git`/`claude`
         // call does not pay for it (ADR-086).
         ProcessEnvironment.prewarm()
@@ -483,6 +484,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keep: Set<String> = ["CLAUDE_CONFIG_DIR"]
         let exact: Set<String> = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"]
         for key in ProcessInfo.processInfo.environment.keys where (exact.contains(key) || key.hasPrefix("CLAUDE_CODE_")) && !keep.contains(key) {
+            unsetenv(key)
+        }
+    }
+
+    /// When Xcode runs Clinic it injects its diagnostics into our environment — `DYLD_INSERT_LIBRARIES`
+    /// for the main-thread checker and the view debugger, `DYLD_*_PATH` pointing into DerivedData, and
+    /// `METAL_DEVICE_WRAPPER_TYPE=1` for Metal API validation. Every shell libghostty spawns inherits
+    /// them, and so does anything that shell launches, which is not what those switches were turned on
+    /// for: a `studio`, `code` or `xed` run from a Clinic terminal comes up under the validation layer
+    /// and loads dylibs out of Clinic's build directory. Android Studio dies outright — Skia's Metal
+    /// backend trips a validation assertion that aborts the JVM seconds after launch (ADR-145).
+    ///
+    /// dyld has read these by now, so unsetting them changes nothing for us and everything for our
+    /// children. A Clinic launched any other way has none of them.
+    private func scrubInheritedDebuggerEnvironment() {
+        let prefixes = ["DYLD_", "METAL_", "MTL_", "__XCODE", "__XPC_DYLD"]
+        let exact: Set<String> = [
+            "MallocNanoZone", "MallocStackLogging", "MallocStackLoggingNoCompact", "MallocScribble",
+            "MallocGuardEdges", "MallocErrorAbort", "NSZombieEnabled", "NSUnbufferedIO",
+            "OS_ACTIVITY_TOOLS_PRIVACY", "OS_ACTIVITY_TOOLS_OVERSIZE", "OS_ACTIVITY_DT_MODE",
+        ]
+        for key in ProcessInfo.processInfo.environment.keys where exact.contains(key) || prefixes.contains(where: key.hasPrefix) {
             unsetenv(key)
         }
     }

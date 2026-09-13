@@ -7,7 +7,7 @@ Every branch visited 2026-09-07 (rounds 1–4). Links go to the ADR that settles
   - milestone 1 = sidebar, open/resume, new session, hook state, notifications, shell tabs → [[ADR-013 Milestone 1 Slice]]
 - **Claude Code integration** — hybrid: CLI in PTY + hooks + JSONL → [[ADR-003 Claude Code Integration Model]]
   - hooks via `--settings`, bundled helper → Unix socket, async → [[ADR-015 Hook Transport]]
-  - login shell + `initial_input` → [[ADR-016 Launch Shape]]; CLIs found via the login shell's `PATH`, `gh` failures split into missing vs logged-out → [[ADR-086 Tool Discovery and gh Availability]]
+  - login shell + `initial_input` → [[ADR-016 Launch Shape]]; CLIs found via the login shell's `PATH`, `gh` failures split into missing vs logged-out → [[ADR-086 Tool Discovery and gh Availability]]; a session's shell inherits the user's environment but not Xcode's instrumentation of Clinic — `DYLD_*`, `METAL_*` and the malloc switches are unset at launch → [[ADR-145 Clinic's Terminals Do Not Inherit Xcode's Debugger]]
   - pre-assigned `--session-id`, SessionStart confirms → [[ADR-017 Session Identity]]
   - `~/.claude` read-only → [[ADR-018 Claude Data Write Policy]] (amended by [[ADR-084 Plugin Marketplace]])
   - state machine → [[ADR-026 Session State Machine]]; hook set → [[ADR-027 Installed Hook Set]] (notification events only → [[ADR-098 WorktreeCreate Is Not Ours]]); outside sessions inactive-only → [[ADR-028 Sessions Started Outside Clinic]]; no global hook → [[ADR-047 No Global Hook]]
