@@ -329,6 +329,7 @@ struct ExitedOverlay: View {
 /// would be (found 2026-09-11).
 private struct RootToolbar: ViewModifier {
     @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
     let window: WindowState
 
     func body(content: Content) -> some View {
@@ -337,10 +338,11 @@ private struct RootToolbar: ViewModifier {
         let runTab = tab.flatMap { $0.replay == nil && !window.isShowingScreen && window.editingDraft == nil ? $0 : nil }
         let platforms = runTab.map { tabs.devicePlatforms(for: $0) } ?? []
         let openIn = tab.flatMap { $0.replay == nil ? ($0.pwd ?? $0.projectPath) : nil }
+        let openInProject = tab.flatMap { $0.replay == nil ? $0.projectPath : nil }
         if #available(macOS 26.0, *) {
-            content.toolbar { SpacedItems(runTab: runTab, platforms: platforms, openIn: openIn) }
+            content.toolbar { SpacedItems(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
         } else {
-            content.toolbar { Items(runTab: runTab, platforms: platforms, openIn: openIn) }
+            content.toolbar { Items(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
         }
     }
 
@@ -348,11 +350,13 @@ private struct RootToolbar: ViewModifier {
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
         let openIn: String?
+        let openInProject: String?
+        let sessions: SessionStore
 
         var body: some ToolbarContent {
             ToolbarItemGroup {
                 StartButtons()
-                TabControls(runTab: runTab, platforms: platforms, openIn: openIn)
+                TabControls(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions)
                 NotificationBell()
             }
         }
@@ -363,6 +367,8 @@ private struct RootToolbar: ViewModifier {
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
         let openIn: String?
+        let openInProject: String?
+        let sessions: SessionStore
 
         var body: some ToolbarContent {
             ToolbarItemGroup { StartButtons() }
@@ -371,7 +377,7 @@ private struct RootToolbar: ViewModifier {
             // an item whose content went away keeps its width as a gap (both seen 2026-09-11). Inside
             // one item they are ordinary views, which appear and collapse as they should.
             ToolbarItem {
-                HStack(spacing: 8) { TabControls(runTab: runTab, platforms: platforms, openIn: openIn) }
+                HStack(spacing: 8) { TabControls(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
             }
             .sharedBackgroundVisibility(.hidden)
             ToolbarItem { NotificationBell() }
@@ -383,12 +389,14 @@ private struct RootToolbar: ViewModifier {
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
         let openIn: String?
+        let openInProject: String?
+        let sessions: SessionStore
 
         var body: some View {
             CaffeineItem()
             if let runTab { RunToolbarControl(tab: runTab).ownGlass() }
             if let runTab, !platforms.isEmpty { DeviceControls(tab: runTab, platforms: platforms) }
-            if let openIn { OpenInToolbarMenu(path: openIn).ownGlass() }
+            if let openIn { OpenInToolbarMenu(path: openIn, projectPath: openInProject, sessions: sessions).ownGlass() }
         }
     }
 

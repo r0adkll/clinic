@@ -3823,3 +3823,40 @@ Every route starts at Clinic, so the scrub goes at the source.
 
 `make build` clean, 460 tests pass. Smoke instance and its App Support removed. **Confirmed by the user**
 on a Clinic restarted onto this build: the Campfire worktree opens in Android Studio and stays open.
+
+## 2026-09-13 — The wrong Android Studio, and what Open In should let you say
+
+User: *"it looks like the Android Studio being picked up is the preview version, and not the main one.
+Should we add a settings panel to configure these available apps? Also can we make them configurable per
+project?"*
+
+**The first half was a defect, not a missing preference.** Both installs answer to
+`com.google.android.studio`, and `urlForApplication(withBundleIdentifier:)` returns exactly one — Launch
+Services prefers the Preview. No UI could have fixed that, because the registry was keyed by bundle id
+and *could not represent two installs*. [[ADR-146 Two Installs Of One App Are Two Targets]] moves to the
+plural lookup, keys targets by path, and names them from the `.app` file name — because `CFBundleName` is
+"Android Studio" for **both**, so the bundle's own name would have drawn the list twice with one label.
+
+*Fix the model before designing UI on top of it.* Had the Settings pane come first, it would have
+inherited a list that silently dropped half the answer and looked like a preference problem forever.
+
+[[ADR-147 Open In Is Configured And Per-Project]] then answers the two questions the user actually asked,
+and keeps them apart: **which apps exist** is a fact about this Mac (a Settings pane that *adds to*
+discovery — add by path, hide, set the default), **which app to use** is a fact about the project (the
+toolbar picker writes `openInByProject`, with a *Use Default (…)* row to clear it, the ADR-118 shape). The
+pick is personal state, not `.clinic/` — a run configuration is the team's, but the editor you open a
+checkout in is yours, and naming an app a teammate lacks is worse than saying nothing.
+
+Verified through the accessibility tree, since Screen Recording is still declined: the pane lists all
+seven targets with their locations, and a pick round-tripped — *Android Studio Preview* changed the
+toolbar button, wrote `{"/Users/r0adkll": "/Applications/Android Studio Preview.app"}` to `state.json`,
+and *Use Default (Android Studio)* reverted both. **The ADR-146 migration also ran against real
+preferences** and turned the stored bundle id into the release build's path, which is the outcome the
+user wanted.
+
+Two notes for next time. A smoke instance gets its own `CLINIC_APP_SUPPORT` but **shares `UserDefaults`
+with the live app** — harmless here (the migration is what the real app would do anyway), but a smoke run
+that toggles a preference would silently edit the user's. And `make build` reports two SwiftLint failures
+in the vendored CodeEdit packages; they predate this work and are not mine.
+
+`make build` clean, 460 tests pass. Smoke instances and their App Support removed.

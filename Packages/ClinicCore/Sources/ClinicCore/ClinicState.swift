@@ -36,6 +36,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var workItemLinks: [SessionID: [WorkItemRef]] = [:]
     /// The run configuration ⌘R starts, per project (ADR-122). Never written into the repo's run.json.
     public var runSelectionByProject: [String: String] = [:]
+    /// Which Open In target a project opens in, by project path, overriding the global default
+    /// (ADR-147). Personal to this Mac: the value is an app's path, which a teammate may not have.
+    public var openInByProject: [String: String] = [:]
     /// Fingerprints (`RunTrust`) of commands the user has run from the UI or saved in the editor: the
     /// only ones Claude's `run` tool may execute (ADR-122).
     public var trustedRunCommands: Set<String> = []
@@ -104,7 +107,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -132,6 +135,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         taskSources = (try? c.decodeIfPresent([String: [WorkItemSource]].self, forKey: .taskSources)) ?? [:]
         workItemLinks = (try? c.decodeIfPresent([SessionID: [WorkItemRef]].self, forKey: .workItemLinks)) ?? [:]
         runSelectionByProject = (try? c.decodeIfPresent([String: String].self, forKey: .runSelectionByProject)) ?? [:]
+        openInByProject = (try? c.decodeIfPresent([String: String].self, forKey: .openInByProject)) ?? [:]
         trustedRunCommands = (try? c.decodeIfPresent(Set<String>.self, forKey: .trustedRunCommands)) ?? []
         runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
         watchedPullRequests = (try? c.decodeIfPresent(Set<String>.self, forKey: .watchedPullRequests)) ?? []

@@ -42,8 +42,22 @@ final class OpenInApps {
     static let finderPath = "/System/Library/CoreServices/Finder.app"
     private static let staleAfter: TimeInterval = 60
     private static let defaultKey = "ClinicOpenInDefault"
+    private static let customKey = "ClinicOpenInCustomApps"
+    private static let hiddenKey = "ClinicOpenInHidden"
 
-    private(set) var targets: [OpenInTarget] = []
+    /// Every destination Clinic knows about, hidden ones included. The Settings pane works on this.
+    private(set) var allTargets: [OpenInTarget] = []
+    /// What the menus and the toolbar offer: `allTargets` minus what the reader has hidden.
+    var targets: [OpenInTarget] { allTargets.filter { !hiddenIds.contains($0.id) } }
+
+    /// Apps the reader added by hand because discovery does not know them (ADR-147). Paths, so an
+    /// app that moves stops resolving rather than silently opening something else.
+    private(set) var customAppPaths: [String] = [] {
+        didSet { UserDefaults.standard.set(customAppPaths, forKey: Self.customKey) }
+    }
+    private(set) var hiddenIds: Set<String> = [] {
+        didSet { UserDefaults.standard.set(Array(hiddenIds), forKey: Self.hiddenKey) }
+    }
     /// Id of the target the footer chip opens; nil until the user picks one.
     var defaultTargetId: String? {
         didSet { UserDefaults.standard.set(defaultTargetId, forKey: Self.defaultKey) }
@@ -53,12 +67,43 @@ final class OpenInApps {
 
     private init() {
         defaultTargetId = UserDefaults.standard.string(forKey: Self.defaultKey)
+        customAppPaths = UserDefaults.standard.stringArray(forKey: Self.customKey) ?? []
+        hiddenIds = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? [])
         refresh()
     }
 
-    /// The target the primary action opens: the user's pick if it is still installed, else the first one.
+    /// The target the primary action opens when a project has no pick of its own: the reader's global
+    /// default if it is still installed and visible, else the first one.
     var defaultTarget: OpenInTarget? {
         targets.first { $0.id == defaultTargetId } ?? targets.first
+    }
+
+    /// The target a project opens in: its own pick (ADR-147), falling back to the global default.
+    /// An id that no longer resolves — app deleted, or hidden since — falls back rather than failing.
+    func target(forProjectPick pick: String?) -> OpenInTarget? {
+        guard let pick, let match = targets.first(where: { $0.id == pick }) else { return defaultTarget }
+        return match
+    }
+
+    func addCustomApp(_ url: URL) {
+        guard !customAppPaths.contains(url.path) else { return }
+        customAppPaths.append(url.path)
+        refresh()
+    }
+
+    /// Removes a reader-added app. Discovered apps cannot be removed, only hidden — they would come
+    /// straight back on the next refresh.
+    func removeCustomApp(_ id: String) {
+        guard customAppPaths.contains(id) else { return }
+        customAppPaths.removeAll { $0 == id }
+        hiddenIds.remove(id)
+        refresh()
+    }
+
+    func isCustom(_ target: OpenInTarget) -> Bool { customAppPaths.contains(target.id) }
+
+    func setHidden(_ target: OpenInTarget, _ hidden: Bool) {
+        if hidden { hiddenIds.insert(target.id) } else { hiddenIds.remove(target.id) }
     }
 
     func refreshIfStale() {
@@ -82,7 +127,15 @@ final class OpenInApps {
                 found.append(OpenInTarget(id: url.path, name: name, kind: .app(url), iconPath: url.path, bundleId: editor.bundleId))
             }
         }
-        if found != targets { targets = found }
+        // Reader-added apps last, in the order they were added: discovery's order is curated
+        // (ADR-078) and these have no place in it.
+        for path in customAppPaths where !found.contains(where: { $0.id == path }) {
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            let name = url.deletingPathExtension().lastPathComponent
+            found.append(OpenInTarget(id: path, name: name.isEmpty ? path : name, kind: .app(url), iconPath: path))
+        }
+        if found != allTargets { allTargets = found }
         adoptPreAppPathDefault()
     }
 
@@ -107,7 +160,7 @@ final class OpenInApps {
         .sorted { ($0.1, $0.0.path) < ($1.1, $1.0.path) }
     }
 
-    private static func abbreviatingHome(_ path: String) -> String {
+    static func abbreviatingHome(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         guard path == home || path.hasPrefix(home + "/") else { return path }
         return "~" + path.dropFirst(home.count)
@@ -117,8 +170,8 @@ final class OpenInApps {
     /// rewrite it to the install it resolves to, so the pick survives rather than silently falling back
     /// to Finder.
     private func adoptPreAppPathDefault() {
-        guard let id = defaultTargetId, !targets.contains(where: { $0.id == id }) else { return }
-        guard let match = targets.first(where: { $0.bundleId == id }) else { return }
+        guard let id = defaultTargetId, !allTargets.contains(where: { $0.id == id }) else { return }
+        guard let match = allTargets.first(where: { $0.bundleId == id }) else { return }
         defaultTargetId = match.id
     }
 
@@ -186,10 +239,17 @@ struct OpenInRow: View {
 /// drops down is a real NSMenu and keeps the icons' colour.
 struct OpenInToolbarMenu: View {
     let path: String
+    /// The project the open directory belongs to, so the pick can be its own (ADR-147). Nil for a
+    /// directory that is not under a registered project; the choice is then the global default.
+    let projectPath: String?
+    let sessions: SessionStore
     private var apps: OpenInApps { OpenInApps.shared }
 
+    private var pick: String? { projectPath.flatMap { sessions.state.openInByProject[$0] } }
+    private var current: OpenInTarget? { apps.target(forProjectPick: pick) }
+
     var body: some View {
-        if !path.isEmpty, let current = apps.defaultTarget {
+        if !path.isEmpty, let current {
             ToolbarSplitButton(help: "Open \(TabFooter.abbreviate(path)) in \(current.name)",
                                choicesHelp: "Choose which app the button opens in", smokeId: "openIn") {
                 apps.open(path, in: current)
@@ -204,18 +264,33 @@ struct OpenInToolbarMenu: View {
                 .frame(width: 34, height: 28)
             } choices: {
                 // Choosing only changes which app the button uses; it never opens anything (ADR-078).
-                PopoverMenu(width: 240) {
-                    PopoverMenuHeader(title: "Open with")
+                // With a project in view the choice is *that project's* (ADR-147) — an Android checkout
+                // and a Swift one want different editors, and saying so once should stick.
+                PopoverMenu(width: 260) {
+                    PopoverMenuHeader(title: projectPath == nil ? "Open with" : "Open this project with")
                     ForEach(apps.targets) { target in
-                        PopoverMenuRow(title: target.name, checked: apps.isDefault(target).wrappedValue) {
-                            apps.isDefault(target).wrappedValue = true
+                        PopoverMenuRow(title: target.name, checked: target.id == current.id) {
+                            choose(target)
                         } icon: {
                             if let icon = apps.icon(target, size: 16) { Image(nsImage: icon) }
                         }
+                    }
+                    if let projectPath, pick != nil, let fallback = apps.defaultTarget {
+                        PopoverMenuDivider()
+                        PopoverMenuRow(title: "Use Default (\(fallback.name))") {
+                            sessions.update { $0.openInByProject[projectPath] = nil }
+                        } icon: { EmptyView() }
                     }
                 }
             }
             .onAppear { apps.refreshIfStale() }
         }
+    }
+
+    /// A pick with a project in view is the project's; without one it is the global default, which is
+    /// the only thing such a directory could mean.
+    private func choose(_ target: OpenInTarget) {
+        guard let projectPath else { apps.defaultTargetId = target.id; return }
+        sessions.update { $0.openInByProject[projectPath] = target.id }
     }
 }

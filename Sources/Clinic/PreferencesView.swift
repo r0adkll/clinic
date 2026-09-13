@@ -22,7 +22,7 @@ enum Prefs {
 /// bucket: what was "General" held startup, window chrome, an account, session defaults and a git
 /// preference in one flat list.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, sessions, notifications, shortcuts, advanced
+    case general, sessions, openIn, notifications, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -30,6 +30,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .sessions: "Sessions"
+        case .openIn: "Open In"
         case .notifications: "Notifications"
         case .shortcuts: "Shortcuts"
         case .advanced: "Advanced"
@@ -43,6 +44,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gear"
         case .sessions: "terminal"
+        case .openIn: "arrow.up.forward.app"
         case .notifications: "bell"
         case .shortcuts: "keyboard"
         case .advanced: "wrench.and.screwdriver"
@@ -101,6 +103,7 @@ struct PreferencesView: View {
                 switch pane {
                 case .general: GeneralPane().settingsColumn()
                 case .sessions: SessionsPane().settingsColumn()
+                case .openIn: OpenInPane().settingsColumn()
                 case .notifications: NotificationPreferences(tabs: tabs).settingsColumn()
                 case .shortcuts: ShortcutsPreferences()
                 case .advanced: AdvancedPane().settingsColumn()
@@ -500,5 +503,113 @@ private struct SoundRow: View {
             .buttonStyle(.borderless).help("Remove")
         }
         .help(sound.path)
+    }
+}
+
+// MARK: - Open In
+
+/// The apps the "Open In" menus offer (ADR-147).
+///
+/// Discovery stays in charge — the list is what Launch Services knows about, one row per *install*
+/// (ADR-146) — and this pane only says which of them to show, which to open by default, and lets an
+/// app discovery has never heard of be added by hand.
+private struct OpenInPane: View {
+    private var apps: OpenInApps { OpenInApps.shared }
+    @State private var addError: String?
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(apps.allTargets) { target in
+                    OpenInAppRow(target: target)
+                }
+            } header: {
+                Text("Apps")
+            } footer: {
+                Text("The checked app is what Open In uses for a project that has no app of its own. A project's own choice is made in the Open In button's menu, beside the toolbar's Run controls.")
+            }
+
+            Section {
+                Button("Add App…") { add() }
+                RefusalLabel(addError)
+            } footer: {
+                Text("Clinic finds Xcode, VS Code, Cursor, Zed, IntelliJ IDEA and Android Studio on its own, including a second copy of one — a Preview build, or a Toolbox install beside one in /Applications. Add anything else here.")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { apps.refresh() }
+    }
+
+    private func add() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Add"
+        panel.message = "Choose an app to add to the Open In menu."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard Bundle(url: url)?.bundleIdentifier != nil else {
+            addError = "\(url.lastPathComponent) is not an app Clinic can open a folder with."
+            return
+        }
+        addError = nil
+        apps.addCustomApp(url)
+    }
+}
+
+/// One app in the Open In settings list: its icon and name, where it lives, whether it is shown, and
+/// whether it is the default.
+private struct OpenInAppRow: View {
+    let target: OpenInTarget
+    private var apps: OpenInApps { OpenInApps.shared }
+
+    private var isHidden: Bool { apps.hiddenIds.contains(target.id) }
+    private var isDefault: Bool { apps.defaultTarget?.id == target.id }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let icon = apps.icon(target, size: 20) { Image(nsImage: icon) }
+                else { Image(systemName: "app.dashed").foregroundStyle(.secondary) }
+            }
+            .frame(width: 20, height: 20)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(target.name)
+                // Two installs of one app differ only in where they live, so the path is the row's
+                // only way to say which is which (ADR-146).
+                if case .app(let url) = target.kind {
+                    Text(OpenInApps.abbreviatingHome(url.deletingLastPathComponent().path))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+
+            if isDefault {
+                Text("Default").font(.caption).foregroundStyle(.secondary)
+            } else if !isHidden {
+                Button("Make Default") { apps.defaultTargetId = target.id }
+                    .buttonStyle(.link).font(.caption)
+            }
+
+            Toggle("Show \(target.name) in Open In menus", isOn: Binding(
+                get: { !isHidden },
+                set: { apps.setHidden(target, !$0) }))
+                .labelsHidden()
+                // The default cannot be hidden: hiding it would leave the toolbar button opening
+                // something the reader had just said to stop showing.
+                .disabled(isDefault)
+
+            if apps.isCustom(target) {
+                Button {
+                    apps.removeCustomApp(target.id)
+                } label: {
+                    Image(systemName: "minus.circle").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove \(target.name) from the list")
+            }
+        }
     }
 }
