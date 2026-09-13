@@ -3595,3 +3595,30 @@ item, and the round is posted in a poll loop that waits for the session tab rath
 sleep.
 
 `make build` clean, 455 tests pass. Appearance still unseen — Screen Recording remains declined.
+
+## 2026-09-12 (cont.) — the title is the round picker
+
+User: *"I don't think we need the 'Sent' banner at the top of round history. Another UX improvement
+would be to make the whole round/title a dropdown instead of the history icon when in this view."*
+Recorded as [[ADR-141 The Title Is The Round Picker]].
+
+- ADR-137's `HistoryHeader` block is **deleted** — outcome, age and counts-by-kind above the rows. The
+  counts stopped earning their place once every row carried its own answer, and *Sent* is what happens
+  to nearly every round.
+- The **title is the menu** now, with a chevron; the clock glyph is gone. The control that changes which
+  round you are looking at is the thing that says which round you are looking at. It is a menu whenever
+  the session has more than one round — in the wizard too, not only in history — because chrome that
+  changes shape with the mode is worse than one control in one place.
+- **"Sent" goes, "not sent" stays.** Deleting the header would have left nothing saying why a round is
+  read-only, and for a **superseded** round that means *your answers were never sent* — a surprise, not
+  a formality. `ReadOnlyBanner` (orphaned by ADR-137, still sitting in the file unreferenced) comes back
+  for `superseded` and `answeredElsewhere` only. The rule worth keeping: **say nothing about the
+  ordinary, say plainly what would surprise.**
+
+**A scripting trap worth remembering**: deleting a struct by slicing between two anchors assumed the
+struct came first; it came *after*, so the slice was empty, `s.count("")` blew the assertion, and — by
+luck — the script died before writing, so nothing was half-applied. Slice deletions want an assert that
+the boundaries are in the expected order, which this one now has. Checking `grep -c` for each intended
+edit afterwards is what revealed nothing had applied at all.
+
+`make build` clean, 455 tests pass. Appearance still unseen.

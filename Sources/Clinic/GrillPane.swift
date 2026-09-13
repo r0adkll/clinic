@@ -245,6 +245,8 @@ struct GrillPane: View {
     @ViewBuilder
     private func body(for round: GrillRound) -> some View {
         VStack(spacing: 0) {
+            // Only ever for the two outcomes that would surprise: superseded, and answered elsewhere.
+            if let note = readOnlyNote(round) { ReadOnlyBanner(text: note) }
             ScrollView {
                 Group {
                     if !isActionable {
@@ -276,7 +278,9 @@ struct GrillPane: View {
     private func readOnlyNote(_ round: GrillRound) -> String? {
         switch round.outcome {
         case .open: nil
-        case .sent: "You sent these answers. They are here to read, not to change."
+        // Nothing for a sent round: it is the expected outcome, and the reader came to read the
+        // questions rather than be told the unremarkable (ADR-141).
+        case .sent: nil
         case .answeredElsewhere: "You answered this round in the terminal, so this copy is a record."
         // ADR-132: nothing the reader typed is thrown away, it just has nowhere to go.
         case .superseded: "The agent moved on to the next round. Anything you entered here was kept, but not sent."
@@ -290,13 +294,18 @@ struct GrillPane: View {
             Image(systemName: "flame")
                 .font(.system(size: PaneMetrics.glyph, weight: .medium))
                 .foregroundStyle(isActionable ? Color.accentColor : Color.secondary)
-            Text(title)
-                .font(.system(size: PaneMetrics.label, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            // The control that changes which round you are looking at is the thing that says which
+            // round you are looking at (ADR-141). Plain text while there is only one.
+            if rounds.count > 1 {
+                roundsMenu
+            } else {
+                Text(title)
+                    .font(.system(size: PaneMetrics.label, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
             Spacer(minLength: 4)
             if let hint = modeHint { hintLabel(hint) }
-            if rounds.count > 1 { roundsMenu }
             if let round = current {
                 PaneIconButton(symbol: "doc.on.doc", help: "Copy this round as Markdown (⌘⌃C)") {
                     tabs.copyGrillRound(round)
@@ -356,13 +365,20 @@ struct GrillPane: View {
                 }
             }
         } label: {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: PaneMetrics.glyph, weight: .medium))
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: PaneMetrics.label, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: PaneMetrics.control + 6, height: PaneMetrics.control)
-        .help("Earlier rounds")
+        .fixedSize()
+        .help("This round — pick another")
     }
 
     private func outcomeWord(_ round: GrillRound) -> String {
@@ -915,7 +931,6 @@ private struct HistoryList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HistoryHeader(round: round)
             ForEach(Array(round.questions.enumerated()), id: \.element.id) { index, question in
                 let expanded = model.isHistoryExpanded(question)
                 GrillAnswerRow(
@@ -1057,85 +1072,6 @@ private struct GrillAnswerRow<Detail: View>: View {
 ///
 /// The bare sentence it replaces said only *why* the round was read-only. A record wants the same three
 /// things a commit does: what happened, when, and how much.
-private struct HistoryHeader: View {
-    let round: GrillRound
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text(outcome)
-                    .font(.system(size: 12, weight: .medium))
-                Text(age)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            Text(shape)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-    }
-
-    private var symbol: String {
-        switch round.outcome {
-        case .open: "hourglass"
-        case .sent: "paperplane"
-        case .answeredElsewhere: "text.cursor"
-        case .superseded: "arrow.turn.down.right"
-        }
-    }
-
-    private var outcome: String {
-        switch round.outcome {
-        case .open: "Waiting for you"
-        case .sent: "Sent"
-        case .answeredElsewhere: "Answered in the terminal"
-        case .superseded: "Superseded — not sent"
-        }
-    }
-
-    private var age: String {
-        let when: Date = switch round.outcome {
-        case .open: round.postedAt
-        case .sent(let d), .answeredElsewhere(let d), .superseded(let d): d
-        }
-        // "in 0 seconds" is what the formatter says about something that just happened, which is both
-        // wrong and odd; under a minute the honest word is "just now".
-        let elapsed = Date().timeIntervalSince(when)
-        guard elapsed >= 60 else { return "just now" }
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .full
-        f.dateTimeStyle = .named
-        return f.localizedString(for: when, relativeTo: Date())
-    }
-
-    /// Counts by kind, naming only the kinds this round actually has.
-    private var shape: String {
-        var accepted = 0, chosen = 0, yours = 0, skipped = 0, none = 0
-        for question in round.questions {
-            switch round.answers[question.id] {
-            case .acceptedRecommendation: accepted += 1
-            case .choices: chosen += 1
-            case .text: yours += 1
-            case .skipped: skipped += 1
-            case .none: none += 1
-            }
-        }
-        let parts = [(accepted, "accepted"), (chosen, "chosen"), (yours, "in your words"),
-                     (skipped, "skipped"), (none, "unanswered")]
-            .filter { $0.0 > 0 }
-            .map { "\($0.0) \($0.1)" }
-        return parts.isEmpty ? "\(round.questions.count) questions" : parts.joined(separator: " · ")
-    }
-}
-
 // MARK: - Pieces
 
 /// Why the round on screen cannot be answered, said plainly rather than left to be worked out.
