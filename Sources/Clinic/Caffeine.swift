@@ -230,7 +230,7 @@ struct CaffeineToolbarMenu: View {
     /// would otherwise shift each time an agent starts or stops.
     private static func glyph(_ symbol: String, accent: Bool) -> NSImage {
         var config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-        if accent { config = config.applying(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) }
+        if accent { config = config.applying(NSImage.SymbolConfiguration(paletteColors: [Appearance.shared.nsAccentColor])) }
         guard let symbolImage = NSImage(systemSymbolName: symbol, accessibilityDescription: "Caffeine")?.withSymbolConfiguration(config)
         else { return NSImage() }
         let image = NSImage(size: NSSize(width: 24, height: 18), flipped: false) { rect in

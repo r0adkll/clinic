@@ -26,7 +26,7 @@ struct MarketplaceScreen: View {
         @Bindable var model = model
         return VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "storefront.fill").font(.title3).foregroundStyle(Color.accentColor)
+                Image(systemName: "storefront.fill").font(.title3).foregroundStyle(Color.accent)
                 Text("Marketplace").font(.title3.weight(.semibold))
                 Text("Plugins for Claude Code").font(.callout).foregroundStyle(.secondary)
                 Spacer(minLength: 12)
@@ -504,13 +504,13 @@ struct PluginKindChip: View {
                 if let kind { Image(systemName: kind.symbol).imageScale(.small) }
                 Text(label ?? kind?.label ?? "")
                 Text("\(count)").monospacedDigit()
-                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.tertiary))
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accent.opacity(0.7)) : AnyShapeStyle(.tertiary))
             }
             .font(.callout)
-            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .foregroundStyle(selected ? Color.accent : Color.secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.07), in: Capsule())
-            .overlay(Capsule().strokeBorder(selected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08)))
+            .background(selected ? Color.accent.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.07), in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? Color.accent.opacity(0.35) : Color.primary.opacity(0.08)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

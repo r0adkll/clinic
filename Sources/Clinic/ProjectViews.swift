@@ -50,7 +50,7 @@ struct ProjectHeader: View {
             sessions.moveProject(moved, before: project.path)
             return true
         } isTargeted: { dropTargeted = $0 }
-        .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accentColor).frame(height: 2) } }
+        .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accent).frame(height: 2) } }
     }
 }
 
@@ -134,7 +134,7 @@ struct ProjectIcon: View {
         Group {
             if SessionStore.isChats(project.path) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: size * 0.22).fill(Color.accentColor)
+                    RoundedRectangle(cornerRadius: size * 0.22).fill(Color.accent)
                     Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.5)).foregroundStyle(.white)
                 }
             } else if let image = icon {

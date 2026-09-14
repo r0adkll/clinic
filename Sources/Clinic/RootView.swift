@@ -286,9 +286,9 @@ struct FooterToggle: View {
                 .font(.callout)
                 .lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accentColor.opacity(0.35) : .clear))
-                .foregroundStyle(active ? Color.accentColor : Color.primary)
+                .background(active ? Color.accent.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accent.opacity(0.35) : .clear))
+                .foregroundStyle(active ? Color.accent : Color.primary)
         }
         .buttonStyle(.plain)
         .help(help)
@@ -423,7 +423,7 @@ private struct RootToolbar: ViewModifier {
             let lit = caffeine.isHolding
             CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine))
                 // Always washed, at nothing when unlit, so the capsule fades rather than snapping.
-                .ownGlass(wash: .accentColor.opacity(lit ? 0.16 : 0))
+                .ownGlass(wash: .accent.opacity(lit ? 0.16 : 0))
                 .animation(.easeInOut(duration: 0.25), value: lit)
         }
     }

@@ -4055,3 +4055,61 @@ switch a smoke instance, and the system setting was left alone — so it went in
 rather than an assumption. **The user then confirmed both appearances on screen**, and 16 % holds for
 both: one constant, no appearance-dependent pair. The harness limitation is worth remembering; the open
 item is closed.
+
+## 2026-09-14 — Clinic gets its own theme and accent
+
+*"Lets add some 'Appearance' settings that lets the user override the accent color and theme modes
+(light/dark/system)."* The theme was the easy half: `NSApp.appearance` moves every window, sheet and
+control at once, and the terminal now follows too — `Appearance` observes `effectiveAppearance` and calls
+`ghostty_app_set_color_scheme`, and `TabStore` answers libghostty's soft `reload_config` by handing back
+the current config so a `theme = light:…,dark:…` re-evaluates (nothing had ever answered that action).
+
+The accent took three rounds, each settled by a screenshot rather than the docs:
+
+1. **The documented routes don't do it.** `swiftc` harnesses first: a per-app `AppleAccentColor` default
+   *does* colour `controlAccentColor` — but only at launch; posting `AppleColorPreferencesChangedNotification`
+   changes nothing in-process. `Color.accentColor` ignores `.tint()`. It *did* follow the deprecated
+   `.accentColor()` under `ImageRenderer`, so that went on every root.
+2. **`ImageRenderer` lied.** In the real app, with `.accentColor()` + `.tint()` on both scenes, the tiles
+   stayed red while the segmented picker went purple — and the purple was the launch default the previous
+   smoke run had written, not the modifier. Moving the modifiers inside the `NavigationSplitView` columns
+   changed nothing. `Color.accentColor` in a real window follows only what AppKit read at launch.
+3. **So the accent is a Clinic colour.** `Color.accent` — a `@MainActor` static reading `Appearance.shared`,
+   tracked by Observation — replaced 105 `Color.accentColor` and five shorthand `.accentColor` sites;
+   `.tint` stays on every hosting root (both scenes, the file and image windows, and the panel's four
+   `NSHostingView`s via `inject`) for the controls that read it; the three `controlAccentColor` AppKit sites
+   read `Appearance.shared.nsAccentColor`. A launch with a custom teal turned every tile, link, the picker
+   and the caffeine cup teal at once; *Blue* pressed via the accessibility API turned them all blue live.
+
+AppKit-drawn switches, checkboxes and selection fills still read `controlAccentColor`, so a named accent
+also writes `AppleAccentColor` into Clinic's domain (custom → nearest of the eight) and the pane's footer
+says those catch up at the next launch, only while that is true. One wrinkle that fell out: once the app
+has written that key, `controlAccentColor` no longer *is* the Mac's accent, so the System swatch reads the
+global domain instead.
+
+Smoke lessons: a smoke instance with a non-system accent writes `AppleAccentColor` into the **real**
+`com.r0adkll.clinic` domain on start — deleted `ClinicAccent`, `ClinicTheme`, `AppleAccentColor` afterwards
+and checked the domain. Screen Recording was back, so screenshots worked; the AX tool found the smoke
+process by its `CLINIC_APP_SUPPORT` value (`clinic-appr`, its own dir), not by `clinic-smoke`, whose
+sockets belonged to an earlier session.
+
+Recorded as [[ADR-152 Clinic Has Its Own Theme And Accent]], linked from the design tree. `xcodebuild`
+Debug clean (one pre-existing warning in `EditorPanel.swift`); `swift test` — 460 pass.
+
+Follow-up: *"the theme options should just be the options under the header and not double state
+'Theme'"* — the segmented picker's row label is hidden (`labelsHidden()`, an accessibility label kept),
+so the control fills the row under the section header alone, the same rule ADR-108 applied to the pane
+title. And a cleanup lesson: the first `defaults delete` after killing the smoke instance lost the race
+with the dying process flushing its defaults, so the next run came up blue. Kill, wait, then delete.
+
+Then: *"looks like the sidebar item highlights are still the system accent"* — the AppKit selection fill,
+which the ADR had written off as read-once-at-launch. Wrong: AppKit re-reads the app's `AppleAccentColor`
+on the distributed **`AppleAquaColorVariantChanged`**. The first harness had posted
+`AppleColorPreferencesChangedNotification` (nothing); a second posted all three names System Settings sends
+and worked; five variants isolated the one that matters — not the wait, not `synchronize()`, not the
+"color preferences" name. `controlAccentColor`, `selectedContentBackgroundColor` and
+`keyboardFocusIndicatorColor` all follow, graphite and removal included. `applyAccentDefault` now posts it,
+the "next launch" footer is gone (a custom colour's footer names the nearest standard accent instead), and
+the user's live sidebar selection went blue without a relaunch. Two smoke-run notes: the notification is
+system-wide, so a smoke instance's accent lands on the live app's switches immediately; and the AX tool
+matched the *window title* "Appearance" before the sidebar row, so `select` now matches static text only.

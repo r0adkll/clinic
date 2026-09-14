@@ -65,7 +65,7 @@ private struct TemplateTile: View {
                 HStack(spacing: 8) {
                     Image(systemName: template.icon)
                         .font(.system(size: 15)).frame(width: 22)
-                        .foregroundStyle(missingTool == nil ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                        .foregroundStyle(missingTool == nil ? AnyShapeStyle(Color.accent) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
                     Text(template.name).font(.body.weight(.semibold)).lineLimit(1)
                     Spacer(minLength: 4)
                 }

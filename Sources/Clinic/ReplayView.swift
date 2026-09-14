@@ -110,7 +110,7 @@ struct TurnBubble: View {
         case .user(let text, let date):
             HStack { Spacer(minLength: 80)
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(text).textSelection(.enabled).padding(10).background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+                    Text(text).textSelection(.enabled).padding(10).background(Color.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
                     if let date { Text(date, format: .dateTime.hour().minute().second()).font(.caption2).foregroundStyle(.tertiary) }
                 }
             }

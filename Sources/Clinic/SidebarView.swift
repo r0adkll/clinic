@@ -149,9 +149,9 @@ struct ScreenNavRow: View {
                 // project outline, so they do not indent to clear a chevron they do not have.
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accentColor))
+                    .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accent))
                     .frame(width: 22, height: 22)
-                    .background(active ? Color.white.opacity(0.22) : Color.accentColor.opacity(0.16),
+                    .background(active ? Color.white.opacity(0.22) : Color.accent.opacity(0.16),
                                 in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 Text(screen.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 4)
@@ -170,7 +170,7 @@ struct ScreenNavRow: View {
     }
 
     private var background: AnyShapeStyle {
-        if active { return AnyShapeStyle(Color.accentColor) }
+        if active { return AnyShapeStyle(Color.accent) }
         return hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)
     }
 }
@@ -395,7 +395,7 @@ struct SessionRow: View {
         HStack(spacing: 8) {
             if let checked {
                 Button(action: onToggle) {
-                    Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                    Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
                 }.buttonStyle(.plain)
             }
             if let tab, tab.isAttached, !tab.childExited {
@@ -530,12 +530,12 @@ struct ToolbarIcon: View {
 
     private var foreground: AnyShapeStyle {
         if !isEnabled { return AnyShapeStyle(.tertiary) }
-        if active { return AnyShapeStyle(Color.accentColor) }
+        if active { return AnyShapeStyle(Color.accent) }
         return hovering ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(.secondary)
     }
 
     private var background: AnyShapeStyle {
-        if active { return AnyShapeStyle(Color.accentColor.opacity(hovering ? 0.26 : 0.18)) }
+        if active { return AnyShapeStyle(Color.accent.opacity(hovering ? 0.26 : 0.18)) }
         return hovering && isEnabled ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)
     }
 }
@@ -543,7 +543,7 @@ struct ToolbarIcon: View {
 /// The session status vocabulary (ADR-096).
 ///
 /// Motion carries "running" and colour is spent only on the two states that want the user, so a
-/// sidebar with a dozen live sessions stays quiet. Nothing here is `Color.accentColor`: the accent
+/// sidebar with a dozen live sessions stays quiet. Nothing here is `Color.accent`: the accent
 /// already paints selection fills and active controls, so a status dot wearing it reads as chrome
 /// rather than as state — and it would mean something different for every user's accent.
 struct StateGlyph: View {

@@ -287,7 +287,7 @@ struct SidePanelTabChip: View {
     private var title: String { tabs.paneTitle(pane.kind, in: tab) }
 
     private var fill: Color {
-        if selected { return Color.accentColor.opacity(hovering ? 0.26 : 0.20) }
+        if selected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }
         if hovering { return Color.primary.opacity(0.11) }
         return Color.primary.opacity(0.05)
     }
@@ -328,8 +328,8 @@ struct SidePanelTabChip: View {
         .frame(maxWidth: compact ? nil : 200)
         .background(fill, in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(selected ? Color.accentColor.opacity(0.55) : .clear))
-        .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .strokeBorder(selected ? Color.accent.opacity(0.55) : .clear))
+        .foregroundStyle(selected ? Color.accent : Color.primary)
         .contentShape(Rectangle())
         // ⇧-click closes (ADR-130). A panel pane closes without asking — nothing is running in it
         // that the tab does not already own — and this is the compact chip's only pointer-driven

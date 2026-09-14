@@ -238,9 +238,9 @@ struct RunEditorSheet: View {
                         Image(systemName: SFSymbolCatalog.resolved(symbol))
                             .font(.system(size: 13))
                             .frame(width: 28, height: 28)
-                            .foregroundStyle(on ? Color.accentColor : Color.secondary)
-                            .background(on ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(on ? Color.accentColor.opacity(0.5) : .clear))
+                            .foregroundStyle(on ? Color.accent : Color.secondary)
+                            .background(on ? Color.accent.opacity(0.16) : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(on ? Color.accent.opacity(0.5) : .clear))
                     }
                     .buttonStyle(.plain)
                     .help(symbol)
@@ -492,7 +492,7 @@ struct RunImportSheet: View {
                 Button { dismiss(); tabs.setUpRunsWithClaude(projectPath: context.projectPath) } label: {
                     Label("Set Up with Claude…", systemImage: "sparkles")
                 }
-                .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+                .buttonStyle(.borderless).foregroundStyle(Color.accent)
                 if let error { Text(error).font(.caption).foregroundStyle(.orange) }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).controlSize(.large)
@@ -612,12 +612,12 @@ struct RunPickerSheet: View {
                                 Text("detected").font(.caption2).foregroundStyle(.secondary)
                                     .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
                             } else if item.config.id == selectedId {
-                                Image(systemName: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                                Image(systemName: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(Color.accent)
                             }
                             RunStatusGlyph(run: tabs.runs.run(of: item.config, checkout: context.checkout), idleSymbol: "", size: 11)
                         }
                         .padding(.vertical, 2)
-                        .listRowBackground(i == highlighted ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .listRowBackground(i == highlighted ? Color.accent.opacity(0.2) : Color.clear)
                         .contentShape(Rectangle())
                         .onTapGesture { highlighted = i; choose(run: false) }
                     }

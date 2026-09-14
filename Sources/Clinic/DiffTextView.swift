@@ -65,7 +65,7 @@ enum DiffMetrics {
     /// line reads as one stripe across both.
     static func band(_ kind: DiffDocument.LineKind) -> NSColor? {
         switch kind {
-        case .hunk: NSColor.controlAccentColor.withAlphaComponent(0.08)
+        case .hunk: Appearance.shared.nsAccentColor.withAlphaComponent(0.08)
         case .code(let code): tint(code)
         }
     }

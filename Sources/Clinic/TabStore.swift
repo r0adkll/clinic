@@ -1084,6 +1084,12 @@ final class TabStore {
         switch action {
         case .newTab, .newWindow, .newSplit: newShell(); return true
         case .quit: NSApp.terminate(nil); return true
+        // libghostty asks for this when the colour scheme changes (ADR-152) and a `theme = light:…,
+        // dark:…` config has a different theme to apply. Handing it the same config back is how it
+        // re-evaluates the conditional; the files are not re-read.
+        case .unhandled(kind: "reload_config"):
+            if let runtime { runtime.reloadConfig(runtime.config) }
+            return true
         case .unhandled(let kind): Self.log.debug("unhandled app action \(kind, privacy: .public)"); return false
         default: return false
         }

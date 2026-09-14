@@ -90,7 +90,7 @@ struct TaskDetailView: View {
                     }
                 }
                 ForEach(linked) { s in
-                    LinkChip(symbol: "terminal", title: sessions.displayName(for: s), tint: .accentColor,
+                    LinkChip(symbol: "terminal", title: sessions.displayName(for: s), tint: .accent,
                              help: "Session started from this task. Click to open it.") {
                         tabs.open(session: s)
                     }

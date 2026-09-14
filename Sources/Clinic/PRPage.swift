@@ -547,7 +547,7 @@ private struct WatchToggle: View {
                 .frame(width: 16, height: 16)
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(watching ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+        .foregroundStyle(watching ? AnyShapeStyle(Color.accent) : AnyShapeStyle(.secondary))
         .help(helpText)
         .accessibilityLabel(watching ? "Stop watching checks" : "Watch checks")
     }
@@ -1063,9 +1063,9 @@ struct PRChip: View {
             .font(.callout)
             .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(active ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accentColor.opacity(0.35) : .clear))
-            .foregroundStyle(active ? Color.accentColor : .primary)
+            .background(active ? Color.accent.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accent.opacity(0.35) : .clear))
+            .foregroundStyle(active ? Color.accent : .primary)
         }
         .buttonStyle(.plain)
         .help(mark?.summary ?? "\(host.noun) \(host.reference(ref.number))")

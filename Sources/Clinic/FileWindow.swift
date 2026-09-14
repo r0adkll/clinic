@@ -45,7 +45,7 @@ final class FileWindowController: NSObject, NSWindowDelegate {
         super.init()
         model.open(absolute: path)
         model.onOpen = { [weak self] path in self?.retitle(path) }
-        window.contentView = NSHostingView(rootView: FileEditorView(model: model).frame(minWidth: 480, minHeight: 320))
+        window.contentView = NSHostingView(rootView: FileEditorView(model: model).frame(minWidth: 480, minHeight: 320).clinicAppearance())
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.delegate = self

@@ -135,7 +135,7 @@ struct PopoverMenuRow<Icon: View>: View {
             .padding(.vertical, subtitle == nil ? 4 : 5)
             .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
             .foregroundStyle(highlighted ? Color.white : Color.primary)
-            .background(highlighted ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
+            .background(highlighted ? Color.accent : .clear, in: RoundedRectangle(cornerRadius: 5))
             .opacity(isEnabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }

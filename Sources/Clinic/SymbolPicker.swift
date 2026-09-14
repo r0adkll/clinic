@@ -166,9 +166,9 @@ struct SymbolBrowser: View {
             Image(systemName: SFSymbolCatalog.resolved(name))
                 .font(.system(size: 17))
                 .frame(width: 44, height: 40)
-                .foregroundStyle(on ? Color.accentColor : Color.primary)
-                .background(on ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(on ? Color.accentColor.opacity(0.5) : .clear))
+                .foregroundStyle(on ? Color.accent : Color.primary)
+                .background(on ? Color.accent.opacity(0.16) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(on ? Color.accent.opacity(0.5) : .clear))
         }
         .buttonStyle(.plain)
         .help(name)
@@ -180,9 +180,9 @@ struct SymbolBrowser: View {
         HStack(spacing: 10) {
             Image(systemName: SFSymbolCatalog.resolved(chosen))
                 .font(.system(size: 17))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.accent)
                 .frame(width: 34, height: 34)
-                .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 TextField("Symbol name", text: $typed)
                     .textFieldStyle(.roundedBorder)

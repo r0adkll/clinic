@@ -23,6 +23,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.mcpServers)
                 .environment(appDelegate.automations)
                 .environment(appDelegate.tasks)
+                .clinicAppearance()
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
@@ -37,6 +38,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.bindings)
                 .environment(appDelegate.tabs.snapshots)
                 .environment(appDelegate.tabs.sounds)
+                .clinicAppearance()
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 780, height: 560)
@@ -77,6 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
         scrubInheritedDebuggerEnvironment()
+        // The saved theme goes on before any window exists, so nothing is drawn in the wrong one
+        // (ADR-152). libghostty hears every change of appearance, so a config with a light and a dark
+        // theme follows Clinic's rather than the Mac's.
+        Appearance.shared.start { [weak self] dark in self?.tabs.runtime?.setColorScheme(dark: dark) }
         // Resolve the login shell's PATH now, off the main thread, so the first `gh`/`git`/`claude`
         // call does not pay for it (ADR-086).
         ProcessEnvironment.prewarm()

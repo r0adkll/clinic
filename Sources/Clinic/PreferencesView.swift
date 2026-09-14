@@ -12,6 +12,9 @@ enum Prefs {
     static let hookTrace = "ClinicHookTrace"
     /// Where new worktrees branch from when a project has no choice of its own (ADR-118).
     static let worktreeBase = "ClinicWorktreeBase"
+    /// `system`, `light` or `dark`; and `system`, a named accent, or `#RRGGBB` (ADR-152).
+    static let theme = "ClinicTheme"
+    static let accent = "ClinicAccent"
 
     static var defaultWorktreeBase: WorktreeBase {
         UserDefaults.standard.string(forKey: worktreeBase).flatMap(WorktreeBase.init(rawValue:)) ?? .defaultBranch
@@ -22,13 +25,14 @@ enum Prefs {
 /// bucket: what was "General" held startup, window chrome, an account, session defaults and a git
 /// preference in one flat list.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, sessions, openIn, notifications, shortcuts, advanced
+    case general, appearance, sessions, openIn, notifications, shortcuts, advanced
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "General"
+        case .appearance: "Appearance"
         case .sessions: "Sessions"
         case .openIn: "Open In"
         case .notifications: "Notifications"
@@ -43,6 +47,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: "gear"
+        case .appearance: "paintpalette"
         case .sessions: "terminal"
         case .openIn: "arrow.up.forward.app"
         case .notifications: "bell"
@@ -102,6 +107,7 @@ struct PreferencesView: View {
             Group {
                 switch pane {
                 case .general: GeneralPane().settingsColumn()
+                case .appearance: AppearancePane().settingsColumn()
                 case .sessions: SessionsPane().settingsColumn()
                 case .openIn: OpenInPane().settingsColumn()
                 case .notifications: NotificationPreferences(tabs: tabs).settingsColumn()
@@ -175,9 +181,9 @@ private struct SettingsPaneIcon: View {
     var body: some View {
         Image(systemName: pane.symbol)
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(Color.accent)
             .frame(width: 20, height: 20)
-            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(Color.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
@@ -266,6 +272,126 @@ private struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Appearance
+
+/// Theme and accent (ADR-152). Both live on `Appearance.shared` rather than in `@AppStorage`, because
+/// changing either has work to do beyond storing it.
+private struct AppearancePane: View {
+    private var appearance: Appearance { Appearance.shared }
+    /// The custom well's colour. Kept apart from `appearance.accent` so dragging in the picker does
+    /// not write a preference per pixel; the accent is set when the picker settles.
+    @State private var customColor: Color = Color(nsColor: Appearance.shared.systemAccentColor)
+
+    var body: some View {
+        Form {
+            Section {
+                // The header already says "Theme"; a label on the row would say it twice, one line
+                // apart, so the control fills the row on its own.
+                Picker("Theme", selection: Binding(get: { appearance.theme }, set: { appearance.theme = $0 })) {
+                    ForEach(Appearance.Theme.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Theme")
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text("Clinic's windows only. A terminal whose Ghostty config names a light and a dark theme switches with it.")
+            }
+
+            Section {
+                AccentSwatches(customColor: $customColor)
+            } header: {
+                Text("Accent colour")
+            } footer: {
+                // Switches, checkboxes and selection fills are AppKit's and come in the Mac's eight
+                // accents only, so a colour of the reader's own is matched to the nearest for them.
+                if case .custom = appearance.accent, let nearest = appearance.accent.nearestNamed {
+                    Text("Switches, checkboxes and selection highlights use the nearest standard accent, \(nearest.title).")
+                } else {
+                    Text("System follows the accent chosen in System Settings.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            if case .custom(let hex) = appearance.accent { customColor = Color(nsColor: NSColor(hex: hex)) }
+        }
+    }
+}
+
+/// System, the eight named accents, and a colour well: one row of 26 pt circles, the chosen one ringed.
+private struct AccentSwatches: View {
+    @Binding var customColor: Color
+    private var appearance: Appearance { Appearance.shared }
+
+    private var isCustom: Bool { if case .custom = appearance.accent { true } else { false } }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Swatch(title: "System", color: Color(nsColor: appearance.systemAccentColor), selected: appearance.accent == .system,
+                   systemMark: true) { appearance.accent = .system }
+            ForEach(Appearance.NamedAccent.allCases) { named in
+                Swatch(title: named.title, color: Color(nsColor: named.nsColor),
+                       selected: appearance.accent == .named(named)) { appearance.accent = .named(named) }
+            }
+            Divider().frame(height: 22)
+            ColorPicker(selection: $customColor, supportsOpacity: false) {
+                EmptyView()
+            }
+            .labelsHidden()
+            .overlay(alignment: .topTrailing) {
+                if isCustom {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white, Color.accent)
+                        .offset(x: 4, y: -4)
+                }
+            }
+            .help("Any colour")
+            .accessibilityLabel(isCustom ? "Custom accent, selected" : "Custom accent")
+            .onChange(of: customColor) { _, new in
+                appearance.accent = Appearance.Accent(custom: NSColor(new))
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private struct Swatch: View {
+        let title: String
+        let color: Color
+        let selected: Bool
+        var systemMark = false
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                ZStack {
+                    Circle().fill(color).frame(width: 22, height: 22)
+                    // The system swatch is the Mac's accent with a hairline ring, so it is told apart
+                    // from a named accent that happens to be the same colour.
+                    if systemMark {
+                        Circle().strokeBorder(.primary.opacity(0.35), lineWidth: 1).frame(width: 22, height: 22)
+                    }
+                    if selected {
+                        Circle().fill(.white).frame(width: 7, height: 7)
+                    }
+                }
+                .frame(width: 26, height: 26)
+                .overlay {
+                    if selected {
+                        Circle().strokeBorder(color, lineWidth: 2)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help(title)
+            .accessibilityLabel(selected ? "\(title), selected" : title)
+        }
     }
 }
 

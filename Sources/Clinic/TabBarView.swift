@@ -21,7 +21,7 @@ struct TabBarView: View {
                 Divider().frame(height: 18)
                 Button { tabs.togglePanelZoom(tab) } label: {
                     Image(systemName: tab.panel.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                        .foregroundStyle(tab.panel.isZoomed ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(tab.panel.isZoomed ? Color.accent : Color.secondary)
                 }
                 .buttonStyle(.borderless)
                 .padding(.leading, 8)
@@ -29,7 +29,7 @@ struct TabBarView: View {
                                          : "Expand the panel to fill the window" + bindings.hint(.zoomPanel))
                 Button { tabs.togglePanelVisibility(tab) } label: {
                     Image(systemName: "sidebar.right")
-                        .foregroundStyle(tab.panel.isVisible ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(tab.panel.isVisible ? Color.accent : Color.secondary)
                 }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 8)
@@ -59,8 +59,8 @@ struct TabChip: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
         .frame(maxWidth: 220)
-        .background(selected ? Color.accentColor.opacity(0.18) : (hovering ? Color.primary.opacity(0.06) : .clear), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? Color.accentColor.opacity(0.5) : .clear))
+        .background(selected ? Color.accent.opacity(0.18) : (hovering ? Color.primary.opacity(0.06) : .clear), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? Color.accent.opacity(0.5) : .clear))
         .contentShape(Rectangle())
         // ⇧-click closes the tab (ADR-130). It goes through `close`, not around it, so a running
         // session still asks before its child is killed (ADR-037) — the modifier is a shortcut to

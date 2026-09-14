@@ -57,7 +57,7 @@ struct NewSessionScreen: View {
     /// The wash behind the card takes the icon's own colour, so a project's start screen looks like its icon.
     private var tint: Color {
         _ = ProjectIconCache.shared.revision
-        return isChats ? .accentColor : ProjectIconCache.shared.tint(for: project.path)
+        return isChats ? .accent : ProjectIconCache.shared.tint(for: project.path)
     }
 
     /// This project's last few opening prompts, newest first, deduplicated (ADR-071 quick starts).
@@ -138,8 +138,8 @@ struct NewSessionScreen: View {
                 }
                 .font(.caption).lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(draft.worktree ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.07), in: Capsule())
-                .foregroundStyle(draft.worktree ? Color.accentColor : Color.secondary)
+                .background(draft.worktree ? Color.accent.opacity(0.16) : Color.primary.opacity(0.07), in: Capsule())
+                .foregroundStyle(draft.worktree ? Color.accent : Color.secondary)
                 .help(draft.worktree ? "The session gets its own branch off \(baseName(draft.worktreeBase))" : "Current branch")
             }
         }
@@ -175,7 +175,7 @@ struct NewSessionScreen: View {
         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(focus == .prompt ? Color.accentColor.opacity(0.55) : Color(nsColor: .separatorColor),
+                .strokeBorder(focus == .prompt ? Color.accent.opacity(0.55) : Color(nsColor: .separatorColor),
                               lineWidth: focus == .prompt ? 1.5 : 1)
         }
         .animation(.easeOut(duration: 0.12), value: focus)
@@ -204,7 +204,7 @@ struct NewSessionScreen: View {
                     }
                 }
                 .frame(width: 24, height: 24)
-                .background(Color.accentColor, in: Circle())
+                .background(Color.accent, in: Circle())
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.return, modifiers: .command)
@@ -375,7 +375,7 @@ struct NewSessionScreen: View {
                 Text(baseName(draft.worktreeBase)).fontWeight(.medium)
                 Image(systemName: "chevron.up.chevron.down").imageScale(.small)
             }
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(Color.accent)
             .contentShape(Rectangle())
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
@@ -483,10 +483,10 @@ struct NewSessionScreen: View {
     private func chip<Content: View>(active: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 4) { content() }
             .font(.callout)
-            .foregroundStyle(active ? Color.accentColor : Color.secondary)
+            .foregroundStyle(active ? Color.accent : Color.secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(active ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.07), in: Capsule())
-            .overlay(Capsule().strokeBorder(active ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08)))
+            .background(active ? Color.accent.opacity(0.16) : Color.primary.opacity(0.07), in: Capsule())
+            .overlay(Capsule().strokeBorder(active ? Color.accent.opacity(0.35) : Color.primary.opacity(0.08)))
             .contentShape(Capsule())
     }
 }
@@ -507,7 +507,7 @@ private struct EffortBars: View {
         HStack(alignment: .bottom, spacing: 1.5) {
             ForEach(1...5, id: \.self) { i in
                 Capsule()
-                    .fill(i <= level ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .fill(i <= level ? Color.accent : Color.secondary.opacity(0.3))
                     .frame(width: 2.5, height: 3 + CGFloat(i) * 1.8)
             }
         }

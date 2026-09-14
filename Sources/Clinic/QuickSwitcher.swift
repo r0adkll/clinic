@@ -40,7 +40,7 @@ struct QuickSwitcher: View {
                             Text(s.activityDate, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 2)
-                        .listRowBackground(i == highlighted ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .listRowBackground(i == highlighted ? Color.accent.opacity(0.2) : Color.clear)
                         .contentShape(Rectangle())
                         .onTapGesture { highlighted = i; openHighlighted() }
                         .id(s.id)

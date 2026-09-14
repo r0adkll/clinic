@@ -60,7 +60,7 @@ final class ImageWindowController: NSObject, NSWindowDelegate {
             case .openWindow, .remove, .step: break
             }
         }
-        window.contentView = NSHostingView(rootView: view.frame(minWidth: 280, minHeight: 200))
+        window.contentView = NSHostingView(rootView: view.frame(minWidth: 280, minHeight: 200).clinicAppearance())
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.delegate = self

@@ -35,7 +35,7 @@ struct MCPServersScreen: View {
         @Bindable var model = model
         return VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "server.rack").font(.title3).foregroundStyle(Color.accentColor)
+                Image(systemName: "server.rack").font(.title3).foregroundStyle(Color.accent)
                 Text("MCP Servers").font(.title3.weight(.semibold))
                 Text("Tools your sessions can call").font(.callout).foregroundStyle(.secondary)
                 Spacer(minLength: 12)

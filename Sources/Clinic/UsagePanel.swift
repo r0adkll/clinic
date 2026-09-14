@@ -252,11 +252,11 @@ struct UsageBarView: View {
 
 extension UsageSnapshot.Bar {
     /// Shared by the collapsed chip and the expanded bar, so one limit reads the same in both.
-    var tint: Color {
+    @MainActor var tint: Color {
         switch severity {
         case "exceeded": return .red
         case "warning": return .orange
-        default: return percent >= 90 ? .orange : .accentColor
+        default: return percent >= 90 ? .orange : .accent
         }
     }
 

@@ -70,7 +70,7 @@ struct AutomationEditorSheet: View {
         HStack(spacing: Metrics.row) {
             Image(systemName: "alarm.fill")
                 .font(.system(size: 22))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.accent)
                 .frame(width: 28)
             TextField("Automation name", text: $draft.name)
                 .textFieldStyle(.plain)
@@ -106,14 +106,14 @@ struct AutomationEditorSheet: View {
             ProjectIcon(project: project, size: 18)
         } else {
             Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(.system(size: 13)).foregroundStyle(Color.accentColor).frame(width: 18)
+                .font(.system(size: 13)).foregroundStyle(Color.accent).frame(width: 18)
         }
     }
 
     private var targetList: some View {
         VStack(alignment: .leading, spacing: 0) {
             targetRow(icon: AnyView(Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 15)).foregroundStyle(Color.accentColor).frame(width: 24)),
+                        .font(.system(size: 15)).foregroundStyle(Color.accent).frame(width: 24)),
                       title: "Chat",
                       detail: "No repository — runs in Clinic's scratch folder",
                       selected: selectedProject == nil) {
@@ -196,7 +196,7 @@ struct AutomationEditorSheet: View {
         }
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(RoundedRectangle(cornerRadius: Metrics.corner)
-            .strokeBorder(promptFocused ? Color.accentColor.opacity(0.55) : Color.black.opacity(0.08),
+            .strokeBorder(promptFocused ? Color.accent.opacity(0.55) : Color.black.opacity(0.08),
                           lineWidth: promptFocused ? 2 : 1))
     }
 
@@ -414,7 +414,7 @@ private struct TargetRow: View {
                 Spacer(minLength: 6)
                 if selected {
                     Image(systemName: "checkmark").font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.accent)
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 7)

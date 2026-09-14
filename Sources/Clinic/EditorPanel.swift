@@ -404,7 +404,7 @@ struct FileEditorView: View {
             if let rel = model.relativeOpenPath {
                 Text(rel).font(.system(size: PaneMetrics.label, design: .monospaced))
                     .lineLimit(1).truncationMode(.head).help(rel)
-                if model.isDirty { Circle().fill(Color.accentColor).frame(width: 7, height: 7).help("Unsaved changes") }
+                if model.isDirty { Circle().fill(Color.accent).frame(width: 7, height: 7).help("Unsaved changes") }
                 Text(model.language.tsName).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
             } else {
                 Text("No file open").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)

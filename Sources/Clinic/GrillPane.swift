@@ -327,7 +327,7 @@ struct GrillPane: View {
         PaneHeader {
             Image(systemName: "flame")
                 .font(.system(size: PaneMetrics.glyph, weight: .medium))
-                .foregroundStyle(isActionable ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isActionable ? Color.accent : Color.secondary)
             // The control that changes which round you are looking at is the thing that says which
             // round you are looking at (ADR-141). Plain text while there is only one.
             if rounds.count > 1 {
@@ -348,7 +348,7 @@ struct GrillPane: View {
             if let round = shown, isActionable, GrillPaneModel.hasWizardChrome(round) {
                 Text("\(round.answeredCount) of \(round.questions.count)")
                     .font(.system(size: PaneMetrics.label, weight: .medium).monospacedDigit())
-                    .foregroundStyle(round.isFullyAnswered ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(round.isFullyAnswered ? Color.accent : Color.secondary)
             }
         }
     }
@@ -404,10 +404,10 @@ struct GrillPane: View {
         let answering = model.mode == .answering
         return Text(hint)
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(answering ? Color.accentColor : Color.secondary)
+            .foregroundStyle(answering ? Color.accent : Color.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background((answering ? Color.accentColor : Color.secondary).opacity(0.11), in: Capsule())
+            .background((answering ? Color.accent : Color.secondary).opacity(0.11), in: Capsule())
             .lineLimit(1)
     }
 
@@ -812,12 +812,12 @@ private struct ProgressStrip: View {
                 }
             }
 
-            var fill: Color {
+            @MainActor var fill: Color {
                 switch self {
                 case .unanswered: Color.primary.opacity(0.08)
                 // Filled in, but not a decision with content. A border would not read at 18 pt.
                 case .skipped: Color.secondary.opacity(0.5)
-                case .answered: Color.accentColor
+                case .answered: Color.accent
                 }
             }
 
@@ -859,7 +859,7 @@ private struct ProgressStrip: View {
                 // three fills — including the accent one it used to be invisible against (ADR-134).
                 .overlay {
                     Circle()
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .strokeBorder(Color.accent, lineWidth: 2)
                         .padding(-3)
                         .opacity(current ? 1 : 0)
                 }
@@ -926,18 +926,18 @@ private struct QuestionStep: View {
         return HStack(alignment: .top, spacing: 7) {
             Image(systemName: "arrow.turn.down.right")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.accent)
                 .padding(.top, 2)
             GrillMarkdown(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(accepted ? "Accepted" : "Accept") { accept() }
                 .buttonStyle(.borderless)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(accepted ? Color.secondary : Color.accentColor)
+                .foregroundStyle(accepted ? Color.secondary : Color.accent)
                 .help(accepted ? "You accepted this" : "Accept the agent's recommendation — ⏎")
         }
         .padding(9)
-        .background(Color.accentColor.opacity(accepted ? 0.14 : 0.08), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.accent.opacity(accepted ? 0.14 : 0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var choiceList: some View {
@@ -984,7 +984,7 @@ private struct QuestionStep: View {
                     // focused card use. `NSScrollView.lineBorder` cannot change with state, so the
                     // border lives here.
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(focused ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.12),
+                        .strokeBorder(focused ? Color.accent.opacity(0.8) : Color.primary.opacity(0.12),
                                       lineWidth: focused ? 1.5 : 1)
                         // Decoration only. An overlay sits *above* the `NSViewRepresentable`, and a
                         // shape hit-tests, so without this the border swallowed every click into the
@@ -1089,7 +1089,7 @@ private struct HistoryList: View {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.accent)
                         .padding(.top, 2)
                     GrillMarkdown(recommendation)
                 }
@@ -1098,7 +1098,7 @@ private struct HistoryList: View {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: picked(choice, in: question) ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 10))
-                        .foregroundStyle(picked(choice, in: question) ? Color.accentColor : Color.secondary.opacity(0.6))
+                        .foregroundStyle(picked(choice, in: question) ? Color.accent : Color.secondary.opacity(0.6))
                         .padding(.top, 2)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(choice.label)
@@ -1190,7 +1190,7 @@ private struct GrillAnswerRow<Detail: View>: View {
                     in: RoundedRectangle(cornerRadius: 7))
         .overlay {
             RoundedRectangle(cornerRadius: 7)
-                .strokeBorder(focused ? Color.accentColor.opacity(0.75) : .clear, lineWidth: 1.5)
+                .strokeBorder(focused ? Color.accent.opacity(0.75) : .clear, lineWidth: 1.5)
         }
         .onHover { hovering = $0 }
     }
@@ -1250,10 +1250,10 @@ struct AnswerBadge: View {
     var body: some View {
         Text(word)
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(isDecision ? Color.accentColor : Color.secondary)
+            .foregroundStyle(isDecision ? Color.accent : Color.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background((isDecision ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
+            .background((isDecision ? Color.accent : Color.secondary).opacity(0.12), in: Capsule())
             .fixedSize()
     }
 }
@@ -1293,7 +1293,7 @@ private struct ChoiceRow: View {
             HStack(alignment: .top, spacing: 7) {
                 Image(systemName: symbol)
                     .font(.system(size: 12))
-                    .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(picked ? Color.accent : Color.secondary)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
@@ -1304,10 +1304,10 @@ private struct ChoiceRow: View {
                         if choice.recommended {
                             Text("recommended")
                                 .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(Color.accent)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background(Color.accentColor.opacity(0.13), in: Capsule())
+                                .background(Color.accent.opacity(0.13), in: Capsule())
                         }
                     }
                     if let detail = choice.detail {
@@ -1339,7 +1339,7 @@ private struct ChoiceRow: View {
     }
 
     private var background: Color {
-        if picked { return Color.accentColor.opacity(0.13) }
+        if picked { return Color.accent.opacity(0.13) }
         return hovering ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03)
     }
 }

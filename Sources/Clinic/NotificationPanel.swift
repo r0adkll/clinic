@@ -11,7 +11,7 @@ struct NotificationBell: View {
         Button { showPanel.toggle(); store.markAllRead() } label: {
             Label("Notifications", systemImage: store.unreadCount > 0 ? "bell.badge" : "bell")
                 .symbolRenderingMode(.palette)
-                .foregroundStyle(store.unreadCount > 0 ? Color.accentColor : Color.primary, Color.primary)
+                .foregroundStyle(store.unreadCount > 0 ? Color.accent : Color.primary, Color.primary)
         }
         .help((store.unreadCount > 0 ? "\(store.unreadCount) unread" : "Notification history") + bindings.hint(.notifications))
         .keyboardShortcut(bindings.shortcut(for: .notifications))

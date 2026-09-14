@@ -106,7 +106,7 @@ struct TasksScreen: View {
         let facets = WorkItemFacets(all)
         return VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "list.bullet.clipboard").font(.title3).foregroundStyle(Color.accentColor)
+                Image(systemName: "list.bullet.clipboard").font(.title3).foregroundStyle(Color.accent)
                 Text("Tasks").font(.title3.weight(.semibold))
                 Text("Issues from your projects").font(.callout).foregroundStyle(.secondary)
                 Spacer(minLength: 12)
@@ -401,7 +401,7 @@ private struct ScopeRow<Content: View>: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(selected ? AnyShapeStyle(Color.white) : dimmed ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
             .padding(.vertical, 5).padding(.horizontal, 8)
-            .background(selected ? AnyShapeStyle(Color.accentColor) : hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
+            .background(selected ? AnyShapeStyle(Color.accent) : hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
                         in: RoundedRectangle(cornerRadius: 7))
             .contentShape(Rectangle())
         }
@@ -535,7 +535,7 @@ struct TaskRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.title).font(.body.weight(.semibold)).lineLimit(2)
                     if updated {
-                        Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                        Circle().fill(Color.accent).frame(width: 7, height: 7)
                             .help("Updated since you last opened it")
                     }
                     Spacer(minLength: 0)

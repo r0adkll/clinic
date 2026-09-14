@@ -72,7 +72,7 @@ struct FileTreeRowView<Accessory: View>: View {
     private var isDirectory: Bool { isExpanded != nil }
 
     private var fill: Color {
-        if isSelected { return Color.accentColor.opacity(hovering ? 0.26 : 0.20) }
+        if isSelected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }
         if hovering { return Color.primary.opacity(0.09) }
         return .clear
     }
@@ -83,7 +83,7 @@ struct FileTreeRowView<Accessory: View>: View {
                 chevron
                 Image(systemName: symbol)
                     .font(.system(size: FileTreeMetrics.glyphSize))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.accent : Color.secondary)
                     .frame(width: FileTreeMetrics.icon)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(name)

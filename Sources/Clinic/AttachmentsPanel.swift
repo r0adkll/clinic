@@ -326,7 +326,7 @@ private struct ImageRowView: View {
     @State private var hovering = false
 
     private var fill: Color {
-        if isSelected { return Color.accentColor.opacity(hovering ? 0.26 : 0.20) }
+        if isSelected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }
         if hovering { return Color.primary.opacity(0.09) }
         return .clear
     }

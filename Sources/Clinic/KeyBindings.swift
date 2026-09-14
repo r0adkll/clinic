@@ -292,10 +292,11 @@ struct ShortcutRecorder: NSViewRepresentable {
 
         override func draw(_ dirtyRect: NSRect) {
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
-            (recording ? NSColor.controlAccentColor.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill(); path.fill()
-            (recording ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke(); path.stroke()
+            let accent = Appearance.shared.nsAccentColor
+            (recording ? accent.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill(); path.fill()
+            (recording ? accent : NSColor.separatorColor).setStroke(); path.stroke()
             let text = recording ? "Type shortcut…" : label
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: recording ? NSColor.controlAccentColor : (label == "None" ? NSColor.secondaryLabelColor : NSColor.labelColor)]
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: recording ? accent : (label == "None" ? NSColor.secondaryLabelColor : NSColor.labelColor)]
             let size = text.size(withAttributes: attrs)
             text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attrs)
         }

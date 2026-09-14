@@ -50,7 +50,7 @@ struct AutomationsScreen: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "alarm.fill").font(.title3).foregroundStyle(Color.accentColor)
+            Image(systemName: "alarm.fill").font(.title3).foregroundStyle(Color.accent)
             Text("Automations").font(.title3.weight(.semibold))
             Text("Prompts that run on a schedule").font(.callout).foregroundStyle(.secondary)
             Spacer(minLength: 12)
@@ -132,7 +132,7 @@ private struct AutomationRow: View {
         HStack(spacing: 8) {
             Image(systemName: glyph)
                 .font(.system(size: 13)).frame(width: 18)
-                .foregroundStyle(automation.isEnabled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                .foregroundStyle(automation.isEnabled ? AnyShapeStyle(Color.accent) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
             VStack(alignment: .leading, spacing: 1) {
                 Text(automation.name).font(.body.weight(.medium)).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -181,7 +181,7 @@ struct AutomationOutcomeBadge: View {
 
     private var tint: Color {
         switch outcome {
-        case .running: .accentColor
+        case .running: .accent
         case .finished: .green
         case .failed, .launchFailed: .red
         case .stalled: .orange

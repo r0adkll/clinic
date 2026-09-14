@@ -262,7 +262,7 @@ private struct ShortcutTip: View {
                 Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 8)
                 Button("All Shortcuts…") { PreferencesView.open(.shortcuts) }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Color.accent)
             }
             .padding(.horizontal, 8)
         }
@@ -294,10 +294,10 @@ private struct FirstLaunchHome: View {
             }
             .padding(.horizontal, 24).padding(.top, 34).padding(.bottom, 28)
             .frame(maxWidth: 560)
-            .background(targeted ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.02),
+            .background(targeted ? Color.accent.opacity(0.08) : Color.primary.opacity(0.02),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(targeted ? Color.accentColor : Color.primary.opacity(0.16), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+                .strokeBorder(targeted ? Color.accent : Color.primary.opacity(0.16), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
             HStack(spacing: 12) {
                 HomeActionCard(symbol: "bubble.left.and.bubble.right", title: "New Chat", action: .newChat) { tabs.newChat() }
                 HomeActionCard(symbol: "terminal", title: "New Shell", action: .newShell) { tabs.newShell() }
@@ -377,9 +377,9 @@ struct AccentTile: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: glyph, weight: .medium))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(Color.accent)
             .frame(width: size, height: size)
-            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
+            .background(Color.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
     }
 }
 

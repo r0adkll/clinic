@@ -141,8 +141,11 @@ struct TerminalStack: NSViewRepresentable {
         }
     }
 
+    /// Each of these becomes an `NSHostingView` root of its own, so it gets the accent as well as the
+    /// stores; neither crosses from the window's root into a separate hosting view (ADR-152).
     private func inject<V: View>(_ view: V) -> AnyView {
-        AnyView(view.environment(tabs).environment(sessions).environment(prs).environment(history).environment(usage))
+        AnyView(view.environment(tabs).environment(sessions).environment(prs).environment(history).environment(usage)
+            .clinicAppearance())
     }
 
     /// Panel pages fill their hosting view, so a page whose ideal size is small does not float in it.

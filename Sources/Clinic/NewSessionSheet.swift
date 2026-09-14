@@ -165,7 +165,7 @@ struct NewSessionSheet: View {
         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .strokeBorder(searchFocused ? Color.accentColor.opacity(0.55) : Color(nsColor: .separatorColor),
+                .strokeBorder(searchFocused ? Color.accent.opacity(0.55) : Color(nsColor: .separatorColor),
                               lineWidth: searchFocused ? 1.5 : 1)
         }
         .animation(.easeOut(duration: 0.12), value: searchFocused)
@@ -254,9 +254,9 @@ struct NewSessionSheet: View {
 
     private var dropOverlay: some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.accentColor.opacity(0.08))
+            .fill(Color.accent.opacity(0.08))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+                .strokeBorder(Color.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
             .overlay {
                 VStack(spacing: 8) {
                     AccentTile(symbol: "folder.badge.plus", size: 44, glyph: 22)
@@ -326,7 +326,7 @@ private struct ProjectPickerRow<Icon: View>: View {
             .background(background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 if highlighted {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.accentColor.opacity(0.35))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.accent.opacity(0.35))
                 }
             }
             .contentShape(Rectangle())
@@ -336,7 +336,7 @@ private struct ProjectPickerRow<Icon: View>: View {
     }
 
     private var background: AnyShapeStyle {
-        if highlighted { return AnyShapeStyle(Color.accentColor.opacity(0.14)) }
+        if highlighted { return AnyShapeStyle(Color.accent.opacity(0.14)) }
         return hovering ? AnyShapeStyle(Color.primary.opacity(0.06)) : AnyShapeStyle(Color.clear)
     }
 }

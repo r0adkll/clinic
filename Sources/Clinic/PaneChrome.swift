@@ -64,14 +64,14 @@ struct PaneIconButton: View {
         if !enabled { return .clear }
         // Quiet enough not to read as an alert when the accent colour is a loud one — this button is
         // on for as long as the tree is open, which is most of the time.
-        if isOn { return Color.accentColor.opacity(hovering ? 0.18 : 0.11) }
+        if isOn { return Color.accent.opacity(hovering ? 0.18 : 0.11) }
         if hovering { return Color.primary.opacity(0.09) }
         return .clear
     }
 
     private var tint: Color {
         if !enabled { return Color.secondary.opacity(0.4) }
-        return isOn ? Color.accentColor : Color.secondary
+        return isOn ? Color.accent : Color.secondary
     }
 
     var body: some View {
@@ -153,7 +153,7 @@ struct TreeFilterField: View {
         HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(focused ? Color.accentColor : Color.secondary)
+                .foregroundStyle(focused ? Color.accent : Color.secondary)
             TextField("Filter", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: PaneMetrics.label))
@@ -186,7 +186,7 @@ struct TreeFilterField: View {
         .background(Color.primary.opacity(focused ? 0.04 : 0.07), in: RoundedRectangle(cornerRadius: 6))
         .overlay {
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(focused ? Color.accentColor : Color.primary.opacity(0.12),
+                .strokeBorder(focused ? Color.accent : Color.primary.opacity(0.12),
                               lineWidth: focused ? 1.5 : 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -222,7 +222,7 @@ struct TreeSplitHandle: View {
             .frame(width: 1)
             // The line answers the pointer before it is dragged, so the seam is findable rather than
             // something you learn is there (ADR-103).
-            .overlay { Rectangle().fill(Color.accentColor).frame(width: 2).opacity(active ? 1 : 0) }
+            .overlay { Rectangle().fill(Color.accent).frame(width: 2).opacity(active ? 1 : 0) }
             .overlay {
                 Color.clear
                     .frame(width: 11)
