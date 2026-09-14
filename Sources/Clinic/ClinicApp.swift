@@ -124,6 +124,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // its tab, its detached agent, or both say it is working.
         caffeine.start { [weak self] in
             guard let self else { return 0 }
+            // `-ClinicCaffeineFakeWorking <n>` stands in for agents a smoke instance cannot start, so
+            // the working cup and its pulse can be photographed (ADR-038, ADR-150). Smoke-only: it
+            // shares UserDefaults with the live app, which must never hold the assertion on a test key.
+            if ClinicPaths.isSmokeInstance {
+                let faked = UserDefaults.standard.integer(forKey: "ClinicCaffeineFakeWorking")
+                if faked > 0 { return faked }
+            }
             let agents = backgroundAgents.background.filter(\.isWorking)
             var ids = Set(agents.compactMap(\.sessionId))
             ids.formUnion(tabs.tabs.filter { $0.state == .working }.compactMap(\.sessionId))

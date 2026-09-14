@@ -82,11 +82,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let show = NSMenuItem(title: "Show Clinic", action: #selector(showApp), keyEquivalent: ""); show.target = self; menu.addItem(show)
         let new = NSMenuItem(title: "New Session…", action: #selector(newSession), keyEquivalent: ""); new.target = self; menu.addItem(new)
-        // The same header and modes as the toolbar cup's menu (ADR-119).
+        // The same header, modes and cups as the toolbar's popover (ADR-119, ADR-150).
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: caffeine.statusLine))
         for (i, m) in CaffeineController.Mode.allCases.enumerated() {
             let mi = NSMenuItem(title: m.title, action: #selector(chooseCaffeineMode(_:)), keyEquivalent: ""); mi.target = self; mi.tag = i
+            mi.image = NSImage(systemSymbolName: m.symbol, accessibilityDescription: nil)
             mi.state = caffeine.mode == m ? .on : .off; menu.addItem(mi)
         }
         menu.addItem(.separator())

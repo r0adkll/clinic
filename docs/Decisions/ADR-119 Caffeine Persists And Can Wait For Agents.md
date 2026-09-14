@@ -1,10 +1,15 @@
 ---
-status: accepted
+status: superseded in part by ADR-150
 date: 2026-09-10
 supersedes: "[[ADR-075 Caffeine Mode]] (its *not persisted* rule and its *no automatic mode* consequence)"
 tags: [adr, ui, power]
 ---
 # ADR-119: Caffeine persists, and can wait for agents
+
+> **Partly superseded by [[ADR-150 The Caffeine Cup Says Mode And Grip]]** (2026-09-14).
+> Persistence, the two modes, what counts as an agent working and the assertion itself all stand.
+> *The indicator is the toolbar cup* is redrawn there — shape now says which mode, weight says whether
+> the assertion is held — and the modes are renamed *Always* and *While Agents Work*.
 
 ## Context
 User (2026-09-10): *"I'm not sure the caffeine mode is always working. Also could we add a mode where

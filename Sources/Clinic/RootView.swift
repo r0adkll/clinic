@@ -416,7 +416,16 @@ private struct RootToolbar: ViewModifier {
     private struct CaffeineItem: View {
         @Environment(CaffeineController.self) private var caffeine
         @Environment(KeyBindings.self) private var bindings
-        var body: some View { CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine)).ownGlass() }
+        // The capsule washes accent while the Mac is actually being held awake — Always, or an agent
+        // working — and not merely while caffeine is on (ADR-151). It is the one fact worth catching
+        // from the corner of the eye, and the cup says the rest.
+        var body: some View {
+            let lit = caffeine.isHolding
+            CaffeineToolbarMenu(caffeine: caffeine, hint: bindings.hint(.caffeine))
+                // Always washed, at nothing when unlit, so the capsule fades rather than snapping.
+                .ownGlass(wash: .accentColor.opacity(lit ? 0.16 : 0))
+                .animation(.easeInOut(duration: 0.25), value: lit)
+        }
     }
 
     /// One capsule per platform the selected configuration installs onto (ADR-124).
@@ -437,9 +446,17 @@ private extension View {
     /// A capsule of toolbar glass around a control that has left the shared one, drawn only where
     /// there is a control — an empty item would otherwise leave an empty capsule. Earlier systems
     /// draw no toolbar capsules.
-    @ViewBuilder func ownGlass() -> some View {
+    ///
+    /// `wash` lights the capsule for a control whose state is worth catching without looking straight
+    /// at it. Only caffeine passes one today (ADR-151).
+    @ViewBuilder func ownGlass(wash: Color? = nil) -> some View {
         if #available(macOS 26.0, *) {
-            padding(.horizontal, 4).frame(height: 36).glassEffect(.regular.interactive(), in: Capsule())
+            padding(.horizontal, 4).frame(height: 36)
+                // Behind the control but above the glass (ADR-151). An overlay across the whole capsule
+                // dulls the glyphs it covers, and `Glass.tint` changes the capsule's brightness rather
+                // than its hue, so neither produces an accent wash.
+                .background { if let wash { Capsule().fill(wash) } }
+                .glassEffect(.regular.interactive(), in: Capsule())
         } else {
             self
         }

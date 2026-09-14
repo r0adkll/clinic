@@ -3955,3 +3955,103 @@ Verified by measuring rendered pixels rather than by eye: content centre equals 
 states across repeated toggles, a shell opens and fills the pane, and one reopened after every tab was
 closed works. Recorded as [[ADR-149 An Empty Terminal Stack Freezes The Pane]], linked from the design
 tree. `xcodebuild` Debug clean.
+
+## 2026-09-14 — Caffeine lets the display sleep, on purpose
+
+User: *"When I have it enabled I wouldn't expect my devices screen to sleep, but it does."*
+
+Not a bug, and worth writing down because the code reads like an omission. `CaffeineController.apply`
+takes exactly one assertion — `beginActivity([.idleSystemSleepDisabled])`, i.e. `PreventUserIdleSystemSleep` —
+which keeps the *Mac* up on its idle timer and says nothing about the panel. `NSActivityOptions` has no
+display member at all; `PreventUserIdleDisplaySleep` is only reachable through
+`IOPMAssertionCreateWithName`, which Clinic never calls. [[ADR-075 Caffeine Mode]] said so from the start
+("the display may still sleep"), but a reader who arrives at `Caffeine.swift` first sees one option where
+they expected two.
+
+Walked the rest of the mechanism to be sure nothing else was leaking: the reason string *is* the state
+(nil off, `Clinic caffeine mode` always-on, `…: an agent is working` agent-based), the activity is only
+ended and rebegun when that string changes, and the name is what `pmset -g assertions` prints, so the
+holding mode is visible from outside. Agent Based counts a session once across its tab (`state == .working`)
+and its detached agent (`isWorking`), per [[ADR-119 Caffeine Persists And Can Wait For Agents]].
+
+**The user reviewed the behaviour and chose to keep it**: the machine stays awake behind a dark screen and
+the agent keeps working, which is the point; burning the display all night is not. So a display assertion
+is *declined*, not deferred — if it is ever wanted it belongs on its own toggle and its own ADR superseding
+part of ADR-075, never folded into the existing switch. No code changed.
+
+Then, same session: *"I do like the single glyph design for the menu bar caffeine indicator, but I don't
+find its states and agent-only modes super intuitive."*
+
+The diagnosis is that ADR-119's table put **two independent facts on one axis**: which mode is set, and
+whether the assertion is held right now. Off and *Agent Based, waiting* were literally the same glyph
+separated by tint — and waiting is where an agent-based day mostly sits, so caffeine looked off while it
+was on. `.fill` meanwhile meant "on" in one mode and nothing in the other.
+
+Split them: **shape is the mode** (steam marks the agent mode), **weight is right now**. Renamed the
+modes *Always* and *While Agents Work*, since both then finish "keep the Mac awake…" where *Agent Based*
+named a mechanism.
+
+**The useful part was rendering the candidates instead of reasoning about them**, twice over.
+
+The first build made weight an alpha: solid at full strength while holding, outline at 0.55 while armed.
+Rendering three candidate rows side by side at 4× caught that fill *alone* could not carry it — the waves
+are most of the steaming glyph and identical in both variants, so `cup.and.heat.waves` beside
+`cup.and.heat.waves.fill` read as one cup.
+
+Then the user, seeing it live: *"The glyph switch is really throwing me."* The real fault was upstream of
+the alpha. Shape meant the *live* mode, so off was always the plain cup — and in the agent mode one click
+changed shape **and** colour at once, which reads as the icon being swapped rather than a state changing.
+Fix: shape belongs to the mode and persists through off (`onlyWhileWorking` already persists), so the
+click moves colour alone. That freed the holding channel, and **motion took it**: a working cup fills and
+pulses (0.9 s easeInOut, 1 → 0.4, the shape of Apple's `.pulse`, which can't be used directly because
+`glyph` draws into a plain canvas and the image stops being a symbol image). Opacity goes back to full
+strength everywhere, so a waiting cup no longer looks half-disabled.
+
+Lesson worth keeping: **when a single click changes two channels at once, the icon reads as replaced, not
+changed.** Pick one channel for the thing the click controls, and let identity stay put.
+
+Also checked the metrics rather than assuming: all four symbols fit the fixed 24×18 canvas, and every
+agent-mode glyph is 20 pt wide, so nothing that mode does shifts the toolbar. A smoke instance has no
+agent to count, so the working cup could not be photographed at all — added
+**`-ClinicCaffeineFakeWorking <n>`**, gated on `ClinicPaths.isSmokeInstance` because UserDefaults is
+shared with the live app (ADR-038). With it every state in the table was shot in the real toolbar,
+the pulse included, as a burst of frames 220 ms apart showing the cup breathe.
+
+Two smaller things landed with it: each mode's row now wears its own cup (toolbar popover and the status
+item's NSMenu), so the glyph is learned where the choice is made; and the popover carries the note *"The
+display sleeps on its own schedule either way."* — the question that opened this session, answered where
+it is asked instead of in an ADR. The waiting status line was shortened to fit one line, because the
+status item draws the same string in an NSMenu header, which truncates rather than wraps.
+
+Recorded as [[ADR-150 The Caffeine Cup Says Mode And Grip]], which partly supersedes ADR-119; linked from
+the design tree. `xcodebuild` Debug clean.
+
+Then: *"What options do we have for styling/coloring the pillbox in the menu bar?"* — the glass capsule
+ADR-123 puts around each split toolbar control. Read the API surface out of the SDK rather than from
+memory: `Glass` is `.regular`/`.clear`/`.identity` plus `.tint(Color?)` and `.interactive(Bool)`, and
+`glassEffect(_:in:)` takes no `isEnabled:`, so a conditional capsule branches the modifier.
+
+The user chose a wash that tracks **the assertion, not the switch**: lit only while the Mac is actually
+being held awake. Then four treatments, all rendered in the real toolbar:
+
+- **`Glass.tint`** — swept 0.16 → 1.0. **It changes brightness, not hue.** At 0.16 the capsule reads as
+  *less* present than plain glass; even at 1.0 it is a lighter grey pill, never an accent one. Worth
+  remembering: on dark glass, tint is a "selected" look, not a colour.
+- **Accent ring** — reads as a focus ring, and circles the chevron too.
+- **Accent overlay** — dulls every glyph it covers; the chevron went pink.
+- **Accent wash behind the content, above the glass** (`.background` before `.glassEffect`) — the
+  capsule takes the colour, the cup and chevron stay crisp. **Chosen**, at ADR-111's 16 %; a second
+  sweep showed 50 % starts washing out the accent cup, which is exactly the problem ADR-111 solves by
+  turning its glyph white.
+
+**The layering is the whole lesson**: over the content dulls it, under the glass is frosted away, between
+them is the only place a wash works.
+
+Recorded as [[ADR-151 The Caffeine Capsule Lights While It Holds]], linked from the design tree.
+`xcodebuild` Debug clean.
+
+Light appearance was the one thing the harness could not check — `-AppleInterfaceStyle Light` does not
+switch a smoke instance, and the system setting was left alone — so it went into the ADR as an open item
+rather than an assumption. **The user then confirmed both appearances on screen**, and 16 % holds for
+both: one constant, no appearance-dependent pair. The harness limitation is worth remembering; the open
+item is closed.
