@@ -104,8 +104,12 @@ struct DetailView: View {
         let showTerminals = tabs.startupError == nil && !window.isShowingScreen && !mine.isEmpty && selected?.replay == nil
         return ZStack {
             // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
-            TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
-                          keys: live.map { "\($0.id)|\($0.panel.renderKey)|\(tabs.runs.renderKey(for: $0))" })
+            // With no live tab there is nothing to keep mounted, and an empty stack left in place freezes
+            // the width of everything else in this `ZStack` (ADR-149).
+            if !live.isEmpty {
+                TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
+                              keys: live.map { "\($0.id)|\($0.panel.renderKey)|\(tabs.runs.renderKey(for: $0))" })
+            }
             ForEach(mine.filter { $0.replay != nil }) { tab in
                 ReplayView(model: tab.replay!)
                     .opacity(tab.id == window.selectedTabId ? 1 : 0)

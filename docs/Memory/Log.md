@@ -3917,3 +3917,41 @@ theories that a five-minute probe would have killed outright.
 Recorded as [[ADR-148 The Conversation Is Not Lazy]], which amends ADR-090's laziness clause and is linked
 from the design tree. `xcodebuild` Debug clean. **User confirmed on screen: the panel opens and scrolls
 without dying.**
+
+## 2026-09-14 — The home screen was frozen by the view next to it
+
+User: *"Small visual bug I noticed. On the empty screen, when I collapse the sidebar the empty content is
+no longer centered."*
+
+It would not reproduce. A freshly launched window, collapsed by the toolbar button, by dragging the
+divider to the edge, at 1800 pt, at 1100 pt, in full screen — the column measured dead centre every time,
+to the pixel. The missing precondition was a tab: **launch, ⌘T, ⌘W, then collapse**, and the column sits
+180 pt left of centre and stays there through a window resize.
+
+Geometry printed on screen, one readout per container, placed the boundary in one build.
+`HomeScreen`'s own `.frame(maxWidth: .infinity)` tracked the pane correctly (1436 @ x=364 open,
+1800 @ x=0 collapsed). Everything *below* that frame kept the width it was first handed — 1800 while the
+pane was 1436, 1436 while the pane was 1800. Not stale by one change: frozen.
+
+Three fixes inside `HomeScreen` all failed, and that was the useful part. `onGeometryChange` instead of
+the `GeometryReader` changed nothing, so the reader was a symptom. `ViewThatFits`, drawing no scroll view
+when the column fits, changed nothing, so the `ScrollView` was not it either. Sizing the column from a
+measured pane produced a measure→resize→measure loop with the window thrashing on screen. **A frozen
+SwiftUI layout is frozen by a sibling, not by itself.**
+
+The sibling is `TerminalStack`, the `NSViewRepresentable` in the same `ZStack`. Once it has hosted a tab
+content view and been emptied again, it stops the stack's other children being re-proposed a width.
+`sizeThatFits` returning the proposal made it worse (a representable is handed the *window's* width
+there, so the column went 180 pt the other way); `.frame(maxWidth: .infinity)` on it did nothing, since
+the stack was already told to fill — what matters is what it does to its siblings.
+
+The fix is one `if`: mount the stack only while this window has a live tab. With none there is nothing to
+keep mounted; the invariant ADR-019 and ADR-072 protect is that a *live tab's* surface survives being
+switched away from. Content views belong to their `Tab`, so the next ⌘T re-parents rather than recreates,
+and a tab moved between windows still lands wherever `sync` calls `addSubview` first. `HomeScreen` is
+untouched.
+
+Verified by measuring rendered pixels rather than by eye: content centre equals pane centre in both
+states across repeated toggles, a shell opens and fills the pane, and one reopened after every tab was
+closed works. Recorded as [[ADR-149 An Empty Terminal Stack Freezes The Pane]], linked from the design
+tree. `xcodebuild` Debug clean.
