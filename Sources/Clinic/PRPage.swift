@@ -416,7 +416,17 @@ struct PRPage: View {
     /// The service's timeline: comments in boxes with a header strip, reviews as events on the rail.
     private func conversation(_ pr: PullRequest) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            // A plain `VStack`, not a `LazyVStack`. A rendered comment body is routinely taller than
+            // the panel -- the Danger report on Campfire #1103 measures 2116pt against a ~1000pt
+            // viewport -- and a lazy stack cannot settle on a visible range when one item is twice
+            // the viewport: realising it lengthens the content, which pushes the item out of the
+            // band, which unrealises it, which shortens the content, which pulls it back in. That
+            // flip-flopped every ~7ms and re-entered `NSHostingView.layout` until AppKit gave up
+            // ("more Update Constraints in Window passes than there are views in the window") and
+            // took the app with it. Laziness bought little here regardless: every body in view is
+            // realised anyway, and ADR-090 already accepts that a wide-open thread is one web view
+            // per comment.
+            VStack(alignment: .leading, spacing: 0) {
                 TimelineEntry(art: art, isFirst: true, isLast: pr.comments.isEmpty) {
                     Avatar(url: pr.author.avatarURL, login: pr.author.login, size: 24)
                 } content: {

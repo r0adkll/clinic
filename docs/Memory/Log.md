@@ -3860,3 +3860,60 @@ that toggles a preference would silently edit the user's. And `make build` repor
 in the vendored CodeEdit packages; they predate this work and are not mine.
 
 `make build` clean, 460 tests pass. Smoke instances and their App Support removed.
+
+## 2026-09-14 — The PR panel did not crash, it gave up laying itself out
+
+User report: opening the PR panel on the `desktop-distribution-prep` session (Campfire
+`r0adkll/Campfire#1103`, branch `desktop-publication`) and scrolling down killed the app, consistently.
+
+**There was no crash report, and that was the first finding.** Nothing in `DiagnosticReports`, ever, for
+Clinic. The app was not dying on a signal — AppKit was raising an uncaught `NSGenericException`:
+
+> The window has been marked as needing another Update Constraints in Window pass, but it has already
+> had more Update Constraints in Window passes than there are views in the window.
+
+*When there is no `.ips`, the app was not killed — it threw.* `/usr/bin/log show` with a per-PID
+predicate is the tool; the distinct-PID list is what showed the restarts and gave the dying process to
+read backwards from. `limit: 346, count: 352` — 352 constraint passes against 346 views.
+
+**Then two wrong fixes, both from reading the backtrace as if it named a cause.** It does not. The trace
+(`LazyLayoutViewCache.updateItemPhase` → `NSHostingView.requestUpdate` → `setNeedsUpdateConstraints`)
+shows the *symptom* — a lazy container reacting — and is byte-identical whatever drives the oscillation.
+Clinic's own frames appear nowhere in it except `main`.
+
+- **Attempt 1** blamed [[ADR-090 GitHub-Rendered Bodies]]'s self-sizing web views: `ResizeObserver` →
+  `@State height` → `.frame(height:)` resizing the observed element. Removed the height animation, hid
+  scrollbar gutters on `table`/`pre`, added `html { overflow-y: hidden }`, widened the settle epsilon.
+  No effect.
+- **Attempt 2** read the `_NSConstraintBasedLayoutHostingView` in the cascade as an `NSTableView` row and
+  suspected the sidebar `List`. Also wrong.
+
+**Instrumenting settled it in one reproduction**, and should have been the first move. A temporary
+`prloop` logger over web view creation, teardown and every height report, plus `onAppear`/`onDisappear`
+probes on the conversation items and the sidebar rows. `notice` was raised to `error` first, because the
+only Clinic entries that survive in the log store are error-level and a wasted reproduction is a wasted
+round trip.
+
+It read out clean. Four bodies made once, heights settled immediately and never moved again
+(`24->2116`, `24->200`, `24->80`, `24->39`, then nothing but `drop`) — **17 seconds before the crash**.
+The sidebar logged four appearances and no churn. Both suspects exonerated by their own silence. What
+did churn: at the instant `body=7900` took **2116pt**, all three comments went `CONV-`; on the next
+scroll they returned and then flip-flopped appear/disappear **every ~7ms** until the window gave up.
+
+**A `LazyVStack` cannot settle on a visible range when one item is twice the viewport.** Realising the
+2116pt body lengthens the content, which pushes it out of the visible band, which unrealises it, which
+shortens the content, which pulls it back in. There is no fixed point, and each flip re-enters
+`NSHostingView.layout`. The conversation is now a plain `VStack`. Laziness bought little here regardless
+— every body in view is realised anyway, and ADR-090 already accepts that a wide-open thread is one web
+view per comment. The checks tab keeps its `LazyVStack`: its rows are small, and the failure needs an
+item taller than the viewport.
+
+Both failed attempts were reverted in full rather than left in as incidental hygiene — an unverified
+change sitting in a diff reads as a fix, and neither had evidence behind it.
+
+*Read a backtrace for where the loop closes, not for what opened it.* Three reproductions went to
+theories that a five-minute probe would have killed outright.
+
+Recorded as [[ADR-148 The Conversation Is Not Lazy]], which amends ADR-090's laziness clause and is linked
+from the design tree. `xcodebuild` Debug clean. **User confirmed on screen: the panel opens and scrolls
+without dying.**
