@@ -501,7 +501,7 @@ def step_smoke(ui, args, dry_run):
 
 
 def build_notes(version, prev_tag):
-    lines = [f"## Clinic {version}", ""]
+    lines = []   # no title line: GitHub shows the release name above the body, and the name is the version
     if prev_tag:
         subjects = git("log", "--first-parent", "--reverse", "--format=%s", f"{prev_tag}..HEAD").splitlines()
         lines += ["## What's Changed", "", *(f"- {s}" for s in subjects), "",
@@ -571,7 +571,7 @@ def step_publish(ui, version, sha, notes_path, ahead, dry_run):
     if dry_run:
         if ahead:
             info(f"[dry-run] would push {ahead} commit(s) to origin/main")
-        info(f"[dry-run] would tag {version}, push it, and create GitHub release 'Clinic {version}'"
+        info(f"[dry-run] would tag {version}, push it, and create GitHub release '{version}'"
              + (" as a pre-release" if prerelease else "") + f" with {zip_file.name}")
         info("[dry-run] would leave the cask alone (pre-release)" if prerelease
              else f"[dry-run] would write Casks/clinic.rb in {TAP_REPO} and push it as 'clinic {version}'")
@@ -590,10 +590,10 @@ def step_publish(ui, version, sha, notes_path, ahead, dry_run):
         run(["git", "push", "--quiet", "origin", version])
     ok(f"tagged {version}")
 
-    with Spinner(f"creating GitHub release Clinic {version} and uploading {zip_file.name}"):
+    with Spinner(f"creating GitHub release {version} and uploading {zip_file.name}"):
         run([
             "gh", "release", "create", version, str(zip_file),
-            "--repo", REPO, "--title", f"Clinic {version}", "--notes-file", str(notes_path), "--verify-tag",
+            "--repo", REPO, "--title", version, "--notes-file", str(notes_path), "--verify-tag",
             *(["--prerelease"] if prerelease else []),
         ])
     ok(f"release created: {REPO_URL}/releases/tag/{version}")

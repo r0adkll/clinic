@@ -4169,3 +4169,11 @@ passed. A running Clinic makes the default an isolated `CLINIC_APP_SUPPORT` inst
 Found while testing: `pgrep -f` sees nothing from the sandboxed shell while `ps -axo comm=` lists the
 Debug Clinic, so detection uses `ps`. Dry run stops at this session's dirty tree, as it should; the rest
 was exercised by loading the script as a module. ADR-153 rewritten around the guided flow.
+
+## 2026-09-14 — 0.1.0 is out; the release is titled by its version
+`make publish` cut **0.1.0** end to end: build, notarize, smoke test, tag `0.1.0`, the GitHub Release with
+`Clinic-0.1.0.zip`, and `Casks/clinic.rb` pushed to the tap. *"It worked!"* Two notes from looking at it on
+GitHub: the release title should be just the version — *"0.1.0"*, not *"Clinic 0.1.0"* — and the body
+should not repeat it, since GitHub already shows the name above the body. `scripts/publish` now titles
+the release with the bare version and the notes start with the content; the live 0.1.0 release was
+edited to match (`gh release edit 0.1.0 --title 0.1.0`, body with the heading removed).
