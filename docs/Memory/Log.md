@@ -4177,3 +4177,48 @@ GitHub: the release title should be just the version — *"0.1.0"*, not *"Clinic
 should not repeat it, since GitHub already shows the name above the body. `scripts/publish` now titles
 the release with the bare version and the notes start with the content; the live 0.1.0 release was
 edited to match (`gh release edit 0.1.0 --title 0.1.0`, body with the heading removed).
+
+## 2026-09-14 — Tasks screen "empty on first open": not reproduced
+*"I noticed when testing that the Tasks screen will not load anything on its first open and tasks don't
+appear until I navigate away and then back."* Read `TasksStore` / `TasksScreen` end to end, then drove a
+smoke instance seeded with a copy of the real `state.json` and `work-items/` through every route to the
+screen: `-ClinicScreenOnLaunch tasks`, sidebar click from Home, sidebar click with the cache deleted (cold),
+the installed 0.1.0 release build under a launchd-like environment (`env -i … open`), composer → Tasks,
+and a live chat tab → Tasks. Every one drew cached items at once and showed *Updated just now* within
+three seconds. Nothing in the last two hours of the `tasks` log category either, so no fetch failed.
+
+What the disk says about the live (Xcode-launched, 20:35) process: only `github-…-clinic.json` was written
+after launch, by this session's composer at 20:44:51 (`composerAppeared`). A completed Tasks refresh
+rewrites every source file and `resolutions.json`; those are all from 20:33, i.e. from the release build
+that ran 20:32–20:35. So either the symptom was seen in that earlier process (whose refresh *did* complete
+in ~2 s, which would make it a view-update failure I could not trigger) or the live process's first
+refresh never reached `resolveProjects` — and no `gh` child is still alive under it, so it is not a hung
+subprocess. Left open; the next occurrence needs `log stream --predicate 'subsystem == "com.r0adkll.clinic"
+AND category == "tasks"'` running, and the store should log its phases at info level so that stream says
+something.
+
+Two small things found on the way, not changed: `TasksStore.retry()` clears `availability` but
+`GitHubService` still answers from its 60 s cache, so Retry within a minute cannot succeed; and the
+unavailable view replaces the whole content area even when cached items are loaded (the footer still
+says *6 sources · 36 open* behind it).
+
+Smoke-instance lesson (in memory too): `open --env PATH=/usr/bin:/bin:/usr/sbin:/sbin …` from this fish
+session also passes `__NIX_DARWIN_SET_ENVIRONMENT_DONE=1` and `__fish_nixos_env_preinit_sourced=1`, so the
+ADR-086 `fish -l -c 'printenv PATH'` probe skips nix init and never finds `~/.nix-profile/bin/gh`. That
+"Can't find the gh CLI" run was an artifact; a real Finder or Xcode launch carries neither variable. Use
+`env -i HOME=… SHELL=… PATH=… /usr/bin/open …` for a faithful bare launch.
+
+## 2026-09-14 — Project icons follow their files (ADR-154)
+*"When you add a new project and say generate or add a new project icon it won't update immediately …
+Is there a way we can watch for that file?"* Yes: `ProjectIconCache` only ever reloaded on its own
+*Use* / *Remove Generated Icon*, so an icon written by anything else waited for a relaunch. Added
+`PathWatcher` to ClinicCore — kqueue vnode sources on a fixed set of paths, anchored on the nearest
+existing ancestor when a path is missing, re-armed on every event so descriptors never trail an old
+inode — and had the cache watch the four candidate files of every sidebar project, reloading only those
+whose existence/size/mtime stamp changed. `SessionStore.rebuildProjects` feeds it the roster.
+
+Verified in a smoke instance (`CLINIC_APP_SUPPORT=~/Library/Caches/clinic-icw`, one scratch project in
+`projectsAddedAt`): creating `.clinic/icon.svg` in a repo with no `.clinic/`, overwriting it in place,
+and deleting it each logged `icons: icon files changed, reloading` within ~300 ms; the bare `mkdir
+.clinic` did not, which is the stamp filter working. Four `PathWatcherTests` cover anchor climbing, a
+missing file appearing then being rewritten, a missing intermediate directory, and deletion.

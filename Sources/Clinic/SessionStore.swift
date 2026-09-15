@@ -81,6 +81,7 @@ final class SessionStore {
                                               removed: state.removedProjects, manualOrder: state.projectOrder,
                                               pinnedFirst: [Self.chatsDirectory]))
         projects = paths.map(Project.init(path:))
+        ProjectIconCache.shared.watch(projects: paths)
     }
 
     // MARK: Project groups (ADR-062)

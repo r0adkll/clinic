@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import ClinicCore
+import os
 
 /// Project header: icon, name, count, "+" and a menu (ADR-050).
 struct ProjectHeader: View {
@@ -167,12 +168,55 @@ struct ProjectIcon: View {
 @MainActor @Observable
 final class ProjectIconCache {
     static let shared = ProjectIconCache()
+    private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "icons")
     /// Bumped by `invalidate`; views read it so a generated icon (ADR-076) redraws everywhere.
     private(set) var revision = 0
     /// Lookups fill the cache lazily, so this storage must stay out of observation (it is written during `body`).
     @ObservationIgnored private var cache: [String: NSImage?] = [:]
     @ObservationIgnored private var tints: [String: Color?] = [:]
+    /// What the candidate files looked like when `cache` was filled; a watcher event that leaves a
+    /// project's stamp unchanged is ignored, so build churn in a repo root never redraws (ADR-154).
+    @ObservationIgnored private var stamps: [String: Stamp] = [:]
+    @ObservationIgnored private let watcher = PathWatcher()
+    @ObservationIgnored private var watchTask: Task<Void, Never>?
     static let candidates = ["project-icon.svg", "project-icon.png", ".clinic/icon.svg", ".clinic/icon.png"]
+
+    /// Existence, size and modification time of each candidate, in lookup order.
+    struct Stamp: Equatable {
+        var entries: [(Int, Date)?]
+        static func == (a: Stamp, b: Stamp) -> Bool {
+            a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0?.0 == $1?.0 && $0?.1 == $1?.1 }
+        }
+    }
+
+    static func stamp(for path: String) -> Stamp {
+        Stamp(entries: candidates.map { name in
+            let attrs = try? FileManager.default.attributesOfItem(atPath: (path as NSString).appendingPathComponent(name))
+            guard let attrs else { return nil }
+            return ((attrs[.size] as? Int) ?? 0, (attrs[.modificationDate] as? Date) ?? .distantPast)
+        })
+    }
+
+    /// Follows the candidate icon files of these projects (ADR-154). Called whenever the project list
+    /// changes; a file appearing, changing or vanishing redraws that project's icon without a relaunch.
+    func watch(projects: [String]) {
+        let paths = projects.filter { !SessionStore.isChats($0) }
+        watcher.watch(Set(paths.flatMap { p in Self.candidates.map { (p as NSString).appendingPathComponent($0) } }))
+        guard watchTask == nil else { return }
+        watchTask = Task { [weak self, watcher] in
+            for await _ in watcher.changes {
+                guard let self else { return }
+                self.reconcile()
+            }
+        }
+    }
+
+    /// Drops every cached icon whose files no longer match the stamp taken when it was cached.
+    private func reconcile() {
+        var changed: [String] = []
+        for (path, old) in stamps where Self.stamp(for: path) != old { changed.append(path) }
+        for path in changed { Self.log.info("icon files changed, reloading: \(path, privacy: .public)"); invalidate(path) }
+    }
 
     func image(for path: String) -> NSImage? {
         if let cached = cache[path] { return cached }
@@ -182,12 +226,13 @@ final class ProjectIconCache {
             if FileManager.default.fileExists(atPath: url.path), let img = NSImage(contentsOf: url), img.isValid { found = img; break }
         }
         cache[path] = found
+        stamps[path] = Self.stamp(for: path)
         return found
     }
 
     /// Drops one project's icon (or all of them) and asks every `ProjectIcon` to look again.
     func invalidate(_ path: String? = nil) {
-        if let path { cache[path] = nil; tints[path] = nil } else { cache.removeAll(); tints.removeAll() }
+        if let path { cache[path] = nil; tints[path] = nil; stamps[path] = nil } else { cache.removeAll(); tints.removeAll(); stamps.removeAll() }
         revision &+= 1
     }
 
