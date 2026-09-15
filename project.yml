@@ -7,16 +7,14 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
 configFiles:
-  Debug: Local.xcconfig
-  Release: Local.xcconfig
+  Debug: Version.xcconfig
+  Release: Version.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     ARCHS: arm64
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: 1
     DEAD_CODE_STRIPPING: YES
 packages:
   ClinicCore:
@@ -76,6 +74,9 @@ targets:
       properties:
         CFBundleName: Clinic
         CFBundleDisplayName: Clinic
+        # Without these XcodeGen writes 1.0 / 1 into the plist and every build reports itself as 1.0 (ADR-153).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "15.0"
         NSPrincipalClass: NSApplication
         NSHumanReadableCopyright: "© 2026 Drew Heavner. MIT."

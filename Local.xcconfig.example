@@ -1,2 +1,3 @@
 // Copy to Local.xcconfig (gitignored) and fill in your Apple Developer Team ID.
+// Version.xcconfig includes this file; the version itself lives there.
 DEVELOPMENT_TEAM = XXXXXXXXXX

@@ -1,0 +1,9 @@
+// The one place Clinic's version lives (ADR-153). Semantic versioning, 0.x until 1.0.
+// Bump MARKETING_VERSION here; `make publish` tags it as <MARKETING_VERSION> (no "v"), so the two never disagree.
+// CURRENT_PROJECT_VERSION is the build number: 1 for development builds, the commit count on main
+// for a release (scripts/release.sh overrides it on the command line).
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+// Per-machine signing settings (DEVELOPMENT_TEAM), gitignored; see Local.xcconfig.example.
+#include? "Local.xcconfig"

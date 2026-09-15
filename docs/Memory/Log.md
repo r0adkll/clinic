@@ -4113,3 +4113,59 @@ the "next launch" footer is gone (a custom colour's footer names the nearest sta
 the user's live sidebar selection went blue without a relaunch. Two smoke-run notes: the notification is
 system-wide, so a smoke instance's accent lands on the live app's switches immediately; and the AX tool
 matched the *window title* "Appearance" before the sidebar row, so `select` now matches static text only.
+
+## 2026-09-14 — Release readiness survey for 0.1.0
+Planning only, no code. Took stock of what [[ADR-010 Distribution]] still owes before the first tag:
+the Developer ID Application certificate, the filled `Local.xcconfig` and the `clinic-notary` profile are
+all in place, `scripts/release.sh` produces a notarized, stapled `Clinic-<version>.zip`, and the debug
+bundle carries no `shell-integration` files. Still open: no tag, no GitHub Release (which
+`UpdateCheck` polls via `releases/latest`, so a *pre-release* would never be announced), `CURRENT_PROJECT_VERSION`
+never moves, the README still says "Pre-0.1", the tap `r0adkll/homebrew-tap` has `Formula/` entries
+(cargo-dist pushes them with `HOMEBREW_TAP_TOKEN`) but no `Casks/`, and the "Before tagging 0.1.0"
+backlog items (hand verification, throwaway-session cleanup) are unticked. Builds are arm64-only, so the
+cask needs `depends_on arch: :arm64` and `macos: ">= :sequoia"`. Proposed shape: a `scripts/publish.sh`
+that runs after `make release` to tag, create the GitHub Release with the zip, and bump
+`Casks/clinic.rb` in the tap by sha256 — local for 0.1.0, CI on a tag later once the cert is exportable
+as a secret. To be recorded as a release-process ADR once agreed.
+
+## 2026-09-14 — Semver, and a release that updates the tap
+*"We should go ahead and move our versioning and versioning schema to semver, starting with 0.1.0. Then we
+need to make it a part of the release process to update the tap repo with our Clinic's cask."*
+
+The version now lives in one checked-in `Version.xcconfig` (`MARKETING_VERSION = 0.1.0`,
+`CURRENT_PROJECT_VERSION = 1`, `#include? "Local.xcconfig"` for the team id); `project.yml` bases both
+configurations on it. `scripts/version.sh` reads and validates semver for `release.sh` (which now passes
+the commit count as the build number and refuses a bundle whose version disagrees or that carries
+`shell-integration` files) and the new `scripts/publish.sh` / `make publish`: tag `v<version>`, GitHub
+Release with the zip (`--prerelease` for a `-suffix`; the tag is the bare version, no `v`, per the user), and `Casks/clinic.rb` rewritten and pushed to
+`r0adkll/homebrew-tap` as `clinic <version>` — skipped for a prerelease, since `releases/latest` skips
+those too. Recorded as [[ADR-153 Versions Are Semver And A Release Updates The Tap]]; README gained an
+Install section.
+
+The find: every build so far reported **1.0**. `Info.plist` is *written* by XcodeGen from the `info:`
+block, whose defaults are `1.0` / `1`; my first fix edited the plist and `make project` put 1.0 back.
+The keys now go in `project.yml` as `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`, and a Debug
+build reads 0.1.0. Had that shipped, `UpdateCheck` would have called v0.1.0 older than the running app.
+
+Cask lint (`brew style`) wanted no platform in `desc`, `depends_on macos: :sequoia` (Homebrew 7 parses a
+bare symbol as `>=`), and `launchctl` before `quit`. Not run: `make release` / `make publish` — those
+happen when 0.1.0 is cut.
+
+Follow-ups: asked whether CI could build, attach and update the tap on a GitHub-created release. It
+can — six secrets (the Developer ID .p12 and its password, Apple ID, app-specific password, team id,
+the tap token the other repos already carry), manual signing, a temporary keychain with Apple's
+Developer ID G2 intermediate, a `release: published` trigger with a Ditto-style tag/version guard, and a
+window where `releases/latest` has no zip yet. *"Lets stick with the local release flow for now."*
+And the tag is the bare version — `0.1.0`, not `v0.1.0` — so `version.sh`, the cask URL and ADR-153
+say so; `UpdateCheck` already tolerates either.
+
+Then: *"could we make 'make publish' be interactive like we do for the release script in Campfire"* — read
+`primary/Campfire/scripts/release` and rewrote `scripts/publish.sh` as `scripts/publish`, Python in the same
+shape: five numbered steps (preflight, build via `release.sh`, smoke test, notes, publish), a spinner over
+quiet subprocesses logging to `build/publish/`, `Abort` with the fix in the message, `--yes`, `--dry-run`,
+plus `--reuse-build`, `--skip-smoke`, `--notes FILE`. The smoke step launches the notarized app with
+`open -n -W` and `select`s on stdin, so either the app quitting or Enter moves on, then asks whether it
+passed. A running Clinic makes the default an isolated `CLINIC_APP_SUPPORT` instance (the sockets lesson).
+Found while testing: `pgrep -f` sees nothing from the sandboxed shell while `ps -axo comm=` lists the
+Debug Clinic, so detection uses `ps`. Dry run stops at this session's dirty tree, as it should; the rest
+was exercised by loading the script as a module. ADR-153 rewritten around the guided flow.

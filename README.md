@@ -4,9 +4,19 @@ A native macOS app for managing Claude Code sessions: every session in a sidebar
 
 Clinic is a clean-room macOS reimplementation of [Collins](https://github.com/episode6/collins).
 
+## Install
+
+Apple Silicon, macOS 15 or later. Clinic runs the `claude` CLI, which must be on your `PATH`.
+
+```sh
+brew install --cask r0adkll/tap/clinic
+```
+
+Or download `Clinic-<version>.zip` from the [latest release](https://github.com/r0adkll/clinic/releases/latest). Builds are Developer ID-signed and notarized.
+
 ## Status
 
-Pre-0.1. Milestone 1 (sidebar, open/resume, new session, hook-driven state, notifications) is in progress.
+0.x: usable daily by its author, and the shape of things may still change between minor versions.
 
 ## Building
 
@@ -19,6 +29,8 @@ make project    # generates Clinic.xcodeproj
 make build      # builds the app
 make test       # runs the test suites
 ```
+
+Releasing: bump `MARKETING_VERSION` in `Version.xcconfig`, commit, then `make publish` — a guided flow that builds and notarizes, launches the app for a smoke test, drafts the notes, tags, creates the GitHub Release and updates the Homebrew cask. `make release` alone produces the notarized zip.
 
 ## Documentation
 

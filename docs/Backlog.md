@@ -21,7 +21,7 @@ Organised by milestone ([[ADR-024 Milestones and Versioning]]). Milestone 1 scop
 - ~~Usage panel~~ → [[ADR-051 Usage Panel]]
 - ~~Multiple windows; rebindable shortcuts~~ → [[ADR-072 Multiple Windows]], [[ADR-073 Rebindable Shortcuts]]; tab drag-reorder
 - Terminal panel splits/tabs (ADR-046 deferred)
-- Sparkle updates, Homebrew cask (ADR-010). Signing scaffold exists (`make release`); needs a Developer ID Application certificate + `Local.xcconfig` team id + `notarytool store-credentials clinic-notary`.
+- ~~Homebrew cask~~ → [[ADR-153 Versions Are Semver And A Release Updates The Tap]] (`make publish` writes it to the tap); Sparkle updates still deferred (ADR-010)
 
 ## Milestone 3 — the Collins pages (ordered by what each unlocks)
 1. ~~**Git page**~~ done → [[ADR-052 Git Page]], superseded by [[ADR-080 Diff Panel]] (milestone 5)
@@ -52,7 +52,8 @@ Organised by milestone ([[ADR-024 Milestones and Versioning]]). Milestone 1 scop
 - ~~Sidebar selection for unopened rows~~ fixed.
 - ~~Xcode scheme test action~~ `make test` runs both package suites instead.
 - Verify by hand: working → finished notification in a *real* conversation (synthetic hooks verified); ⌘W close sheet; Resume after `claude` exits. (Quit sheet verified.)
-- ~~Developer ID certificate, notarytool profile, `make release`~~ done (first notarized build 2026-09-08); still open: tag v0.1.0 + GitHub release with the zip, Sparkle, Homebrew cask (ADR-010).
+- ~~Developer ID certificate, notarytool profile, `make release`~~ done (first notarized build 2026-09-08); ~~tag + GitHub release + Homebrew cask~~ scripted → [[ADR-153 Versions Are Semver And A Release Updates The Tap]] (`make publish`, not yet run); Sparkle deferred (ADR-010).
+- Cut 0.1.0: `make publish` (guided: build, smoke test, notes, tag, Release, cask). Then update the tap README and the README screenshots.
 - Smoke instances: run with `CLINIC_APP_SUPPORT=<short dir>` (own sockets/state) — a second instance on the default dir steals the running app's sockets.
 - Clean the throwaway test sessions (hooktest project, `New session` rows, detached agent de9b277b).
 - One-off `ghostty_surface_new` OutOfMemory seen right after a rapid relaunch; retry + alert added. Watch for recurrence.
