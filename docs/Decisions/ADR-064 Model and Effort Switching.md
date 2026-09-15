@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-155 (the list of aliases)
 date: 2026-09-07
 tags: [adr, ui, sessions, milestone-4]
 ---

@@ -24,7 +24,7 @@ final class NewSessionDraft: Identifiable {
 
     init(projectPath: String, model: String?, worktree: Bool, worktreeBase: WorktreeBase = .defaultBranch) {
         self.projectPath = projectPath
-        if let model { if ["sonnet", "opus", "haiku"].contains(model) { self.model = model } else { self.model = "custom"; customModel = model } }
+        if let model { if ModelAlias.all.contains(model) { self.model = model } else { self.model = "custom"; customModel = model } }
         self.worktree = worktree
         self.worktreeBase = worktreeBase
     }
@@ -49,7 +49,7 @@ struct NewSessionScreen: View {
     @State private var branches = GitBranches()
     @State private var repoRoot: String?
 
-    private let models = ["default", "sonnet", "opus", "haiku", "custom"]
+    private let models = ["default"] + ModelAlias.all + ["custom"]
     private let efforts = ["default", "low", "medium", "high", "xhigh", "max"]
     private var project: Project { Project(path: draft.projectPath) }
     private var isChats: Bool { SessionStore.isChats(project.path) }
@@ -218,7 +218,7 @@ struct NewSessionScreen: View {
     private var modelMenu: some View {
         Menu {
             Picker("Model", selection: $draft.model) {
-                ForEach(models, id: \.self) { Text($0 == "default" ? "Default" : $0.capitalized).tag($0) }
+                ForEach(models, id: \.self) { Text(ModelAlias.title($0)).tag($0) }
             }.pickerStyle(.inline).labelsHidden()
         } label: {
             chip(active: draft.model != "default") {

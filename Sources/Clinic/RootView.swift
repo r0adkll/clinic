@@ -208,12 +208,12 @@ struct TabFooter: View {
 struct ModelMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
-    private let aliases = ["default", "sonnet", "opus", "haiku"]
+    private let aliases = ["default"] + ModelAlias.all
 
     var body: some View {
         Menu {
             ForEach(aliases, id: \.self) { a in
-                Button(a.capitalized) { tabs.switchModel(tab, to: a) }
+                Button(ModelAlias.title(a)) { tabs.switchModel(tab, to: a) }
             }
             Button("Custom…") { customModel() }
             if let m = tab.model {

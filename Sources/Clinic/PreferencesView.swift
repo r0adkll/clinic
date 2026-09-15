@@ -407,7 +407,7 @@ private struct SessionsPane: View {
         Form {
             Section {
                 Picker("Default model", selection: $defaultModel) {
-                    ForEach(["default", "sonnet", "opus", "haiku"], id: \.self) { Text($0.capitalized).tag($0) }
+                    ForEach(["default"] + ModelAlias.all, id: \.self) { Text(ModelAlias.title($0)).tag($0) }
                 }
                 Picker("New worktrees branch from", selection: $worktreeBase) {
                     Text("The default branch").tag(WorktreeBase.defaultBranch)

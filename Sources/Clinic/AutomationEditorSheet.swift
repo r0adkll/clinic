@@ -205,8 +205,8 @@ struct AutomationEditorSheet: View {
             Menu {
                 Button("Default") { draft.model = nil }
                 Divider()
-                ForEach(["opus", "sonnet", "haiku"], id: \.self) { m in
-                    Button(m.capitalized) { draft.model = m }
+                ForEach(ModelAlias.all, id: \.self) { m in
+                    Button(ModelAlias.title(m)) { draft.model = m }
                 }
             } label: {
                 chipLabel(icon: "cpu", draft.model?.capitalized ?? "Default model")

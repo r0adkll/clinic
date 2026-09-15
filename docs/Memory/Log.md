@@ -4222,3 +4222,12 @@ Verified in a smoke instance (`CLINIC_APP_SUPPORT=~/Library/Caches/clinic-icw`, 
 and deleting it each logged `icons: icon files changed, reloading` within ~300 ms; the bare `mkdir
 .clinic` did not, which is the stamp filter working. Four `PathWatcherTests` cover anchor climbing, a
 missing file appearing then being rewritten, a missing intermediate directory, and deletion.
+## 2026-09-14 — The model pickers offer Fable
+*"I've noticed that we don't surface the Fable models in our model pickers."* Four hand-written alias
+lists — footer chip, composer, Settings, automation editor — all said *sonnet, opus, haiku*; the CLI
+(2.1.272) accepts `fable` too (`--help` names it first, `/model` lists `fable` and `fable[1m]`). Now one
+list, `ModelAlias.all` = *fable, opus, sonnet, haiku*, read by all four, and the composer's alias-or-custom
+check reads it as well. `[1m]` variants stay behind *Custom…*. Recorded as [[ADR-155 The Model Pickers
+Offer Every CLI Alias]], superseding ADR-064's list. Seen, not changed: the Settings *Default model*
+preference is written and never read. Worktree setup for the build: the gitignored `GhosttyKit.xcframework`
+and `Local.xcconfig` had to come from the main checkout (linked and copied).
