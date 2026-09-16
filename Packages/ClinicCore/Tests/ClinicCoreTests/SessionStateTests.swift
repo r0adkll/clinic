@@ -32,6 +32,37 @@ import Testing
         #expect(trace == [.idle, .idle, .waitingForInput, .working])
     }
 
+    /// Replays events the way `TabStore` does, and reports whether a typed line would be a prompt after each.
+    func acceptsPrompt(_ events: [HookEvent], from start: SessionState = .launching) -> [Bool] {
+        var state = start; var waitingOn: String?; var trace: [Bool] = []
+        for e in events {
+            if let next = SessionStateMachine.reduce(state, event: e) {
+                waitingOn = SessionStateMachine.waitingOn(waitingOn, from: state, to: next, event: e)
+                state = next
+            }
+            trace.append(SessionStateMachine.acceptsPrompt(state, waitingOn: waitingOn))
+        }
+        return trace
+    }
+
+    @Test func idlePromptStillAcceptsPrompts() {
+        let trace = acceptsPrompt([ev("SessionStart"), ev("UserPromptSubmit"), ev("Stop"), ev("Notification", notification: "idle_prompt"), ev("UserPromptSubmit")])
+        #expect(trace == [true, false, true, true, false])
+    }
+
+    @Test func interruptedTurnAcceptsPromptsOnceIdlePromptArrives() {
+        let trace = acceptsPrompt([ev("SessionStart"), ev("UserPromptSubmit"), ev("Notification", notification: "idle_prompt")])
+        #expect(trace == [true, false, true])
+    }
+
+    @Test func dialogDoesNotAcceptPrompts() {
+        let trace = acceptsPrompt([ev("SessionStart"), ev("UserPromptSubmit"), ev("Notification", notification: "elicitation_dialog"),
+                                   ev("Notification", notification: "idle_prompt"), ev("Stop"), ev("Notification", notification: "idle_prompt")])
+        #expect(trace == [true, false, false, false, true, true])
+        #expect(!SessionStateMachine.acceptsPrompt(.waitingForPermission, waitingOn: nil))
+        #expect(!SessionStateMachine.acceptsPrompt(nil, waitingOn: nil))
+    }
+
     @Test func ignoredEventsDoNotChangeState() {
         #expect(SessionStateMachine.reduce(.working, event: ev("PostToolUse")) == nil)
         #expect(SessionStateMachine.reduce(.working, event: ev("Notification", notification: "auth_success")) == nil)

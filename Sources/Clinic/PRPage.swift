@@ -316,7 +316,7 @@ struct PRPage: View {
                     Label(action.title, systemImage: action.symbol).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .help(tab.state == .idle ? "Types the prompt into this session" : "The session must be idle at its prompt")
+                .help(tab.isAtPrompt ? "Types the prompt into this session" : "The session must be idle at its prompt")
             }
             Menu {
                 Button("Address the CI failures") { send("The CI checks on \(name) are failing. Investigate the failures and fix them.") }
@@ -329,11 +329,11 @@ struct PRPage: View {
             .menuStyle(.button)
             .buttonStyle(.bordered)
             .fixedSize()
-            .help(tab.state == .idle ? "Types a prompt into the session" : "The session must be idle at its prompt")
+            .help(tab.isAtPrompt ? "Types a prompt into the session" : "The session must be idle at its prompt")
             if status.action == nil { Spacer(minLength: 0) }
         }
         .controlSize(.large)
-        .disabled(tab.state != .idle)
+        .disabled(!tab.isAtPrompt)
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 

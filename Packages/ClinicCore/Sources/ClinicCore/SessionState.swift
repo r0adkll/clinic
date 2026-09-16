@@ -97,6 +97,22 @@ public enum SessionStateMachine {
         }
     }
 
+    /// The notification type a `waitingForInput` session is waiting on, carried across a transition.
+    /// A later `idle_prompt` does not replace a dialog's type: the dialog is still what is on screen.
+    public static func waitingOn(_ current: String?, from old: SessionState, to new: SessionState, event: HookEvent) -> String? {
+        guard new == .waitingForInput else { return nil }
+        guard event.hookEventName == "Notification", let type = event.notificationType else { return current }
+        return old == .waitingForInput && type == "idle_prompt" ? current : type
+    }
+
+    /// Claude is at its own prompt, so a typed line becomes the next prompt. That is `idle`, and also
+    /// `waitingForInput` on `idle_prompt`, which the CLI sends after ~60 s at the prompt (and which is the
+    /// only event that ends an interrupted turn). A dialog also reads `waitingForInput`, but a line typed
+    /// there answers the dialog.
+    public static func acceptsPrompt(_ state: SessionState?, waitingOn: String?) -> Bool {
+        state == .idle || (state == .waitingForInput && waitingOn == "idle_prompt")
+    }
+
     /// The working→idle edge that sets `unread` and fires "finished" notifications (ADR-033).
     public static func isFinishedEdge(from old: SessionState, to new: SessionState) -> Bool {
         old == .working && new == .idle

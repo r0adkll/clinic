@@ -300,7 +300,7 @@ struct SessionContextMenu: View {
         if let tab = tabs.tab(for: summary.id) {
             Button("Close Tab") { tabs.close(tab) }
             if tab.isRunningClaude { Button("Stop") { tabs.stop(tab) } }
-            if tab.state == .idle { Button("Background") { tabs.background(tab) } }
+            if tab.isAtPrompt { Button("Background") { tabs.background(tab) } }
         }
         Button("Fork Session") { tabs.fork(summary) }
         if let tab = tabs.tab(for: summary.id) { MoveToWindowMenu(tab: tab) }

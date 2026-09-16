@@ -512,7 +512,7 @@ final class RunStore {
     }
 
     func canFix(_ run: Run, in tab: Tab) -> Bool {
-        run.status.isFailure && tab.sessionId != nil && tab.state == .idle && !tab.childExited
+        run.status.isFailure && tab.sessionId != nil && tab.isAtPrompt && !tab.childExited
     }
 
     /// A session's turn ended (`Stop`). Re-runs, without fronting anything, each configuration marked

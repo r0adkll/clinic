@@ -594,7 +594,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .cancel: return .terminateCancel
             case .hide: NSApp.windows.forEach { if $0.canBecomeMain { $0.orderOut(nil) } }; return .terminateCancel
             case .backgroundAll:
-                for tab in tabs.tabs where tab.sessionId != nil && tab.state == .idle { tabs.background(tab) }
+                for tab in tabs.tabs where tab.sessionId != nil && tab.isAtPrompt { tabs.background(tab) }
                 Task { try? await Task.sleep(for: .seconds(3)); self.finishTermination() }
                 return .terminateLater
             case .quit:

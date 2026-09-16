@@ -224,8 +224,8 @@ struct ModelMenu: View {
             Label(tab.model.map(TabFooter.shortModel) ?? "Model", systemImage: "cpu").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .disabled(tab.state != .idle)
-        .help(tab.state == .idle ? "Switch model (/model)" : "Model can be switched when the session is idle at its prompt")
+        .disabled(!tab.isAtPrompt)
+        .help(tab.isAtPrompt ? "Switch model (/model)" : "Model can be switched when the session is idle at its prompt")
     }
 
     private func customModel() {
@@ -249,8 +249,8 @@ struct EffortMenu: View {
             Label(tab.effort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .disabled(tab.state != .idle)
-        .help(tab.state == .idle ? "Switch effort (/effort)" : "Effort can be switched when the session is idle at its prompt")
+        .disabled(!tab.isAtPrompt)
+        .help(tab.isAtPrompt ? "Switch effort (/effort)" : "Effort can be switched when the session is idle at its prompt")
     }
 }
 

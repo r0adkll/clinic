@@ -4335,3 +4335,13 @@ used `.animation(_:value:)`, which puts the repeating animation on everything th
 `onAppear`. On a card that includes the row's layout still settling, so the glyph's position animated forever too. Both
 now use the scoped `.animation(_:body:)` form, so only the rotation (or scale and opacity) repeats. Builds; not
 checked by eye in a smoke instance.
+## 2026-09-16 — PR panel session actions disabled on a finished session
+*"in my most recent campfire session the new PR had merge conflicts, and the action to fix them was on the panel
+but disabled"*. The actions were gated on `tab.state == .idle`, but ~60 s after `Stop` the CLI sends `idle_prompt`,
+which ADR-026 maps to `waitingForInput`. Claude is still at its prompt then, so any session looked at a minute after
+it finished (the usual case for a PR that later conflicts) had every "type into the session" control disabled. The
+state machine is unchanged; `SessionStateMachine.waitingOn` / `acceptsPrompt` (3 tests) record which notification
+the tab is waiting on, and `Tab.isAtPrompt` accepts `idle` or `waitingForInput` on `idle_prompt`, not a dialog. The
+same gate now covers the PR actions, model and effort chips, Background (menu, close sheet, quit), *Fix with Claude*
+and `sendSlashCommand`. The sidebar's attention colours still read the raw state. Builds and tests pass; not checked
+in a running instance against a real `idle_prompt`.

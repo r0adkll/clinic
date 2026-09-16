@@ -21,7 +21,9 @@ final class Tab: Identifiable {
     var replay: ReplayModel?
     /// Persistent AppKit host for the tab's surfaces and right page (never re-parented by SwiftUI).
     @ObservationIgnored let contentView: TabContentView
-    var state: SessionState?
+    var state: SessionState? { didSet { if state != .waitingForInput { waitingOn = nil } } }
+    /// The notification type behind `waitingForInput`: `idle_prompt` still means Claude is at its prompt.
+    var waitingOn: String?
     var unread = false
     var errorBadge = false
     /// The name a tab opened with: the whole story for shells, and the stand-in for a session
@@ -77,6 +79,8 @@ final class Tab: Identifiable {
 
     var sessionId: SessionID? { if case .session(let id) = kind { return id } else { return nil } }
     var isReplay: Bool { if case .replay = kind { return true } else { return false } }
+    /// A typed line becomes Claude's next prompt: idle, including idle long enough for `idle_prompt`.
+    var isAtPrompt: Bool { SessionStateMachine.acceptsPrompt(state, waitingOn: waitingOn) }
     var isRunningClaude: Bool { (state != nil && state != .exited && !childExited) || (isAttached && !childExited) }
 }
 
@@ -671,7 +675,7 @@ final class TabStore {
     /// Types a slash command into an idle session (ADR-064). Returns false when the session is not at its prompt.
     @discardableResult
     func sendSlashCommand(_ command: String, to tab: Tab) -> Bool {
-        guard tab.sessionId != nil, tab.state == .idle else { return false }
+        guard tab.sessionId != nil, tab.isAtPrompt else { return false }
         tab.surface.sendLine(command)
         return true
     }
@@ -705,13 +709,13 @@ final class TabStore {
 
     /// Detach the session with `/bg`; the tab closes when the CLI hands the shell back (ADR-061).
     func background(_ tab: Tab) {
-        guard tab.sessionId != nil, tab.state == .idle else { return }
+        guard tab.sessionId != nil, tab.isAtPrompt else { return }
         tab.detaching = true
         tab.surface.sendLine("/bg")
         Task { try? await Task.sleep(for: .seconds(2)); await backgroundAgents?.refresh() }
     }
 
-    var canBackgroundSelected: Bool { selectedTab.map { $0.sessionId != nil && $0.state == .idle } ?? false }
+    var canBackgroundSelected: Bool { selectedTab.map { $0.sessionId != nil && $0.isAtPrompt } ?? false }
 
     // MARK: Right-hand panel (ADR-079)
 
@@ -1000,7 +1004,7 @@ final class TabStore {
     func confirmCloseTab(_ tab: Tab) -> CloseChoice {
         let alert = NSAlert()
         alert.messageText = "Close this session?"
-        let canBackground = tab.sessionId != nil && tab.state == .idle
+        let canBackground = tab.sessionId != nil && tab.isAtPrompt
         alert.informativeText = canBackground
             ? "Claude Code is still running. Close asks it to exit cleanly (you can resume later); Background keeps it running detached so you can attach again."
             : "Claude Code is still running in this tab. Close asks it to exit cleanly; you can resume the session later."
@@ -1083,7 +1087,9 @@ final class TabStore {
             refreshFooter(tab)
         }
         guard let old = tab.state, let new = SessionStateMachine.reduce(old, event: event) else { return }
+        let waitingOn = SessionStateMachine.waitingOn(tab.waitingOn, from: old, to: new, event: event)
         tab.state = new
+        tab.waitingOn = waitingOn
         tab.errorBadge = (event.hookEventName == "StopFailure")
         let isFrontAndSelected = isFrontAndSelected(tab)
         if event.hookEventName == "StopFailure" {
