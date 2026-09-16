@@ -12,6 +12,7 @@ struct SidebarView: View {
 
     @AppStorage("ClinicShowUsage") private var showUsage = true
     @AppStorage("ClinicShowFolderPaths") private var showFolderPaths = false
+    @AppStorage(SessionRowStyle.defaultsKey) private var rowStyle = SessionRowStyle.default.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,6 +68,7 @@ struct SidebarView: View {
                 .disabled(!canCollapse)
             ToolbarIcon("arrow.up.and.line.horizontal.and.arrow.down", help: "Expand all projects") { sessions.expandAll() }
                 .disabled(!canExpand)
+            SessionRowStyleMenu(style: $rowStyle)
             Divider().frame(height: 14).padding(.horizontal, 4)
             ToolbarIcon("folder.badge.plus", help: "Add project folder") { addProject() }
         }
@@ -117,13 +119,22 @@ struct SidebarView: View {
         }
     }
 
+    /// Compact, a card, or whichever the session's liveness calls for (ADR-156).
     @ViewBuilder
     private func row(_ summary: SessionSummary) -> some View {
         let item = SidebarItem.session(summary.id)
-        SessionRow(summary: summary, tab: tabs.tab(for: summary.id), showPath: showFolderPaths,
-                   checked: window.selectMode ? window.bulkSelection.contains(item) : nil,
-                   onToggle: { if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) } })
-            .tag(item)
+        let tab = tabs.tab(for: summary.id)
+        let checked = window.selectMode ? window.bulkSelection.contains(item) : nil
+        let toggle = { if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) } }
+        let style = SessionRowStyle(rawValue: rowStyle) ?? .default
+        if style == .compact {
+            SessionRow(summary: summary, tab: tab, showPath: showFolderPaths, checked: checked, onToggle: toggle)
+                .tag(item)
+        } else {
+            SessionCardSlot(summary: summary, tab: tab, style: style, showPath: showFolderPaths,
+                            isSelected: selection.wrappedValue.contains(item), checked: checked, onToggle: toggle)
+                .tag(item)
+        }
     }
 }
 
@@ -381,8 +392,6 @@ enum SessionActions {
 
 struct SessionRow: View {
     @Environment(SessionStore.self) private var sessions
-    @Environment(TabStore.self) private var tabs
-    @Environment(BackgroundAgentsService.self) private var background
     let summary: SessionSummary
     let tab: Tab?
     var showPath = false
@@ -398,16 +407,7 @@ struct SessionRow: View {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
                 }.buttonStyle(.plain)
             }
-            if let tab, tab.isAttached, !tab.childExited {
-                Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(.secondary).frame(width: 10)
-                    .help("Attached to a detached session (state not reported)")
-            } else if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
-                Image(systemName: agent.needsAttention ? "exclamationmark.circle.fill" : "moon.zzz.fill")
-                    .font(.caption).foregroundStyle(agent.needsAttention ? .orange : .secondary).frame(width: 10)
-                    .help(agent.needsAttention ? "Detached — needs you" : "Running detached (\(agent.state ?? agent.status))")
-            } else {
-                StateGlyph(tab: tab)
-            }
+            SessionLeadingGlyph(summary: summary, tab: tab)
             VStack(alignment: .leading, spacing: 1) {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
                 HStack(spacing: 5) {
@@ -419,7 +419,7 @@ struct SessionRow: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            if hovering { hoverActions } else { badges }
+            if hovering { SessionHoverActions(summary: summary, tab: tab) } else { SessionBadges(summary: summary) }
         }
         .padding(.vertical, 3)
         .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
@@ -427,11 +427,42 @@ struct SessionRow: View {
         .onHover { hovering = $0 }
         .sidebarRowHover(hovering)
     }
+}
 
-    /// Trailing hover actions (ADR-077). They replace the badges rather than the timestamp, so the
-    /// row keeps its size, and they carry no colour of their own so a selected row stays readable.
-    @ViewBuilder
-    private var hoverActions: some View {
+/// The session's glyph column, shared by the compact row and the card (ADR-077, ADR-096, ADR-156):
+/// the attached moon, a detached agent's moon or alert, or the state glyph.
+struct SessionLeadingGlyph: View {
+    @Environment(BackgroundAgentsService.self) private var background
+    let summary: SessionSummary
+    let tab: Tab?
+    /// Something under a card wants the reader (ADR-156); a resting session's glyph says so.
+    var needsYou = false
+
+    static let size: CGFloat = 10
+
+    var body: some View {
+        if let tab, tab.isAttached, !tab.childExited {
+            Image(systemName: "moon.zzz.fill").font(.caption).foregroundStyle(.secondary).frame(width: Self.size)
+                .help("Attached to a detached session (state not reported)")
+        } else if tab == nil, let agent = background.agent(for: summary.id), agent.isRunning {
+            Image(systemName: agent.needsAttention ? "exclamationmark.circle.fill" : "moon.zzz.fill")
+                .font(.caption).foregroundStyle(agent.needsAttention ? .orange : .secondary).frame(width: Self.size)
+                .help(agent.needsAttention ? "Detached — needs you" : "Running detached (\(agent.state ?? agent.status))")
+        } else {
+            StateGlyph(tab: tab, needsYou: needsYou)
+        }
+    }
+}
+
+/// Trailing hover actions (ADR-077). They replace the badges rather than the timestamp, so the
+/// row keeps its size, and they carry no colour of their own so a selected row stays readable.
+struct SessionHoverActions: View {
+    @Environment(SessionStore.self) private var sessions
+    @Environment(TabStore.self) private var tabs
+    let summary: SessionSummary
+    let tab: Tab?
+
+    var body: some View {
         let archived = sessions.isArchived(summary.id), starred = sessions.isFavorite(summary.id)
         HStack(spacing: 0) {
             if let tab, tab.isRunningClaude { RowAction("stop.fill", help: "Stop") { tabs.stop(tab) } }
@@ -444,9 +475,14 @@ struct SessionRow: View {
             }
         }
     }
+}
 
-    @ViewBuilder
-    private var badges: some View {
+/// The PR mark, mute and star at a row's trailing edge.
+struct SessionBadges: View {
+    @Environment(SessionStore.self) private var sessions
+    let summary: SessionSummary
+
+    var body: some View {
         HStack(spacing: 4) {
             PRMarkView(refs: summary.pullRequests)
             if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
@@ -550,6 +586,8 @@ struct StateGlyph: View {
     let tab: Tab?
     /// 10 pt is the sidebar's glyph column (ADR-077); the tab bar and ⌘K reuse it.
     var size: CGFloat = 10
+    /// A card's child wants the reader (ADR-156): a session at rest, or not open, breathes as if waiting.
+    var needsYou = false
 
     var body: some View {
         Group {
@@ -577,7 +615,8 @@ struct StateGlyph: View {
     /// Live state outranks the `unread` flag: a session that is working again has more to say than
     /// the fact that its last answer went unseen.
     private var appearance: Appearance {
-        guard let tab else { return .absent }
+        guard let tab else { return needsYou ? .attention(.orange) : .absent }
+        if needsYou, tab.state == .idle || tab.state == .exited { return .attention(.orange) }
         switch tab.state {
         // The working arc takes no colour of its own, so it inherits the row's label — legible on a
         // selected row, where a fixed dark tint would vanish into the selection fill.
@@ -590,7 +629,8 @@ struct StateGlyph: View {
     }
 
     private var helpText: String {
-        guard let tab else { return "Not open" }
+        guard let tab else { return needsYou ? "Waiting for your answers" : "Not open" }
+        if needsYou, tab.state == .idle || tab.state == .exited { return "Waiting for your answers" }
         switch tab.state {
         case .launching: return "Starting"
         case .working: return "Working"
@@ -630,7 +670,7 @@ struct SpinningArc: View {
 /// The breath is deliberately shallow. A deeper one was tried and rejected: at the bottom of its
 /// swing the dot was smaller and fainter than the idle dot beside it, so the one state that wants
 /// the user was the quietest thing on screen for half of every cycle.
-private struct PulsingDot: View {
+struct PulsingDot: View {
     let color: Color
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breathing = false

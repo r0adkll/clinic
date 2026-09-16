@@ -53,4 +53,27 @@ import Testing
         #expect(e.source == "startup")
         #expect(e.cwd == "/x")
     }
+
+    /// The CLI's documented status line input, stamped by `clinic-hook statusline` (ADR-157).
+    @Test func statusLinePayloadDecodes() throws {
+        let json = #"{"hook_event_name":"StatusLine","session_id":"11111111-2222-3333-4444-555555555555","transcript_path":"/t.jsonl","cwd":"/r","model":{"id":"claude-opus-5","display_name":"Opus 5"},"context_window":{"total_input_tokens":84500,"total_output_tokens":120,"context_window_size":200000,"current_usage":{"input_tokens":4,"output_tokens":120,"cache_creation_input_tokens":1500,"cache_read_input_tokens":83000},"used_percentage":42.25,"remaining_percentage":57.75},"effort":{"level":"xhigh"},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":1790000000}}}"#
+        let e = try HookEvent.decode(Data(json.utf8))
+        let report = try #require(e.statusLine)
+        #expect(report.contextUsedPercentage == 42.25)
+        #expect(report.contextWindowSize == 200000)
+        #expect(report.contextTokens == 84500)
+        #expect(report.modelDisplayName == "Opus 5")
+        #expect(report.effort == "xhigh")
+        #expect(e.model == nil)
+        #expect(SessionStateMachine.reduce(.working, event: e) == nil)
+        // Round-trips through the trace encoder.
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        let again = try HookEvent.decode(enc.encode(e))
+        #expect(again.hookEventName == "StatusLine")
+
+        let early = try HookEvent.decode(Data(#"{"hook_event_name":"StatusLine","session_id":"s","context_window":{"used_percentage":null}}"#.utf8))
+        #expect(early.statusLine?.contextUsedPercentage == nil)
+        let hook = try HookEvent.decode(Data(#"{"hook_event_name":"Stop","session_id":"s","context_window":{"used_percentage":5}}"#.utf8))
+        #expect(hook.statusLine == nil)
+    }
 }

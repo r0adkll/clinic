@@ -150,7 +150,7 @@ final class MCPToolService {
             let directory = (args["directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tab.pwd ?? tab.projectPath
             let model = args["model"] as? String
             let keep = tabs?.selectedTabId
-            tabs?.newSession(projectPath: directory, model: model, worktree: false, prompt: prompt)
+            tabs?.newSession(projectPath: directory, model: model, worktree: false, prompt: prompt, spawnedBy: sessionId)
             if let keep { tabs?.selectedTabId = keep }
             return MCPToolSpec.textResult("Started a sibling session in \(directory) as a background tab.")
 

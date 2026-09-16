@@ -4240,3 +4240,49 @@ two cases: with no checks the pane is a plain `VStack` of the freshness line ove
 `maxWidth/maxHeight: .infinity`; with checks it is the scroller as before. The freshness line stays in
 the empty case — when nothing is reported, when we last looked *is* the news. No ADR change; ADR-091 and
 ADR-116 say what the tab contains, not how an empty one is laid out.
+## 2026-09-16 — Exploring a Card format for sidebar sessions
+*"Let's consider the current state/rendering of sessions in the sidebar the 'Compact' … explore a design of a
+larger 'Card' format"* with sub-agents, runs, PRs and other live children. Exploration only, no code and no
+ADR yet. Mockup published as an artifact (Compact / Cards / Automatic, card anatomy, child sources, open
+questions). Found on disk with CLI 2.1.273: subagents write `<session>/subagents/agent-<id>.jsonl` plus a
+`.meta.json` (`agentType`, `description`, `toolUseId`, `spawnDepth`); background Bash returns
+`toolUseResult.backgroundTaskId` and ends with a `queue-operation` carrying `<task-notification>…<status>`;
+idle sessions carry a `system`/`away_summary` recap. The binary contains `SubagentStart`/`SubagentStop`
+(and `TaskCreated`/`TaskCompleted`) hook events, none of which ADR-027 installs.
+## 2026-09-16 — Sessions can be cards
+*"This looks great, let's implement it"*, after the mockup above. Recorded as [[ADR-156 Sessions Can Be Cards]].
+Probed with CLI 2.1.273 first: every `Agent` launches async (`status: async_launched`, `agentId`, turns in
+`<session>/subagents/agent-<id>.jsonl` + `.meta.json`); background `Bash` returns `backgroundTaskId`; `Monitor`
+returns `taskId`; all three end with a `<task-notification>` (`tool-use-id`, `task-id`, `status`) written as a
+`queue-operation`, a `queued_command` attachment and/or a user record with `origin.kind: task-notification`;
+`away_summary` is the recap; a `model` attachment carries the marketing name. The mockup proposed installing
+`SubagentStart`/`SubagentStop`, but the transcript already carries the same facts (and reaches detached agents),
+so ADR-027 is unchanged. Built: `SessionActivity` + `TranscriptFollower` + `ModelName` (ClinicCore, with tests),
+`SessionSummary.recap`, `ClinicState.spawnedBy` (written by `start_session`), `GhosttySurfaceView.foregroundJobName`,
+`SessionActivityStore`, `SessionCard`/`SessionCardSlot`, a shared `SessionLeadingGlyph`/`SessionBadges`/
+`SessionHoverActions`, View ▸ Session Rows and a toolbar menu. Smoke instance (isolated app support +
+`CLAUDE_CONFIG_DIR`, synthetic transcript, rows selected and children pressed through the AX API) found an
+unframed `SpinningArc` filling the row and a closed session's open round not raising its glyph; both fixed and
+re-shot. Not checked: orange/red on a *key* window's accent selection. `ClinicSessionRowStyle` was not written to
+the real domain.
+## 2026-09-16 — The status line reports context
+*"Can the claude code session not report its context %?"* It can: the `statusLine` command's stdin (schema in the
+2.1.273 binary) has `context_window.used_percentage` and `context_window_size`, plus live `model.display_name` and
+`effort.level`; ADR-156 had only looked at the transcript. Clinic's `--settings` outranks the user's `statusLine`
+(here Orca's `claude-statusline.sh`); the user said to clobber it, since Clinic replicates what Orca does. Recorded
+as [[ADR-157 The Status Line Reports Context]]. Built: `HookSettings` registers `statusLine` → `clinic-hook
+statusline <sock>` (stamps `hook_event_name: StatusLine`, forwards, prints nothing); `StatusLineReport` on
+`HookEvent` (+ decoding and settings tests); `Tab.statusLine`; the card prefers the report's percentage, model and
+effort. Checked against the real CLI by running `claude --model haiku --settings …` in a Python pty (`script` fails
+without a controlling tty; `--no-session-persistence` is print-only) with the helper aimed at a throwaway socket:
+`used_percentage` null before the reply, 16 after, window 200000, no status line drawn. The run left one short
+discovered transcript under the clinic project.
+## 2026-09-16 — Card meta line and padding
+*"extra padding at the bottom … long branch names will push the context % offscreen … use the progress bar like
+from the design artifact instead."* Recorded as [[ADR-158 The Card's Meta Line Gives Way And Draws A Gauge]].
+Reproduced in a smoke instance (a 63-char branch, only a PR child, a status line payload written straight to the
+smoke `hook.sock`). The padding was the children's hairline: a bare `Rectangle` as a sibling is greedy, so it ran
+~18 pt past the last child and also cut a two-line recap to one. Now a `background` of the stack. The overflow was
+the branch holding `layoutPriority(1)`; now the branch and path truncate first, model/effort at 1, the gauge fixed
+at 2. "42% context" became `ContextGauge` (26×4 capsule + "42%", tooltip names the window); the fallback reads
+"84k tokens". Re-shot at full resolution after both fixes.

@@ -23,6 +23,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.mcpServers)
                 .environment(appDelegate.automations)
                 .environment(appDelegate.tasks)
+                .environment(appDelegate.activities)
                 .clinicAppearance()
         }
         .windowStyle(.titleBar)
@@ -57,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let prs = PRStore()
     let mcp = MCPToolService()
     let backgroundAgents = BackgroundAgentsService()
+    /// What live sessions are doing, for the sidebar's cards (ADR-156).
+    let activities = SessionActivityStore()
     let updates = UpdateCheck()
     let bindings = KeyBindings()
     let caffeine = CaffeineController()
@@ -126,6 +129,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.onRefresh = { [weak self] agents in self?.automations.reconcile(agents: agents) }
         backgroundAgents.start(sessions: sessions, history: history, notifications: notifications)
+        // Live = open in a tab or running detached (ADR-156). Replays and shells have no session to follow.
+        activities.liveProvider = { [weak self] in
+            guard let self else { return [:] }
+            var live: [SessionID: String] = [:]
+            let ids = self.tabs.tabs.compactMap(\.sessionId) + self.backgroundAgents.background.filter(\.isRunning).compactMap(\.sessionId)
+            for id in ids { if let path = self.sessions.sessions[id]?.transcriptPath { live[id] = path } }
+            return live
+        }
+        tabs.activities = activities
+        activities.start()
         // What caffeine's *while agents work* scope waits on (ADR-119): a session counts once whether
         // its tab, its detached agent, or both say it is working.
         caffeine.start { [weak self] in
@@ -654,6 +667,9 @@ struct ClinicCommands: Commands {
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
             Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))
+            Picker("Session Rows", selection: Binding(get: { UserDefaults.standard.string(forKey: SessionRowStyle.defaultsKey) ?? SessionRowStyle.default.rawValue }, set: { UserDefaults.standard.set($0, forKey: SessionRowStyle.defaultsKey) })) {
+                ForEach(SessionRowStyle.allCases) { Text($0.title).tag($0.rawValue) }
+            }
             Picker("Sort Sessions By", selection: Binding(get: { UserDefaults.standard.string(forKey: "ClinicSessionSort") ?? "activity" }, set: { UserDefaults.standard.set($0, forKey: "ClinicSessionSort"); sessions.update { _ in } })) {
                 Text("Last Activity").tag("activity"); Text("Creation Time").tag("created")
             }

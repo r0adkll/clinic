@@ -119,4 +119,13 @@ import Testing
         let hooks = try #require(root["hooks"] as? [String: Any])
         #expect(hooks["WorktreeCreate"] == nil)
     }
+
+    /// The status line forwards to Clinic and replaces the user's own (ADR-157).
+    @Test func hookSettingsRegistersTheStatusLineHelper() throws {
+        let data = try HookSettings.json(helperPath: "/Applications/Clinic.app/Contents/MacOS/clinic-hook", socketPath: "/Users/me/Library/Application Support/Clinic/hook.sock")
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let statusLine = try #require(root["statusLine"] as? [String: Any])
+        #expect(statusLine["type"] as? String == "command")
+        #expect(statusLine["command"] as? String == "/Applications/Clinic.app/Contents/MacOS/clinic-hook statusline '/Users/me/Library/Application Support/Clinic/hook.sock'")
+    }
 }

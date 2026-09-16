@@ -1,5 +1,6 @@
-// clinic-hook: two modes, no dependencies, always exits 0.
+// clinic-hook: three modes, no dependencies, always exits 0.
 //   clinic-hook <socket-path>                     forward a Claude Code hook payload (stdin JSON) to Clinic (ADR-015)
+//   clinic-hook statusline <socket-path>          forward the status line input to Clinic, print nothing (ADR-157)
 //   clinic-hook mcp <socket-path> <session-id>    MCP stdio server relaying tools/list and tools/call to Clinic (ADR-056)
 import Foundation
 import Darwin
@@ -65,6 +66,21 @@ func runHookMode(socketPath: String) {
         try? FileManager.default.createDirectory(atPath: traceDir, withIntermediateDirectories: true)
         if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(payload); try? h.close() } else { try? payload.write(to: url) }
     }
+}
+
+// MARK: - Status line mode
+
+/// Claude Code runs the `statusLine` command on every token, model, effort or mode change and shows its
+/// stdout under the prompt. This forwards the input to Clinic and prints nothing, so there is no status
+/// line: Clinic shows those numbers in the sidebar instead (ADR-157). The payload has no
+/// `hook_event_name`, so one is stamped on to let it share the hook socket and decoder.
+func runStatusLineMode(socketPath: String) {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    guard var obj = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] else { return }
+    obj["hook_event_name"] = "StatusLine"
+    guard var payload = try? JSONSerialization.data(withJSONObject: obj), let fd = connectSocket(socketPath) else { return }
+    payload.append(0x0A)
+    _ = writeAll(fd, payload); shutdown(fd, SHUT_WR); close(fd)
 }
 
 // MARK: - MCP stdio mode
@@ -173,6 +189,9 @@ let args = CommandLine.arguments
 if args.count >= 4, args[1] == "mcp" {
     signal(SIGPIPE, SIG_IGN)
     MCPShim(socketPath: args[2], sessionId: args[3]).run()
+} else if args.count >= 3, args[1] == "statusline" {
+    signal(SIGPIPE, SIG_IGN)
+    runStatusLineMode(socketPath: args[2])
 } else if args.count >= 2 {
     runHookMode(socketPath: args[1])
 }

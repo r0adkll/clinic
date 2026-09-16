@@ -73,6 +73,15 @@ enum GhosttyProcessProbe {
         return "/dev/" + String(cString: name)
     }
 
+    /// The kernel's short command name (`p_comm`, at most 16 bytes) of `pid`.
+    static func name(of pid: pid_t) -> String? {
+        guard var p = processTable([CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]).first else { return nil }
+        let name = withUnsafeBytes(of: &p.kp_proc.p_comm) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return name.isEmpty ? nil : name
+    }
+
     /// The foreground process group of the controlling terminal of `pid`.
     static func foregroundProcessGroup(of pid: pid_t) -> pid_t? {
         guard let p = process(pid), p.ttyDevice != 0, p.ttyDevice != -1 else { return nil }

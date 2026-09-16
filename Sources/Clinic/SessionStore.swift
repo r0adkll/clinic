@@ -52,6 +52,9 @@ final class SessionStore {
         // Owned ids whose transcript never appeared (a session closed before its first prompt while the app was quit) are stale.
         let stale = state.ownedSessions.keys.filter { map[$0] == nil }
         if !stale.isEmpty { update { s in for id in stale { s.ownedSessions[id] = nil } } }
+        // A spawned session whose transcript is gone has no card to hang under its parent (ADR-156).
+        let orphans = state.spawnedBy.keys.filter { map[$0] == nil }
+        if !orphans.isEmpty { update { s in for id in orphans { s.spawnedBy[id] = nil } } }
         rebuildProjects()
         isScanning = false
     }

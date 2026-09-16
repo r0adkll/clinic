@@ -35,12 +35,14 @@ public struct TranscriptReader: Sendable {
         let headLines = Self.lines(in: head, dropTrailingPartial: !tail.isEmpty || size > Int64(head.count))
         let tailLines = tail.isEmpty ? [] : Self.lines(in: tail, dropLeadingPartial: true)
 
-        for line in headLines { apply(record: line, to: &s, fromHead: true) }
-        for line in tailLines { apply(record: line, to: &s, fromHead: false) }
+        // A file that fits in the head has no tail, so its head is also its end.
+        let headIsEnd = tail.isEmpty
+        for line in headLines { apply(record: line, to: &s, fromHead: true, atEnd: headIsEnd) }
+        for line in tailLines { apply(record: line, to: &s, fromHead: false, atEnd: true) }
         return s
     }
 
-    private func apply(record: Data, to s: inout SessionSummary, fromHead: Bool) {
+    private func apply(record: Data, to s: inout SessionSummary, fromHead: Bool, atEnd: Bool) {
         guard let obj = try? JSONSerialization.jsonObject(with: record) as? [String: Any],
               let type = obj["type"] as? String else { return }
         if let sid = obj["sessionId"] as? String ?? obj["session_id"] as? String, !sid.isEmpty, fromHead, s.cwd == nil {
@@ -58,6 +60,7 @@ public struct TranscriptReader: Sendable {
         }
         switch type {
         case "user":
+            if atEnd, s.recap != nil, Self.isPrompt(obj) { s.recap = nil }
             if s.firstPrompt == nil, (obj["isMeta"] as? Bool) != true, (obj["isCompactSummary"] as? Bool) != true,
                let text = Self.userText(from: obj["message"]), !text.isEmpty, !Self.looksLikeSystemInjected(text) {
                 s.firstPrompt = text
@@ -79,6 +82,11 @@ public struct TranscriptReader: Sendable {
             if let t = obj["aiTitle"] as? String, !t.isEmpty { s.aiTitle = t }
         case "custom-title":
             if let t = obj["customTitle"] as? String, !t.isEmpty { s.customTitle = t }
+        case "system":
+            // The CLI's recap of the session so far (ADR-156). From the end only: one in the head of a long file is stale.
+            if atEnd, obj["subtype"] as? String == "away_summary", let content = obj["content"] as? String {
+                s.recap = SessionActivity.cleanRecap(content)
+            }
         case "cost-state":
             if let c = obj["totalCostUSD"] as? Double { s.totalCostUSD = c }
         case "pr-link":
@@ -106,6 +114,14 @@ public struct TranscriptReader: Sendable {
             s.pullRequests.remove(at: i)
         }
         s.pullRequests.append(ref)
+    }
+
+    /// A prompt the user typed, as opposed to a tool result, a task notification or injected context.
+    private static func isPrompt(_ obj: [String: Any]) -> Bool {
+        guard (obj["isMeta"] as? Bool) != true, obj["toolUseResult"] == nil else { return false }
+        if let origin = (obj["origin"] as? [String: Any])?["kind"] as? String, origin != "human" { return false }
+        guard let text = userText(from: obj["message"]), !text.isEmpty else { return false }
+        return !TranscriptTurns.isInjected(text)
     }
 
     static let writingTools: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]

@@ -51,6 +51,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// (ADR-131). Persisted like `attachments` so a grill's decisions survive a relaunch — the pane
     /// itself is not persisted (ADR-079), only what it shows.
     public var grillRounds: [SessionID: [GrillRound]] = [:]
+    /// Sessions another session started with the `start_session` tool: child → parent (ADR-156).
+    /// Clinic's own record — the CLI writes nothing that links the two — so a parent's card can list them.
+    public var spawnedBy: [SessionID: SessionID] = [:]
 
     public init() {}
 
@@ -107,7 +110,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, spawnedBy
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -140,6 +143,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
         watchedPullRequests = (try? c.decodeIfPresent(Set<String>.self, forKey: .watchedPullRequests)) ?? []
         grillRounds = (try? c.decodeIfPresent([SessionID: [GrillRound]].self, forKey: .grillRounds)) ?? [:]
+        spawnedBy = (try? c.decodeIfPresent([SessionID: SessionID].self, forKey: .spawnedBy)) ?? [:]
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 

@@ -22,12 +22,15 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var permissionMode: String?
     public var model: String?             // PostModelSwitch (field name best-effort)
     public var stopHookActive: Bool?
+    /// Set on the `StatusLine` pseudo-event: the CLI's status line input, forwarded by `clinic-hook statusline` (ADR-157).
+    public var statusLine: StatusLineReport?
     public var receivedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name", sessionId = "session_id", transcriptPath = "transcript_path", cwd, source
         case notificationType = "notification_type", message, prompt, toolName = "tool_name", permissionMode = "permission_mode"
         case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
+        case statusLine = "_clinic_status_line"
     }
 
     public init(hookEventName: String, sessionId: SessionID, transcriptPath: String? = nil, cwd: String? = nil, source: String? = nil,
@@ -53,6 +56,9 @@ public struct HookEvent: Codable, Sendable, Hashable {
         model = try c.decodeIfPresent(String.self, forKey: .model)
         stopHookActive = try c.decodeIfPresent(Bool.self, forKey: .stopHookActive)
         receivedAt = try c.decodeIfPresent(Date.self, forKey: .receivedAt) ?? Date()
+        // The status line input is a document of its own shape, not a hook payload, so it is read from
+        // the top level rather than from a key.
+        statusLine = hookEventName == StatusLineReport.eventName ? try? StatusLineReport(from: decoder) : nil
     }
 
     /// Decodes a raw hook JSON payload. Unknown fields are ignored.
@@ -94,5 +100,69 @@ public enum SessionStateMachine {
     /// The working→idle edge that sets `unread` and fires "finished" notifications (ADR-033).
     public static func isFinishedEdge(from old: SessionState, to new: SessionState) -> Bool {
         old == .working && new == .idle
+    }
+}
+
+/// What Claude Code hands its `statusLine` command on stdin, reduced to what Clinic shows (ADR-157).
+///
+/// The shape is documented inside the CLI (2.1.273) as the status line's input: `context_window` carries
+/// a pre-calculated `used_percentage` and the model's `context_window_size`, which the transcript never
+/// states. Every field is optional; a CLI that drops one leaves Clinic on the transcript's token count.
+public struct StatusLineReport: Codable, Sendable, Hashable {
+    /// The `hook_event_name` `clinic-hook statusline` stamps on the payload so it can ride the hook socket.
+    public static let eventName = "StatusLine"
+
+    /// 0–100, nil before the first message.
+    public var contextUsedPercentage: Double?
+    public var contextWindowSize: Int?
+    public var contextTokens: Int?
+    /// "Opus 5".
+    public var modelDisplayName: String?
+    public var modelId: String?
+    /// The live effort level, which `/effort` changes without a hook.
+    public var effort: String?
+
+    public init(contextUsedPercentage: Double? = nil, contextWindowSize: Int? = nil, contextTokens: Int? = nil,
+                modelDisplayName: String? = nil, modelId: String? = nil, effort: String? = nil) {
+        self.contextUsedPercentage = contextUsedPercentage; self.contextWindowSize = contextWindowSize
+        self.contextTokens = contextTokens; self.modelDisplayName = modelDisplayName; self.modelId = modelId; self.effort = effort
+    }
+
+    private enum Keys: String, CodingKey { case contextWindow = "context_window", model, effort }
+    private enum ContextKeys: String, CodingKey {
+        case usedPercentage = "used_percentage", contextWindowSize = "context_window_size", totalInputTokens = "total_input_tokens"
+    }
+    private enum ModelKeys: String, CodingKey { case id, displayName = "display_name" }
+    private enum EffortKeys: String, CodingKey { case level }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        if let w = try? c.nestedContainer(keyedBy: ContextKeys.self, forKey: .contextWindow) {
+            contextUsedPercentage = try? w.decodeIfPresent(Double.self, forKey: .usedPercentage)
+            contextWindowSize = try? w.decodeIfPresent(Int.self, forKey: .contextWindowSize)
+            contextTokens = try? w.decodeIfPresent(Int.self, forKey: .totalInputTokens)
+        }
+        if let m = try? c.nestedContainer(keyedBy: ModelKeys.self, forKey: .model) {
+            modelId = try? m.decodeIfPresent(String.self, forKey: .id)
+            modelDisplayName = try? m.decodeIfPresent(String.self, forKey: .displayName)
+        }
+        if let e = try? c.nestedContainer(keyedBy: EffortKeys.self, forKey: .effort) {
+            effort = try? e.decodeIfPresent(String.self, forKey: .level)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        var w = c.nestedContainer(keyedBy: ContextKeys.self, forKey: .contextWindow)
+        try w.encodeIfPresent(contextUsedPercentage, forKey: .usedPercentage)
+        try w.encodeIfPresent(contextWindowSize, forKey: .contextWindowSize)
+        try w.encodeIfPresent(contextTokens, forKey: .totalInputTokens)
+        var m = c.nestedContainer(keyedBy: ModelKeys.self, forKey: .model)
+        try m.encodeIfPresent(modelId, forKey: .id)
+        try m.encodeIfPresent(modelDisplayName, forKey: .displayName)
+        if let effort {
+            var e = c.nestedContainer(keyedBy: EffortKeys.self, forKey: .effort)
+            try e.encode(effort, forKey: .level)
+        }
     }
 }

@@ -75,4 +75,21 @@ import Testing
         #expect(s.aiTitle == "Late title")
         #expect(s.fileSize > 4096)
     }
+
+    @Test func recapIsTheLatestAwaySummaryUnlessAPromptFollows() {
+        var f = TranscriptFixture()
+        f.user("Fix the popup", at: "2026-09-16T10:00:00.000Z")
+        f.raw(#"{"type":"system","subtype":"away_summary","content":"Old recap. (disable recaps in /config)"}"#)
+        f.raw(#"{"type":"system","subtype":"away_summary","content":"The fix is done. (disable recaps in /config)"}"#)
+        var s = reader.parse(id: f.sessionId, path: "p", head: f.data, tail: Data())
+        #expect(s.recap == "The fix is done.")
+
+        // A task notification is not a prompt; a typed one is.
+        f.raw(#"{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification><status>completed</status></task-notification>"}}"#)
+        s = reader.parse(id: f.sessionId, path: "p", head: f.data, tail: Data())
+        #expect(s.recap == "The fix is done.")
+        f.user("Now the other one", at: "2026-09-16T11:00:00.000Z")
+        s = reader.parse(id: f.sessionId, path: "p", head: f.data, tail: Data())
+        #expect(s.recap == nil)
+    }
 }

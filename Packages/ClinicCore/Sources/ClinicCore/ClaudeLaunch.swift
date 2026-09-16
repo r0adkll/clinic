@@ -106,6 +106,9 @@ public enum HookSettings {
     ///   - worktreeBaseRef: the CLI's `worktree.baseRef` (`fresh` or `head`) for a worktree launch
     ///     (ADR-118). It rides in this file because a second `--settings` flag replaces the first
     ///     rather than merging with it, which would drop the hooks.
+    /// Also registers `statusLine` (ADR-157): the helper forwards the CLI's status line input — context
+    /// percentage, window size, live model and effort — and prints nothing, so it replaces whatever status
+    /// line the user configured for sessions Clinic launches. Deliberate: Clinic shows those numbers itself.
     public static func json(helperPath: String, socketPath: String, worktreeBaseRef: String? = nil) throws -> Data {
         let hook: [String: Any] = [
             "type": "command",
@@ -115,8 +118,16 @@ public enum HookSettings {
         ]
         var hooks: [String: Any] = [:]
         for event in events { hooks[event] = [["hooks": [hook]]] }
-        var root: [String: Any] = ["hooks": hooks]
+        var root: [String: Any] = ["hooks": hooks, "statusLine": statusLine(helperPath: helperPath, socketPath: socketPath)]
         if let worktreeBaseRef { root["worktree"] = ["baseRef": worktreeBaseRef] }
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])
+    }
+
+    static func statusLine(helperPath: String, socketPath: String) -> [String: Any] {
+        [
+            "type": "command",
+            "command": [helperPath, "statusline", socketPath].map(ClaudeLaunch.shellQuote).joined(separator: " "),
+            "padding": 0,
+        ]
     }
 }

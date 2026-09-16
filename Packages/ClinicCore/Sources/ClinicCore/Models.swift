@@ -43,6 +43,8 @@ public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
     public var pullRequests: [PullRequestRef] = []
     /// Absolute paths the agent wrote (Write/Edit/MultiEdit/NotebookEdit), newest last, de-duplicated, capped at 50.
     public var recentFiles: [String] = []
+    /// The CLI's latest `away_summary` recap from the tail, unless a prompt came after it (ADR-156).
+    public var recap: String?
 
     public init(id: SessionID, transcriptPath: String, cwd: String? = nil, lastCwd: String? = nil, gitBranch: String? = nil,
                 firstPrompt: String? = nil, aiTitle: String? = nil, customTitle: String? = nil, model: String? = nil,
@@ -73,6 +75,7 @@ public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
         fileModifiedAt = try c.decode(Date.self, forKey: .fileModifiedAt)
         pullRequests = try c.decodeIfPresent([PullRequestRef].self, forKey: .pullRequests) ?? []
         recentFiles = try c.decodeIfPresent([String].self, forKey: .recentFiles) ?? []
+        recap = try c.decodeIfPresent(String.self, forKey: .recap)
     }
 
     /// Best-effort "last activity" for ordering (ADR-040): last record timestamp, else file mtime.

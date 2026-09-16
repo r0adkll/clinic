@@ -402,6 +402,15 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         return GhosttyProcessProbe.foregroundProcessGroup(of: pid)
     }
 
+    /// The command name of the job in the foreground when it is not the shell itself — `make` while a
+    /// build runs, nil at the prompt. The spawned `login` forks the shell, so the shell is login's first
+    /// child and any other foreground group is a job the user started.
+    public var foregroundJobName: String? {
+        guard let login = childPID, let group = GhosttyProcessProbe.foregroundProcessGroup(of: login),
+              group != login, let shell = GhosttyProcessProbe.children(of: login).first?.pid, group != shell else { return nil }
+        return GhosttyProcessProbe.name(of: group)
+    }
+
     // MARK: - Action dispatch (from GhosttyRuntime)
 
     func handleAction(_ c: ghostty_action_s) -> Bool {

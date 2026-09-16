@@ -56,7 +56,8 @@ final class HookService {
             pumpTask = Task { [weak self] in
                 for await event in events {
                     guard let self else { return }
-                    if self.traceEnabled { self.trace(event) }
+                    // The status line fires on every token update; the trace is for hook sequences (ADR-157).
+                    if self.traceEnabled, event.hookEventName != StatusLineReport.eventName { self.trace(event) }
                     self.onEvent?(event)
                 }
             }
