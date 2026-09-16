@@ -4329,3 +4329,9 @@ project's placeholder row; a *Saved Prompts* popover (title, text, scope, delete
 `state.json` + `composer.json`, driven through AX: mark, popover, delete, scope and Discard Draft verified on disk.
 Setting a title through `AXValue` updated the field but never reached the SwiftUI binding, so title editing is
 covered only by the unit test. Defaults domain unchanged; smoke dirs deleted.
+## 2026-09-16 — Spinner bobbing on session cards
+*"Now on the session in progress the rotating indicator is bouncing up and down"*. `SpinningArc` and `PulsingDot`
+used `.animation(_:value:)`, which puts the repeating animation on everything that changes in the same update as
+`onAppear`. On a card that includes the row's layout still settling, so the glyph's position animated forever too. Both
+now use the scoped `.animation(_:body:)` form, so only the rotation (or scale and opacity) repeats. Builds; not
+checked by eye in a smoke instance.

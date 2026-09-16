@@ -658,8 +658,11 @@ struct SpinningArc: View {
             .trim(from: 0, to: 0.7)
             .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             .padding(lineWidth / 2)     // the stroke straddles the path, so inset it back into `size`
-            .rotationEffect(.degrees(turning ? 360 : 0))
-            .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: turning)
+            // Scoped to the rotation alone: `.animation(_:value:)` would also repeat whatever layout
+            // change lands in the same update as `onAppear` (a card settling), so the arc bobbed forever.
+            .animation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                $0.rotationEffect(.degrees(turning ? 360 : 0))
+            }
             .onAppear { if !reduceMotion { turning = true } }
     }
 }
@@ -678,9 +681,9 @@ struct PulsingDot: View {
     var body: some View {
         Circle()
             .fill(color)
-            .scaleEffect(breathing ? 0.85 : 1)
-            .opacity(breathing ? 0.7 : 1)
-            .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: breathing)
+            .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {   // scoped, as SpinningArc
+                $0.scaleEffect(breathing ? 0.85 : 1).opacity(breathing ? 0.7 : 1)
+            }
             .onAppear { if !reduceMotion { breathing = true } }
     }
 }
