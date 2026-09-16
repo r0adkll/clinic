@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return live
         }
         tabs.activities = activities
+        tabs.usage = usage
         activities.start()
         // What caffeine's *while agents work* scope waits on (ADR-119): a session counts once whether
         // its tab, its detached agent, or both say it is working.

@@ -215,6 +215,8 @@ final class TabStore {
     weak var prs: PRStore?
     /// Set by the app so a hook reads the session's transcript straight away (ADR-156).
     weak var activities: SessionActivityStore?
+    /// Set by the app so the status line's plan windows reach the usage panel (ADR-162).
+    weak var usage: UsageService?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -1042,6 +1044,8 @@ final class TabStore {
     private func handle(hookEvent event: HookEvent) {
         // Not a hook: the status line's numbers, many times a turn. It changes no state (ADR-157).
         if let report = event.statusLine {
+            // The plan windows are the account's, so they count whether or not the session has a tab here.
+            usage?.absorb(report, at: event.receivedAt)
             if let tab = tab(for: event.sessionId), tab.statusLine != report { tab.statusLine = report }
             return
         }

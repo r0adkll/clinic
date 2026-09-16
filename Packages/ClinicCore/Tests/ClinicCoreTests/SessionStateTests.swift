@@ -95,12 +95,15 @@ import Testing
         #expect(report.contextTokens == 84500)
         #expect(report.modelDisplayName == "Opus 5")
         #expect(report.effort == "xhigh")
+        #expect(report.fiveHour == .init(usedPercentage: 12, resetsAt: Date(timeIntervalSince1970: 1790000000)))
+        #expect(report.sevenDay == nil)
         #expect(e.model == nil)
         #expect(SessionStateMachine.reduce(.working, event: e) == nil)
         // Round-trips through the trace encoder.
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         let again = try HookEvent.decode(enc.encode(e))
         #expect(again.hookEventName == "StatusLine")
+        #expect(try JSONDecoder().decode(StatusLineReport.self, from: enc.encode(report)) == report)
 
         let early = try HookEvent.decode(Data(#"{"hook_event_name":"StatusLine","session_id":"s","context_window":{"used_percentage":null}}"#.utf8))
         #expect(early.statusLine?.contextUsedPercentage == nil)

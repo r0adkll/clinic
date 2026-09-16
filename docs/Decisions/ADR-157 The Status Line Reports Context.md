@@ -1,5 +1,5 @@
 ---
-status: accepted (built 2026-09-16; the card's wording superseded by ADR-158)
+status: accepted (built 2026-09-16; the card's wording superseded by ADR-158; `rate_limits` read by ADR-162)
 date: 2026-09-16
 supersedes: "the context-size half of [[ADR-156 Sessions Can Be Cards]] (a token count, because nothing stated the window)"
 amends: "[[ADR-027 Installed Hook Set]] (the settings file also registers `statusLine`)"

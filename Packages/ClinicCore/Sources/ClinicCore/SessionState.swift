@@ -137,14 +137,31 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
     public var modelId: String?
     /// The live effort level, which `/effort` changes without a hook.
     public var effort: String?
+    /// The plan's 5-hour and 7-day windows (ADR-162). The CLI reads them off its own API responses' headers
+    /// and sends a window only while its reset is still ahead; per-model weekly limits are never here.
+    public var fiveHour: RateWindow?
+    public var sevenDay: RateWindow?
 
-    public init(contextUsedPercentage: Double? = nil, contextWindowSize: Int? = nil, contextTokens: Int? = nil,
-                modelDisplayName: String? = nil, modelId: String? = nil, effort: String? = nil) {
-        self.contextUsedPercentage = contextUsedPercentage; self.contextWindowSize = contextWindowSize
-        self.contextTokens = contextTokens; self.modelDisplayName = modelDisplayName; self.modelId = modelId; self.effort = effort
+    /// One plan window as the status line states it.
+    public struct RateWindow: Sendable, Hashable {
+        /// 0–100, above 100 once exceeded.
+        public var usedPercentage: Double
+        public var resetsAt: Date
+
+        public init(usedPercentage: Double, resetsAt: Date) { self.usedPercentage = usedPercentage; self.resetsAt = resetsAt }
     }
 
-    private enum Keys: String, CodingKey { case contextWindow = "context_window", model, effort }
+    public init(contextUsedPercentage: Double? = nil, contextWindowSize: Int? = nil, contextTokens: Int? = nil,
+                modelDisplayName: String? = nil, modelId: String? = nil, effort: String? = nil,
+                fiveHour: RateWindow? = nil, sevenDay: RateWindow? = nil) {
+        self.contextUsedPercentage = contextUsedPercentage; self.contextWindowSize = contextWindowSize
+        self.contextTokens = contextTokens; self.modelDisplayName = modelDisplayName; self.modelId = modelId; self.effort = effort
+        self.fiveHour = fiveHour; self.sevenDay = sevenDay
+    }
+
+    private enum Keys: String, CodingKey { case contextWindow = "context_window", model, effort, rateLimits = "rate_limits" }
+    private enum RateLimitKeys: String, CodingKey { case fiveHour = "five_hour", sevenDay = "seven_day" }
+    private enum WindowKeys: String, CodingKey { case usedPercentage = "used_percentage", resetsAt = "resets_at" }
     private enum ContextKeys: String, CodingKey {
         case usedPercentage = "used_percentage", contextWindowSize = "context_window_size", totalInputTokens = "total_input_tokens"
     }
@@ -165,6 +182,18 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
         if let e = try? c.nestedContainer(keyedBy: EffortKeys.self, forKey: .effort) {
             effort = try? e.decodeIfPresent(String.self, forKey: .level)
         }
+        if let r = try? c.nestedContainer(keyedBy: RateLimitKeys.self, forKey: .rateLimits) {
+            fiveHour = Self.window(in: r, forKey: .fiveHour)
+            sevenDay = Self.window(in: r, forKey: .sevenDay)
+        }
+    }
+
+    /// `resets_at` is epoch seconds; a value too large for that is taken as milliseconds.
+    private static func window(in c: KeyedDecodingContainer<RateLimitKeys>, forKey key: RateLimitKeys) -> RateWindow? {
+        guard let w = try? c.nestedContainer(keyedBy: WindowKeys.self, forKey: key),
+              let used = try? w.decode(Double.self, forKey: .usedPercentage),
+              let resets = try? w.decode(Double.self, forKey: .resetsAt) else { return nil }
+        return RateWindow(usedPercentage: used, resetsAt: Date(timeIntervalSince1970: resets > 1e10 ? resets / 1000 : resets))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -179,6 +208,15 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
         if let effort {
             var e = c.nestedContainer(keyedBy: EffortKeys.self, forKey: .effort)
             try e.encode(effort, forKey: .level)
+        }
+        if fiveHour != nil || sevenDay != nil {
+            var r = c.nestedContainer(keyedBy: RateLimitKeys.self, forKey: .rateLimits)
+            for (key, window) in [(RateLimitKeys.fiveHour, fiveHour), (.sevenDay, sevenDay)] {
+                guard let window else { continue }
+                var w = r.nestedContainer(keyedBy: WindowKeys.self, forKey: key)
+                try w.encode(window.usedPercentage, forKey: .usedPercentage)
+                try w.encode(window.resetsAt.timeIntervalSince1970, forKey: .resetsAt)
+            }
         }
     }
 }

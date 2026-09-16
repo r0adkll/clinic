@@ -264,11 +264,10 @@ private struct GeneralPane: View {
                     }
                 }
                 Toggle("Show usage in the sidebar", isOn: $showUsage)
-                    .disabled(!usage.isConnected)
             } header: {
                 Text("Claude account")
             } footer: {
-                Text("Connecting reads Claude Code's sign-in from your Keychain to show plan usage; nothing is stored by Clinic.")
+                Text("Your 5-hour and weekly limits come from your Clinic sessions and need no sign-in. Connecting also reads Claude Code's sign-in from your Keychain, to add per-model limits and extra usage; nothing is stored by Clinic.")
             }
         }
         .formStyle(.grouped)

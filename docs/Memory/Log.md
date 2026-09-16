@@ -4345,3 +4345,15 @@ the tab is waiting on, and `Tab.isAtPrompt` accepts `idle` or `waitingForInput` 
 same gate now covers the PR actions, model and effort chips, Background (menu, close sheet, quit), *Fix with Claude*
 and `sendSlashCommand`. The sidebar's attention colours still read the raw state. Builds and tests pass; not checked
 in a running instance against a real `idle_prompt`.
+## 2026-09-16 — Usage panel stops asking for the Keychain
+*"The usage panel is repeatedly asking me for my login to update. Is there anyway we can reduce / avoid this?"*
+Recorded as [[ADR-162 Plan Usage Comes From The Status Line First]]. From the 2.1.273 binary: the CLI reads and writes
+`Claude Code-credentials` with `security` (`add-generic-password -U`). The status line's `rate_limits` carries only
+`five_hour` / `seven_day` (plus `spend_limit` behind a gateway), built from `anthropic-ratelimit-unified-*` headers.
+The per-model "Fable" window exists only in the endpoint's `limits[]`. Orca (stablyai/orca) forwards `rate_limits`
+from its status line and reads the token by running `security`. `/usr/bin/security find-generic-password -w` from a
+shell returned at once with no dialog (only the JSON's keys were printed). Built: `StatusLineReport` decodes the
+windows, `LiveRateLimits` + `UsageSnapshot.combining` (1 new test, 1 extended), TabStore forwards every report to
+`UsageService`, the token is read via `security` and held until expiry, the poll is 15 min, and the panel and the
+Preferences toggle work before connecting. 496 core tests pass, app builds. Not checked in a running instance: this
+session runs in the live app, so relaunching it is left to the user.

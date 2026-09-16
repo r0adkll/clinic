@@ -1,5 +1,5 @@
 ---
-status: accepted (consent model superseded by ADR-070)
+status: accepted (consent model superseded by ADR-070; Keychain read and 5-minute poll superseded by ADR-162)
 date: 2026-09-07
 tags: [adr, ui, claude]
 ---

@@ -18,6 +18,53 @@ import Testing
         #expect(s.subscription == "max")
     }
 
+    /// The status line's windows over the fetch (ADR-162): newer and unreset replaces, the rest stays.
+    @Test func liveWindowsOverlayTheFetch() throws {
+        let json = """
+        {"limits":[{"kind":"session","percent":40,"severity":"warning","resets_at":"2026-09-16T20:00:00Z"},
+                   {"kind":"weekly_all","percent":30,"severity":"normal"},
+                   {"kind":"weekly_scoped","percent":70,"severity":"normal","scope":{"model":{"display_name":"Fable"}}}]}
+        """
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        let fetched = try UsageSnapshot.parse(Data(json.utf8), subscription: "max", now: t0)
+        #expect(UsageSnapshot.combining(nil, live: LiveRateLimits(), now: t0) == nil)
+        #expect(UsageSnapshot.combining(fetched, live: LiveRateLimits(), now: t0) == fetched)
+
+        var live = LiveRateLimits()
+        let report = StatusLineReport(fiveHour: .init(usedPercentage: 55.6, resetsAt: t0.addingTimeInterval(3600)),
+                                      sevenDay: .init(usedPercentage: 31, resetsAt: t0.addingTimeInterval(-1)))
+        let first = live.absorb(report, at: t0.addingTimeInterval(60))
+        #expect(first)
+        // The same windows again change nothing and keep their first arrival.
+        let again = live.absorb(report, at: t0.addingTimeInterval(120))
+        #expect(!again)
+        #expect(live.fiveHour?.receivedAt == t0.addingTimeInterval(60))
+
+        let now = t0.addingTimeInterval(90)
+        let combined = try #require(UsageSnapshot.combining(fetched, live: live, now: now))
+        #expect(combined.bars.map(\.kind) == ["session", "weekly_all", "weekly_scoped"])
+        #expect(combined.bars[0].rawPercent == 56 && combined.bars[0].severity == "normal")
+        #expect(combined.bars[1].percent == 30, "a window whose reset has passed is ignored")
+        #expect(combined.bars[2].modelName == "Fable" && combined.subscription == "max")
+        #expect(combined.updatedAt == t0.addingTimeInterval(60))
+
+        // A fetch newer than the reading wins.
+        var later = fetched; later.fetchedAt = t0.addingTimeInterval(100)
+        #expect(UsageSnapshot.combining(later, live: live, now: now)?.bars[0].percent == 40)
+
+        // A report that leaves a window out keeps the one held.
+        let partial = live.absorb(StatusLineReport(contextUsedPercentage: 3), at: now)
+        #expect(!partial)
+        #expect(live.fiveHour != nil)
+
+        // Not connected: the live windows alone, in display order.
+        live.absorb(StatusLineReport(fiveHour: .init(usedPercentage: 104, resetsAt: t0.addingTimeInterval(3600)),
+                                     sevenDay: .init(usedPercentage: 9, resetsAt: t0.addingTimeInterval(86400))), at: now)
+        let alone = try #require(UsageSnapshot.combining(nil, live: live, now: now))
+        #expect(alone.bars.map(\.kind) == ["session", "weekly_all"])
+        #expect(alone.bars[0].percent == 100 && alone.bars[0].severity == "exceeded" && alone.credits == nil)
+    }
+
     @Test func toleratesGarbage() throws {
         let s = try UsageSnapshot.parse(Data(#"{"limits":[{"percent":"x"},null,{}],"spend":{"enabled":false}}"#.utf8))
         #expect(s.bars.isEmpty && s.credits == nil)

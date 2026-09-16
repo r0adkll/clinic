@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (the panel shows the status line's 5h/7d windows before connecting → ADR-162)
 date: 2026-09-07
 supersedes: part of ADR-051
 tags: [adr, ui, claude, privacy]

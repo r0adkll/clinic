@@ -40,6 +40,10 @@ public struct UsageSnapshot: Sendable, Equatable {
     public var credits: Credits?
     public var subscription: String
     public var fetchedAt: Date
+    /// When the newest status line window shown in `bars` arrived, if one is (ADR-162).
+    public var liveAt: Date? = nil
+    /// What the "Updated …" caption means: the fetch or the newest live window, whichever is later.
+    public var updatedAt: Date { max(fetchedAt, liveAt ?? .distantPast) }
 
     static let kindOrder = ["session": 0, "weekly_all": 1, "weekly_scoped": 2]
     static let severityOrder = ["exceeded": 0, "warning": 1]
@@ -95,9 +99,64 @@ public struct UsageSnapshot: Sendable, Equatable {
         return UsageSnapshot(bars: bars, credits: credits, subscription: subscription, fetchedAt: now)
     }
 
+    /// The fetched snapshot with the status line's windows laid over it (ADR-162). A live window replaces
+    /// its bar when it arrived after the fetch and has not reset; the model-scoped bars and credits only
+    /// the endpoint knows stay as fetched. With nothing fetched — not connected, or before the first poll —
+    /// the live windows alone make the snapshot, and with neither there is none.
+    public static func combining(_ fetched: UsageSnapshot?, live: LiveRateLimits, now: Date = Date()) -> UsageSnapshot? {
+        var snap = fetched ?? UsageSnapshot(bars: [], credits: nil, subscription: "", fetchedAt: .distantPast)
+        for (kind, reading) in [("session", live.fiveHour), ("weekly_all", live.sevenDay)] {
+            guard let reading, reading.window.resetsAt > now else { continue }
+            let existing = snap.bars.firstIndex { $0.kind == kind }
+            if existing != nil, reading.receivedAt <= snap.fetchedAt { continue }
+            let raw = Int(reading.window.usedPercentage.rounded())
+            // The status line carries no severity; tint still turns orange at 90 % on percent alone.
+            let bar = Bar(kind: kind, percent: max(0, min(100, raw)), rawPercent: raw, severity: raw >= 100 ? "exceeded" : "normal",
+                          resetsAt: reading.window.resetsAt, modelName: nil)
+            if let existing { snap.bars[existing] = bar } else { snap.bars.append(bar) }
+            snap.liveAt = max(snap.liveAt ?? .distantPast, reading.receivedAt)
+        }
+        guard fetched != nil || snap.liveAt != nil else { return nil }
+        snap.bars = snap.bars.enumerated()
+            .sorted { ((kindOrder[$0.element.kind] ?? 99), $0.offset) < ((kindOrder[$1.element.kind] ?? 99), $1.offset) }
+            .map(\.element)
+        return snap
+    }
+
     nonisolated(unsafe) private static let iso: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f }()
     nonisolated(unsafe) private static let isoPlain: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }()
     static func parseDate(_ s: String) -> Date? { iso.date(from: s) ?? isoPlain.date(from: s) }
+}
+
+/// The newest 5-hour and 7-day windows any Clinic session's status line has reported (ADR-162). The
+/// windows are the account's, not the session's, so one value serves every session.
+public struct LiveRateLimits: Sendable, Equatable {
+    public struct Reading: Sendable, Equatable {
+        public var window: StatusLineReport.RateWindow
+        public var receivedAt: Date
+    }
+    public var fiveHour: Reading?
+    public var sevenDay: Reading?
+
+    public init() {}
+
+    /// Folds in a report's windows; returns whether anything changed. A window the report leaves out is
+    /// no news rather than cleared — the CLI omits one it has not heard about since launch, or whose reset
+    /// has passed, and `UsageSnapshot.combining` already ignores a reading whose reset has passed. A window
+    /// that repeats the one held keeps its first arrival time, so a burst of identical reports does not
+    /// count as a newer reading than a fetch in between.
+    @discardableResult
+    public mutating func absorb(_ report: StatusLineReport, at: Date) -> Bool {
+        var changed = false
+        func take(_ window: StatusLineReport.RateWindow?, into reading: inout Reading?) {
+            guard let window, reading?.window != window else { return }
+            reading = Reading(window: window, receivedAt: at)
+            changed = true
+        }
+        take(report.fiveHour, into: &fiveHour)
+        take(report.sevenDay, into: &sevenDay)
+        return changed
+    }
 }
 
 public enum UsageError: Error, Equatable, CustomStringConvertible {
