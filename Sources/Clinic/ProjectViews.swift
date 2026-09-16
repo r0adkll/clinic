@@ -7,6 +7,7 @@ import os
 struct ProjectHeader: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(ComposerLibraryModel.self) private var composer
     let project: Project
     let count: Int
     var collapsed = false
@@ -25,6 +26,7 @@ struct ProjectHeader: View {
                 .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
+            if let draft = composer.draft(for: project.path) { DraftMark(project: project, draft: draft) }
             Spacer(minLength: 4)
             // Both reveal on hover but always occupy their space, so the header never reflows.
             HStack(spacing: 2) {
@@ -55,17 +57,48 @@ struct ProjectHeader: View {
     }
 }
 
+/// A project with an unsent composer (ADR-161): a pencil beside the count, always shown rather than on
+/// hover, because the point is to notice it. Clicking it opens the composer, which restores the draft.
+struct DraftMark: View {
+    @Environment(TabStore.self) private var tabs
+    let project: Project
+    let draft: ComposerDraft
+
+    var body: some View {
+        Button {
+            if SessionStore.isChats(project.path) { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) }
+        } label: {
+            Image(systemName: "pencil.line")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accent)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel("Unsent draft")
+    }
+
+    private var help: String {
+        let text = draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let what = text.isEmpty ? "a worktree named \(draft.worktreeName)" : "“\(NewSessionScreen.snippet(text, limit: 80))”"
+        return "Unsent draft: \(what)\nClick to continue it"
+    }
+}
+
 /// Stand-in row for a project with no sessions, so an empty group is still a place to start one.
 struct NewSessionPlaceholderRow: View {
     @Environment(TabStore.self) private var tabs
+    @Environment(ComposerLibraryModel.self) private var composer
     let project: Project
     @State private var hovering = false
 
     var body: some View {
         let chats = SessionStore.isChats(project.path)
+        let hasDraft = composer.draft(for: project.path) != nil
         HStack(spacing: 8) {
-            Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).frame(width: 10)
-            Text(chats ? "New Chat" : "New Session")
+            Image(systemName: hasDraft ? "pencil.line" : "plus").font(.system(size: 10, weight: .semibold)).frame(width: 10)
+            Text(hasDraft ? "Continue Draft" : chats ? "New Chat" : "New Session")
             Spacer(minLength: 0)
         }
         .font(.callout)
@@ -75,20 +108,24 @@ struct NewSessionPlaceholderRow: View {
         .onHover { hovering = $0 }
         .sidebarRowHover(hovering)
         .onTapGesture { if chats { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
-        .help(chats ? "Start a chat" : "Start a session in \(project.name)")
+        .help(hasDraft ? "Continue the unsent draft in \(project.name)" : chats ? "Start a chat" : "Start a session in \(project.name)")
     }
 }
 
 struct ProjectMenu: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(ComposerLibraryModel.self) private var composer
     let project: Project
     @State private var remote: URL?
     @State private var checkoutTarget: String?
 
     var body: some View {
-        if SessionStore.isChats(project.path) { Button("New Chat") { tabs.newChat() } }
-        Button("New Session") { tabs.startNewSession(projectPath: project.path) }
+        let hasDraft = composer.draft(for: project.path) != nil
+        if SessionStore.isChats(project.path) { Button(hasDraft ? "Continue Draft" : "New Chat") { tabs.newChat() } }
+        // The composer restores the draft, so with one kept, New Session is Continue Draft (ADR-161).
+        Button(hasDraft && !SessionStore.isChats(project.path) ? "Continue Draft" : "New Session") { tabs.startNewSession(projectPath: project.path) }
+        if hasDraft { Button("Discard Draft") { tabs.discardDraft(projectPath: project.path) } }
         Button("New Session in New Window") { tabs.startNewSession(projectPath: project.path, inNewWindow: true) }
         Button("New Session in Worktree") { tabs.newSession(projectPath: project.path, model: sessions.state.lastModelByProject[project.path], worktree: true) }
         Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }

@@ -37,12 +37,23 @@ public struct ComposerDraft: Codable, Sendable, Equatable {
 public struct SavedPrompt: Codable, Sendable, Equatable, Identifiable {
     public var id: UUID
     public var text: String
+    /// What its pill says instead of the start of the text (ADR-161). Nil or blank: the text.
+    public var title: String?
     public var projectPath: String?
     public var savedAt: Date
 
-    public init(id: UUID = UUID(), text: String, projectPath: String?, savedAt: Date = Date()) {
-        self.id = id; self.text = text; self.projectPath = projectPath; self.savedAt = savedAt
+    public init(id: UUID = UUID(), text: String, title: String? = nil, projectPath: String?, savedAt: Date = Date()) {
+        self.id = id; self.text = text; self.title = title; self.projectPath = projectPath; self.savedAt = savedAt
     }
+
+    /// The title, when it has one worth showing.
+    public var displayTitle: String? {
+        let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? nil : t
+    }
+
+    /// Emptied in the editor. Kept while it is being edited, never offered as a pill.
+    public var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
 /// Composer drafts by project path, and saved prompts. Pure; `ComposerLibraryStore` keeps it on disk.
@@ -64,8 +75,8 @@ public struct ComposerLibrary: Codable, Sendable, Equatable {
 
     // MARK: Saved prompts
 
-    /// What a project's composer offers: its own saved prompts, then those for every project, each
-    /// newest first.
+    /// What a project's composer offers: its own saved prompts, then those for every project, each in
+    /// the order the user left them (newest first until they are moved).
     public func savedPrompts(for projectPath: String) -> [SavedPrompt] {
         savedPrompts.filter { $0.projectPath == projectPath } + savedPrompts.filter { $0.projectPath == nil }
     }
@@ -105,6 +116,29 @@ public struct ComposerLibrary: Codable, Sendable, Equatable {
         guard let i = savedPrompts.firstIndex(where: { $0.id == id }) else { return }
         savedPrompts[i].projectPath = projectPath
     }
+
+    /// Edits a saved prompt in place (ADR-161). Its place in the list and its scope are unchanged.
+    public mutating func updatePrompt(_ id: UUID, text: String? = nil, title: String? = nil) {
+        guard let i = savedPrompts.firstIndex(where: { $0.id == id }) else { return }
+        if let text { savedPrompts[i].text = text }
+        if let title { savedPrompts[i].title = title.isEmpty ? nil : title }
+    }
+
+    /// Reorders one scope's prompts — a project's, or every project's when `projectPath` is nil — as a
+    /// list's `onMove` reports it. The other scopes keep their slots, so each list moves on its own.
+    public mutating func movePrompts(in projectPath: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        let slots = savedPrompts.indices.filter { savedPrompts[$0].projectPath == projectPath }
+        let all = slots.map { savedPrompts[$0] }
+        // `move(fromOffsets:toOffset:)` is SwiftUI's; this is its meaning, in Foundation.
+        let moving = source.filter { $0 < all.count }.map { all[$0] }
+        var group = all.enumerated().filter { !source.contains($0.offset) }.map(\.element)
+        let insertAt = destination - source.filter { $0 < destination }.count
+        group.insert(contentsOf: moving, at: max(0, min(insertAt, group.count)))
+        for (slot, prompt) in zip(slots, group) { savedPrompts[slot] = prompt }
+    }
+
+    /// Drops prompts whose text was emptied in the editor, once it closes.
+    public mutating func removeBlankPrompts() { savedPrompts.removeAll(where: \.isBlank) }
 
     /// Prompts compare by their words, not their spacing or case.
     static func key(_ text: String) -> String {

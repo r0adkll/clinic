@@ -346,6 +346,12 @@ final class TabStore {
         if let w = window(showing: d) { w.editingDraft = nil; w.selectedTabId = tabs(in: w).last?.id }
     }
 
+    /// Discard Draft from the sidebar (ADR-161): the project's composer need not be open, or even exist
+    /// in this run — the draft may only be on disk.
+    func discardDraft(projectPath: String) {
+        if let d = drafts[projectPath] { discardDraft(d) } else { composer.setDraft(nil, for: projectPath) }
+    }
+
     func closeDraftScreen() {
         let w = activeWindow
         w.editingDraft = nil

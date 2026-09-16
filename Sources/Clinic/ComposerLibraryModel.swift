@@ -50,6 +50,9 @@ final class ComposerLibraryModel {
         mutate { $0.setDraft(draft, for: projectPath) }
     }
 
+    /// The project's kept draft, for the sidebar's mark (ADR-161).
+    func draft(for projectPath: String) -> ComposerDraft? { drafts[projectPath] }
+
     // MARK: Saved prompts
 
     func savedPrompts(for projectPath: String) -> [SavedPrompt] { library.savedPrompts(for: projectPath) }
@@ -57,6 +60,11 @@ final class ComposerLibraryModel {
     func savePrompt(_ text: String, projectPath: String?) { mutate { $0.savePrompt(text, projectPath: projectPath) } }
     func deletePrompt(_ id: UUID) { mutate { $0.deletePrompt(id) } }
     func setScope(of id: UUID, projectPath: String?) { mutate { $0.setScope(of: id, projectPath: projectPath) } }
+    func updatePrompt(_ id: UUID, text: String? = nil, title: String? = nil) { mutate { $0.updatePrompt(id, text: text, title: title) } }
+    func movePrompts(in projectPath: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        mutate { $0.movePrompts(in: projectPath, fromOffsets: source, toOffset: destination) }
+    }
+    func removeBlankPrompts() { mutate { $0.removeBlankPrompts() } }
 }
 
 extension NewSessionDraft {

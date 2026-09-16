@@ -49,6 +49,7 @@ struct NewSessionScreen: View {
     @State private var defaultBranch: String?
     @State private var branches = GitBranches()
     @State private var repoRoot: String?
+    @State private var editingSaved = false
 
     private let models = ["default"] + ModelAlias.all + ["custom"]
     private let efforts = ["default", "low", "medium", "high", "xhigh", "max"]
@@ -88,7 +89,7 @@ struct NewSessionScreen: View {
 
     var body: some View {
         let suggestions = taskSuggestions
-        let saved = library.savedPrompts(for: draft.projectPath)
+        let saved = library.savedPrompts(for: draft.projectPath).filter { !$0.isBlank }
         VStack(alignment: .leading, spacing: 12) {
             header
             composer
@@ -415,8 +416,20 @@ struct NewSessionScreen: View {
     private func quickStarts(saved: [SavedPrompt], tasks items: [WorkItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if !saved.isEmpty {
-                quickStartRow("Saved") {
-                    ForEach(saved) { prompt in savedPill(prompt) }
+                HStack(spacing: 4) {
+                    quickStartRow("Saved") {
+                        ForEach(saved) { prompt in savedPill(prompt) }
+                    }
+                    Button { editingSaved = true } label: {
+                        Image(systemName: "slider.horizontal.3").imageScale(.small)
+                            .frame(width: 22, height: 22).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Edit Saved Prompts")
+                    .accessibilityLabel("Edit Saved Prompts")
+                    .popover(isPresented: $editingSaved, arrowEdge: .bottom) {
+                        SavedPromptsEditor(projectPath: draft.projectPath, projectName: isChats ? "Chats" : project.name)
+                    }
                 }
             }
             if !items.isEmpty {
@@ -469,7 +482,7 @@ struct NewSessionScreen: View {
         } label: {
             chip {
                 Image(systemName: prompt.projectPath == nil ? "globe" : "bookmark.fill").imageScale(.small)
-                Text(Self.snippet(prompt.text)).lineLimit(1).truncationMode(.tail).frame(maxWidth: 230, alignment: .leading)
+                Text(prompt.displayTitle ?? Self.snippet(prompt.text)).lineLimit(1).truncationMode(.tail).frame(maxWidth: 230, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
@@ -480,6 +493,7 @@ struct NewSessionScreen: View {
             } else {
                 Button("Offer in Every Project") { library.setScope(of: prompt.id, projectPath: nil) }
             }
+            Button("Edit Saved Prompts…") { editingSaved = true }
             Divider()
             Button("Delete Saved Prompt", role: .destructive) { library.deletePrompt(prompt.id) }
         }

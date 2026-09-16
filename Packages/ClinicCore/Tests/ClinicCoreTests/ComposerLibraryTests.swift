@@ -66,6 +66,38 @@ import Testing
         #expect(lib.savedPrompts.isEmpty)
     }
 
+    @Test func editingKeepsPlaceAndScope() throws {
+        var lib = ComposerLibrary()
+        lib.savePrompt("b", projectPath: "/repo")
+        let saved = lib.savePrompt("a", projectPath: nil)
+        let a = try #require(saved)
+        lib.updatePrompt(a.id, text: "a, reworded", title: "Reword")
+        #expect(lib.savedPrompts.first?.text == "a, reworded")
+        #expect(lib.savedPrompts.first?.displayTitle == "Reword")
+        #expect(lib.savedPrompts.first?.projectPath == nil)
+        lib.updatePrompt(a.id, title: "")
+        #expect(lib.savedPrompts.first?.title == nil)
+        lib.updatePrompt(a.id, text: "  ")
+        #expect(lib.savedPrompts.count == 2)
+        lib.removeBlankPrompts()
+        #expect(lib.savedPrompts.map(\.text) == ["b"])
+    }
+
+    @Test func movingReordersOneScopeOnly() {
+        var lib = ComposerLibrary()
+        // Newest first: [g2, p2, g1, p1, o1]
+        lib.savePrompt("o1", projectPath: "/other")
+        lib.savePrompt("p1", projectPath: "/repo")
+        lib.savePrompt("g1", projectPath: nil)
+        lib.savePrompt("p2", projectPath: "/repo")
+        lib.savePrompt("g2", projectPath: nil)
+        lib.movePrompts(in: "/repo", fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        #expect(lib.savedPrompts.map(\.text) == ["g2", "p1", "g1", "p2", "o1"])
+        lib.movePrompts(in: nil, fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        #expect(lib.savedPrompts.map(\.text) == ["g1", "p1", "g2", "p2", "o1"])
+        #expect(lib.savedPrompts(for: "/repo").map(\.text) == ["p1", "p2", "g1", "g2"])
+    }
+
     @Test func roundTripsAndToleratesBadParts() throws {
         var lib = ComposerLibrary()
         lib.setDraft(ComposerDraft(prompt: "p", model: "opus", worktree: true, worktreeName: "n", worktreeBase: .branch("develop")), for: "/repo")

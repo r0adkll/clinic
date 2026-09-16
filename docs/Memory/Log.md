@@ -4320,3 +4320,12 @@ Draft sits in the footer, saved prompts are text only and scoped to one project 
 or redraws the sidebar. Smoke instance in `~/Library/Caches/clinic-drafts`, driven through the accessibility API with
 `-ClinicDraftPromptOnLaunch`: draft on disk, bookmark saved it, ✕ + kill + relaunch restored the text, Discard Draft
 emptied `drafts` and kept the saved prompt. Defaults domain unchanged; the smoke dir was deleted.
+## 2026-09-16 — Draft mark and saved prompt editor
+*"Let's do #1, #2 (For this lets just do something on the new session screen and skip a settings pane)"*, from
+ADR-160's not-in-v1 list. Recorded as [[ADR-161 Drafts Show In The Sidebar And Saved Prompts Are Edited In The
+Composer]]. Pencil mark on the project header, *Continue Draft* / *Discard Draft* in the project menu and the empty
+project's placeholder row; a *Saved Prompts* popover (title, text, scope, delete, drag to reorder per section).
+`movePrompts` is hand-written because `move(fromOffsets:toOffset:)` is SwiftUI's. Smoke instance seeded with a
+`state.json` + `composer.json`, driven through AX: mark, popover, delete, scope and Discard Draft verified on disk.
+Setting a title through `AXValue` updated the field but never reached the SwiftUI binding, so title editing is
+covered only by the unit test. Defaults domain unchanged; smoke dirs deleted.
