@@ -1,4 +1,4 @@
-.PHONY: setup ghostty project build test release publish clean
+.PHONY: setup ghostty project build test release publish screenshots clean
 
 setup:
 	brew install xcodegen zig@0.15 gettext
@@ -24,6 +24,9 @@ release:
 
 publish:
 	scripts/publish
+
+screenshots:
+	scripts/screenshots/run
 
 clean:
 	rm -rf build Clinic.xcodeproj Packages/*/.build

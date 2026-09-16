@@ -68,7 +68,7 @@ cask "clinic" do
 
   url "https://github.com/{repo}/releases/download/#{{version}}/Clinic-#{{version}}.zip"
   name "Clinic"
-  desc "Claude Code session manager on libghostty"
+  desc "Session manager for Claude Code"
   homepage "https://github.com/{repo}"
 
   livecheck do

@@ -167,7 +167,10 @@ final class DiffPanelModel {
             // A turn pinned by id that no longer exists (snapshots cleared) falls back to the newest.
             if let id = selectedTurnId, !turns.contains(where: { $0.id == id }) { selectedTurnId = nil }
         }
-        if shouldReloadDiff { await loadDiff() }
+        // Decided after the turns refresh, not before: the first file change of a new turn arrives while
+        // `turns` does not hold that turn yet, so `followsWorktree` read false and the diff stayed empty until
+        // a second change came along.
+        if shouldReloadDiff || followsWorktree { await loadDiff() }
     }
 
     private func reloadDiff() { diffTask?.cancel(); diffTask = Task { [weak self] in await self?.loadDiff() } }

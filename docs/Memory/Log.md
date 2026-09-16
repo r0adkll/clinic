@@ -4286,3 +4286,23 @@ smoke `hook.sock`). The padding was the children's hairline: a bare `Rectangle` 
 the branch holding `layoutPriority(1)`; now the branch and path truncate first, model/effort at 1, the gauge fixed
 at 2. "42% context" became `ContextGauge` (26×4 capsule + "42%", tooltip names the window); the fallback reads
 "84k tokens". Re-shot at full resolution after both fixes.
+## 2026-09-16 — How Clinic presents itself
+Tested the cards with two rounds of four Haiku subagents drafting taglines, then *"Grill me about these tag lines
+and a potential product site"* (four rounds through the Grill pane, every recommendation accepted) and *"Let's do
+it."* Recorded as [[ADR-159 How Clinic Presents Itself]]. README rewritten (tagline, subheading, dark/light
+`<picture>`, brew line, five bullets, Credits for Collins); cask desc in `scripts/publish` → "Session manager for
+Claude Code". `make screenshots` (`scripts/screenshots/`): `fixtures.py` stages three invented git repos, transcripts
+and state; the app runs as a copy re-identified `com.r0adkll.clinic.screenshots` so no preference reaches the live
+app; the real CLI resumes the transcript with a pre-approved placeholder key and `ANTHROPIC_BASE_URL` on a closed
+port; `hooks.py` sends working/permission/status-line states; `social-preview.swift` composes 1280×640. New smoke
+args: multi-id `-ClinicOpenSessionOnLaunch`, `-ClinicShowPaneOnLaunch`, `-ClinicWindowContentSize`,
+`-ClinicSkipNotificationPermission`. Iterations each fixed by a re-shoot: inactive window (dropped `-g`); a staged
+background shell made the resumed CLI retry a turn ("Connection refused"); header scrolled off with more history;
+the 8 s notification card; the social crop read buffer rows bottom-up and the icon tile vanished on its own colour.
+Found and fixed a Diff pane bug: the first file change of a new turn refreshed the turn list but decided to skip
+the diff beforehand. The SwiftLint build plugin's nested `sandbox-exec` fails from this tool's unsandboxed shell yet
+the build still succeeds, so the script checks for `** BUILD SUCCEEDED **`. Then, with the user's go-ahead: GitHub About set to
+"All your Claude Code sessions, in good hands" and topics claude-code, macos, ghostty, swiftui, ai-agents (`gh repo edit`,
+read back). The cask desc waits for the next `make publish`; the user uploads the social preview by hand.
+Also this session: the log entries for 09-16 were each written *over* the one before instead of beside it (an
+insert that dropped the tail); rebuilt from their text before committing.

@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# `make screenshots` (ADR-159): stages invented projects and sessions, photographs Clinic in dark and light,
+# and composes the social preview. Writes .github/assets/{hero-dark,hero-light,social-preview}.png.
+#
+# Isolation, because this runs on a Mac with a live Clinic:
+#   - the app runs as a copy re-identified as com.r0adkll.clinic.screenshots, so its preferences (theme,
+#     accent, window and panel sizes) live in their own domain and never reach the real app's;
+#   - CLINIC_APP_SUPPORT and CLAUDE_CONFIG_DIR point into a scratch directory, so its sockets, state and
+#     transcripts are its own;
+#   - the resumed `claude` processes get a placeholder API key and ANTHROPIC_BASE_URL on a closed local
+#     port, so nothing reaches the network.
+# Needs Screen Recording permission for the terminal that runs it, and brings Clinic to the front twice
+# over about a minute: leave the Mac alone while it runs.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HERE="$ROOT/scripts/screenshots"
+OUT="$ROOT/.github/assets"
+WORK="$ROOT/build/screenshots"
+# Short on purpose: the hook socket lives under it, and unix socket paths stop at 103 bytes.
+STAGE="$HOME/Library/Caches/clinic-shots"
+BUNDLE_ID="com.r0adkll.clinic.screenshots"
+ACCENT="#D97757"   # the app icon's coral
+SIZE="1440x900"
+
+SOURCE_APP="$ROOT/build/Build/Products/Debug/Clinic.app"
+APP="$WORK/Clinic.app"
+PID=""
+
+cleanup() {
+  [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+screencapture -x -R 0,0,8,8 "$WORK.probe.png" 2>/dev/null && rm -f "$WORK.probe.png" || {
+  echo "error: screen capture failed. Give this terminal Screen Recording permission in System Settings > Privacy & Security." >&2
+  exit 1
+}
+
+echo "building Clinic"
+rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+make -C "$ROOT" project >/dev/null
+# `make build` pipes through tail, which hides a failure; this is the same build with its status kept.
+xcodebuild -project "$ROOT/Clinic.xcodeproj" -scheme Clinic -configuration Debug -derivedDataPath "$ROOT/build" \
+  -skipPackagePluginValidation -skipMacroValidation build >"$WORK/build.log" 2>&1 || true
+grep -q '\*\* BUILD SUCCEEDED \*\*' "$WORK/build.log" || { grep -E 'error:' "$WORK/build.log" >&2; echo "error: build failed (build/screenshots/build.log)" >&2; exit 1; }
+swiftc -O "$HERE/window-id.swift" -o "$WORK/window-id"
+swiftc -O "$HERE/social-preview.swift" -o "$WORK/social-preview"
+
+echo "re-identifying a copy as $BUNDLE_ID"
+ditto "$SOURCE_APP" "$APP"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
+codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true
+
+shoot() {
+  local theme="$1"
+  echo "staging ($theme)"
+  rm -rf "$STAGE"; mkdir -p "$STAGE"
+  local ids; ids="$(python3 "$HERE/fixtures.py" "$STAGE")"
+  local key working waiting
+  key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["apiKey"])' <<<"$ids")"
+  working="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["working"])' <<<"$ids")"
+  waiting="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["waiting"])' <<<"$ids")"
+
+  echo "launching ($theme)"
+  # Not `-g`: the app comes to the front, so the photograph is of a key window rather than a greyed one.
+  open -n -a "$APP" \
+    --env CLINIC_APP_SUPPORT="$STAGE/app" \
+    --env CLAUDE_CONFIG_DIR="$STAGE/cfg" \
+    --env ANTHROPIC_API_KEY="$key" \
+    --env ANTHROPIC_BASE_URL="http://127.0.0.1:9" \
+    --env DISABLE_AUTOUPDATER=1 \
+    --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    --args \
+    -ClinicTheme "$theme" -ClinicAccent "$ACCENT" \
+    -ClinicShowUsage NO -ClinicShowStatusItem NO -ClinicSkipNotificationPermission YES \
+    -ClinicSessionRowStyle automatic \
+    -ClinicOpenSessionOnLaunch "$waiting,$working" -ClinicShowPaneOnLaunch diff \
+    -ClinicWindowContentSize "$SIZE"
+
+  PID=""
+  for _ in $(seq 1 40); do
+    for p in $(pgrep -x Clinic || true); do
+      ps eww "$p" 2>/dev/null | grep -q "$STAGE/app" && PID="$p"
+    done
+    [ -n "$PID" ] && break
+    sleep 0.5
+  done
+  [ -n "$PID" ] || { echo "error: the staged Clinic did not start" >&2; exit 1; }
+
+  # Let both sessions resume and send their own SessionStart, then put them in the states the hero shows.
+  sleep 14
+  python3 "$HERE/hooks.py" "$STAGE/app/Clinic/hook.sock" "$working" "$waiting"
+  # The prompt's snapshot is taken asynchronously; the edits land after it, as this turn's changes. The
+  # wait after them also outlasts the 8 s in-window card the waiting session's notification raises.
+  sleep 6
+  python3 "$HERE/fixtures.py" "$STAGE" --apply-edits
+  sleep 6
+
+  local window; window="$("$WORK/window-id" "$PID")"
+  screencapture -x -l "$window" "$OUT/hero-$theme.png"
+  echo "wrote .github/assets/hero-$theme.png"
+
+  kill "$PID"; PID=""
+  sleep 3
+}
+
+shoot dark
+shoot light
+
+"$WORK/social-preview" "$ROOT/Sources/Clinic/Assets.xcassets/AppIcon.appiconset/icon_512.png" \
+  "$OUT/hero-dark.png" "$OUT/social-preview.png"
+echo "wrote .github/assets/social-preview.png (upload it in the repo's Settings > Social preview)"
+
+rm -rf "$STAGE"
+defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true

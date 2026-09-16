@@ -1,5 +1,7 @@
 # Vision
 
+> **All your Claude Code sessions, in good hands.** How Clinic describes itself in public — tagline, README, screenshots — is [[ADR-159 How Clinic Presents Itself]].
+
 Clinic is a native macOS app for people who run many Claude Code sessions at once and want one place to see them, switch between them, and know which one needs them. It is a reimplementation of [Collins](https://github.com/episode6/collins) for macOS (see [[Collins]]), with the real `claude` CLI running unmodified inside libghostty terminals (see [[libghostty]]).
 
 Built first for the author's own daily work ([[ADR-001 Audience]]), structured to be publishable ([[ADR-010 Distribution]], [[ADR-011 Repo Naming and License]]). Collins is the milestone 1 spec ([[ADR-002 Collins as the Milestone 1 Spec]]); after that Clinic goes its own way.

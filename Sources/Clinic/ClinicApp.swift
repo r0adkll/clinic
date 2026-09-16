@@ -89,7 +89,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Resolve the login shell's PATH now, off the main thread, so the first `gh`/`git`/`claude`
         // call does not pay for it (ADR-086).
         ProcessEnvironment.prewarm()
-        notifications.requestAuthorization()
+        // `-ClinicSkipNotificationPermission YES` (ADR-159): `make screenshots` runs a re-identified copy of
+        // the app, and asking for permission would leave that copy in System Settings ▸ Notifications.
+        if !UserDefaults.standard.bool(forKey: "ClinicSkipNotificationPermission") { notifications.requestAuthorization() }
         hooks.start()
         sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }
         sessions.start()
@@ -396,11 +398,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 tabs.togglePRPage()
             }
         }
-        // `-ClinicOpenSessionOnLaunch <session-id>` imports and opens an existing session (PR page smoke test) without resuming.
+        // `-ClinicOpenSessionOnLaunch <session-id>[,<session-id>…]` imports and opens existing sessions (PR page
+        // smoke test), in order, so the last one is selected. `make screenshots` opens several (ADR-159).
         if let raw = UserDefaults.standard.string(forKey: "ClinicOpenSessionOnLaunch"), !raw.isEmpty {
             Task {
                 await sessions.initialScan?.value
-                if let s = sessions.sessions[SessionID(raw)] {
+                for id in raw.split(separator: ",").map({ SessionID(String($0).trimmingCharacters(in: .whitespaces)) }) {
+                    guard let s = sessions.sessions[id] else { continue }
                     if UserDefaults.standard.bool(forKey: "ClinicReplayOnLaunch") { tabs.openReplay(s); return }
                     if UserDefaults.standard.bool(forKey: "ClinicDetailsOnLaunch") {
                         try? await Task.sleep(for: .seconds(1))
@@ -409,6 +413,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     tabs.open(session: s)
                     if UserDefaults.standard.bool(forKey: "ClinicOpenPRPageOnLaunch") { tabs.togglePRPage() }
                 }
+                // `-ClinicShowPaneOnLaunch diff|files|terminal` (ADR-159): that pane, in the selected tab.
+                let pane: PanelPane.Kind? = switch UserDefaults.standard.string(forKey: "ClinicShowPaneOnLaunch") {
+                case "diff": .diff
+                case "files": .files
+                case "terminal": .terminal
+                default: nil
+                }
+                if let pane { try? await Task.sleep(for: .seconds(1)); tabs.showPane(pane, in: tabs.selectedTab) }
+            }
+        }
+        // `-ClinicWindowContentSize <w>x<h>` (ADR-159): the primary window's content size in points, centred,
+        // so a screenshot comes out the same size on every Mac and every run.
+        if let raw = UserDefaults.standard.string(forKey: "ClinicWindowContentSize"),
+           case let parts = raw.split(separator: "x").compactMap({ Double($0) }), parts.count == 2 {
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                guard let window = tabs.activeWindow.nsWindow else { return }
+                window.setContentSize(NSSize(width: parts[0], height: parts[1]))
+                window.center()
             }
         }
         if UserDefaults.standard.bool(forKey: "ClinicMCPServersOnLaunch") {
