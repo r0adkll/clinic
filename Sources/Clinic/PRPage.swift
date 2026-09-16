@@ -505,28 +505,36 @@ struct PRPage: View {
 
     // MARK: Checks
 
+    @ViewBuilder
     private func checks(_ pr: PullRequest) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                ChecksFreshness(pr: pr).padding(.horizontal, 12)
-                ForEach(PRChecksGroup.group(pr.checks)) { group in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 6) {
-                            Text(group.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Spacer(minLength: 0)
-                            Text(group.summary).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+        if pr.checks.isEmpty {
+            // Outside the scrolling stack, which is leading-aligned and only as tall as its rows: a
+            // `ContentUnavailableView` centres itself in what it is given, so give it the whole pane.
+            // The freshness line stays -- with nothing reported, when we last looked is the news.
+            VStack(spacing: 0) {
+                ChecksFreshness(pr: pr).padding(.horizontal, 12).padding(.top, 10)
+                ContentUnavailableView("No checks reported", systemImage: "checkmark.circle",
+                                       description: Text("Nothing ran on this \(host.noun.lowercased())."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ChecksFreshness(pr: pr).padding(.horizontal, 12)
+                    ForEach(PRChecksGroup.group(pr.checks)) { group in
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 6) {
+                                Text(group.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                                Text(group.summary).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 12).padding(.bottom, 4)
+                            ForEach(group.checks) { CheckRow(check: $0, art: art, inset: 12) }
                         }
-                        .padding(.horizontal, 12).padding(.bottom, 4)
-                        ForEach(group.checks) { CheckRow(check: $0, art: art, inset: 12) }
                     }
                 }
-                if pr.checks.isEmpty {
-                    ContentUnavailableView("No checks reported", systemImage: "checkmark.circle",
-                                           description: Text("Nothing ran on this \(host.noun.lowercased())."))
-                        .padding(.top, 24)
-                }
+                .padding(.vertical, 10)
             }
-            .padding(.vertical, 10)
         }
     }
 }

@@ -4231,3 +4231,12 @@ check reads it as well. `[1m]` variants stay behind *Custom…*. Recorded as [[A
 Offer Every CLI Alias]], superseding ADR-064's list. Seen, not changed: the Settings *Default model*
 preference is written and never read. Worktree setup for the build: the gitignored `GhosttyKit.xcframework`
 and `Local.xcconfig` had to come from the main checkout (linked and copied).
+## 2026-09-15 — The Checks tab's empty state sits in the middle
+*"The PR check's panel empty content is not centered."* `PRPage.checks` built the "No checks reported"
+`ContentUnavailableView` as the last child of the pane's leading-aligned `LazyVStack`, so it hugged the
+left edge and sat just under the freshness line rather than in the pane. A `ContentUnavailableView`
+centres itself in whatever it is given, and inside that stack it was given its own ideal size. Split the
+two cases: with no checks the pane is a plain `VStack` of the freshness line over the view at
+`maxWidth/maxHeight: .infinity`; with checks it is the scroller as before. The freshness line stays in
+the empty case — when nothing is reported, when we last looked *is* the news. No ADR change; ADR-091 and
+ADR-116 say what the tab contains, not how an empty one is laid out.
