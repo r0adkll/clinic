@@ -41,6 +41,7 @@ struct NewSessionScreen: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
     @Environment(TasksStore.self) private var tasks
+    @Environment(ComposerLibraryModel.self) private var library
     @Bindable var draft: NewSessionDraft
     @FocusState private var focus: Field?
     @State private var branch: String?
@@ -60,12 +61,14 @@ struct NewSessionScreen: View {
         return isChats ? .accent : ProjectIconCache.shared.tint(for: project.path)
     }
 
-    /// This project's last few opening prompts, newest first, deduplicated (ADR-071 quick starts).
+    /// This project's last few opening prompts, newest first, deduplicated (ADR-071 quick starts). One
+    /// that is also saved is left to the Saved row (ADR-160).
     private var recentPrompts: [String] {
         var seen = Set<String>(), out: [String] = []
         for s in sessions.sessions(in: project) {
             let p = (s.firstPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard p.count > 3, !p.hasPrefix("<"), seen.insert(p.lowercased()).inserted else { continue }
+            guard p.count > 3, !p.hasPrefix("<"), seen.insert(p.lowercased()).inserted,
+                  library.savedPrompt(matching: p, in: draft.projectPath) == nil else { continue }
             out.append(p)
             if out.count == 3 { break }
         }
@@ -85,10 +88,11 @@ struct NewSessionScreen: View {
 
     var body: some View {
         let suggestions = taskSuggestions
+        let saved = library.savedPrompts(for: draft.projectPath)
         VStack(alignment: .leading, spacing: 12) {
             header
             composer
-            if !suggestions.isEmpty || !recentPrompts.isEmpty { quickStarts(tasks: suggestions) }
+            if !saved.isEmpty || !suggestions.isEmpty || !recentPrompts.isEmpty { quickStarts(saved: saved, tasks: suggestions) }
             footer
         }
         .padding(24)
@@ -100,10 +104,12 @@ struct NewSessionScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .overlay(alignment: .topTrailing) {
-            Button { tabs.discardDraft(draft) } label: { Image(systemName: "xmark") }
-                .buttonStyle(.borderless).help("Discard (⌘W)").padding(16)
+            Button { tabs.closeDraftScreen() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).help("Close (⌘W). What you typed is kept as this project's draft.").padding(16)
         }
         .onAppear { focus = .prompt }
+        // Kept on disk as it changes, so a closed screen, a quit or a crash doesn't lose it (ADR-160).
+        .onChange(of: draft.persisted, initial: true) { _, persisted in library.setDraft(persisted, for: draft.projectPath) }
         .task(id: draft.projectPath) {
             guard !isChats, let repo = await GitRepository.discover(from: draft.projectPath) else { return }
             repoRoot = repo.root
@@ -193,6 +199,7 @@ struct NewSessionScreen: View {
             effortMenu
             if !isChats { worktreeChip }
             Spacer(minLength: 4)
+            saveButton
             Button { tabs.sendDraft(draft) } label: {
                 Group {
                     if draft.isStarting {
@@ -213,6 +220,25 @@ struct NewSessionScreen: View {
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
         .overlay(alignment: .top) { Divider().opacity(0.6) }
+    }
+
+    /// Keeps the prompt to start from again (ADR-160); filled while the text is already saved, and
+    /// clicking it then takes the prompt back out.
+    private var saveButton: some View {
+        let saved = library.savedPrompt(matching: draft.prompt, in: draft.projectPath)
+        return Button {
+            if let saved { library.deletePrompt(saved.id) } else { library.savePrompt(draft.prompt, projectPath: draft.projectPath) }
+        } label: {
+            Image(systemName: saved == nil ? "bookmark" : "bookmark.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(saved == nil ? Color.secondary : Color.accent)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasPrompt)
+        .opacity(hasPrompt ? 1 : 0.4)
+        .help(saved != nil ? "Remove from Saved Prompts" : "Save Prompt for \(isChats ? "Chats" : project.name)")
     }
 
     private var modelMenu: some View {
@@ -384,10 +410,15 @@ struct NewSessionScreen: View {
 
     // MARK: Quick starts
 
-    /// Two labelled rows under the card: the project's open tasks (ADR-117), then its recent opening
-    /// prompts (ADR-082).
-    private func quickStarts(tasks items: [WorkItem]) -> some View {
+    /// Labelled rows under the card: saved prompts (ADR-160), the project's open tasks (ADR-117), then
+    /// its recent opening prompts (ADR-082).
+    private func quickStarts(saved: [SavedPrompt], tasks items: [WorkItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            if !saved.isEmpty {
+                quickStartRow("Saved") {
+                    ForEach(saved) { prompt in savedPill(prompt) }
+                }
+            }
             if !items.isEmpty {
                 quickStartRow("Tasks") {
                     ForEach(items) { item in taskPill(item) }
@@ -425,6 +456,32 @@ struct NewSessionScreen: View {
             .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.93),
                                          .init(color: .clear, location: 1)],
                                  startPoint: .leading, endPoint: .trailing))
+        }
+    }
+
+    /// A saved prompt fills the editor like a Recent one. Its menu moves it between this project and
+    /// every project, or deletes it.
+    private func savedPill(_ prompt: SavedPrompt) -> some View {
+        Button {
+            detachTask()
+            draft.prompt = prompt.text
+            focus = .prompt
+        } label: {
+            chip {
+                Image(systemName: prompt.projectPath == nil ? "globe" : "bookmark.fill").imageScale(.small)
+                Text(Self.snippet(prompt.text)).lineLimit(1).truncationMode(.tail).frame(maxWidth: 230, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(prompt.projectPath == nil ? "\(prompt.text)\n\nSaved for every project" : prompt.text)
+        .contextMenu {
+            if prompt.projectPath == nil {
+                Button("Offer Only in \(isChats ? "Chats" : project.name)") { library.setScope(of: prompt.id, projectPath: draft.projectPath) }
+            } else {
+                Button("Offer in Every Project") { library.setScope(of: prompt.id, projectPath: nil) }
+            }
+            Divider()
+            Button("Delete Saved Prompt", role: .destructive) { library.deletePrompt(prompt.id) }
         }
     }
 
@@ -471,6 +528,10 @@ struct NewSessionScreen: View {
         HStack {
             Text(hint).font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
             Spacer()
+            if !draft.persisted.isBlank {
+                Button("Discard Draft") { tabs.discardDraft(draft) }
+                    .help("Clear this project's draft and close")
+            }
             Button("Empty Session") { tabs.sendDraft(draft, empty: true) }
         }
     }

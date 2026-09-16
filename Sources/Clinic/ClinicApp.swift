@@ -24,6 +24,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.automations)
                 .environment(appDelegate.tasks)
                 .environment(appDelegate.activities)
+                .environment(appDelegate.tabs.composer)
                 .clinicAppearance()
         }
         .windowStyle(.titleBar)
@@ -617,7 +618,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabs.runs.tearDown()
         hooks.stop()
         mcp.stop()
-        Task { await sessions.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
+        Task { await sessions.flush(); await tabs.composer.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

@@ -198,6 +198,8 @@ final class TabStore {
     let sounds = NotificationSoundPlayer()
     /// Turn snapshots for the diff panel (ADR-080).
     let snapshots = SnapshotService()
+    /// Unsent composers kept across launches, and saved prompts (ADR-160).
+    let composer = ComposerLibraryModel()
     /// Run configurations and their runs (ADR-122).
     let runs: RunStore
     /// Set by the app after construction (ADR-056, ADR-061).
@@ -308,16 +310,17 @@ final class TabStore {
 
     // MARK: New-session screen (ADR-071)
 
-    /// Opens the screen for a project (reusing unsent text), or the folder picker when no project is known.
-    /// `inNewWindow` puts the screen in a fresh window (ADR-072).
+    /// Opens the screen for a project (reusing unsent text, from this run or a saved draft — ADR-160), or
+    /// the folder picker when no project is known. `inNewWindow` puts the screen in a fresh window (ADR-072).
     func startNewSession(projectPath: String? = nil, inNewWindow: Bool = false) {
         guard let path = projectPath ?? selectedTab?.projectPath ?? editingDraft?.projectPath else {
             NotificationCenter.default.post(name: .clinicNewSession, object: nil); return
         }
         let window = inNewWindow ? openNewWindow() : activeWindow
         if let d = drafts[path] { window.editingDraft = d; return }
-        let d = NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false,
-                                worktreeBase: worktreeBase(for: path))
+        let d = composer.drafts[path].map { NewSessionDraft(projectPath: path, restoring: $0, defaultBase: worktreeBase(for: path)) }
+            ?? NewSessionDraft(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: sessions.state.lastWorktreeByProject[path] ?? false,
+                               worktreeBase: worktreeBase(for: path))
         drafts[path] = d
         window.editingDraft = d
     }
@@ -336,8 +339,10 @@ final class TabStore {
 
     private func window(showing d: NewSessionDraft) -> WindowState? { windows.first { $0.editingDraft?.id == d.id } }
 
+    /// Throws the project's draft away, on disk too (ADR-160). Closing the screen keeps it.
     func discardDraft(_ d: NewSessionDraft) {
         drafts[d.projectPath] = nil
+        composer.setDraft(nil, for: d.projectPath)
         if let w = window(showing: d) { w.editingDraft = nil; w.selectedTabId = tabs(in: w).last?.id }
     }
 
@@ -380,6 +385,7 @@ final class TabStore {
 
     private func closeDraft(_ d: NewSessionDraft) {
         drafts[d.projectPath] = nil
+        composer.setDraft(nil, for: d.projectPath)
         let window = window(showing: d) ?? activeWindow
         window.editingDraft = nil
         if activeWindowId != window.id { activeWindowId = window.id }

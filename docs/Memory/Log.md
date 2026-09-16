@@ -4311,3 +4311,12 @@ insert that dropped the tail); rebuilt from their text before committing.
 centered."* `<p align="center">` icon (128 pt, `.github/assets/icon.png`, now copied by `make screenshots`),
 `<h1 align="center">Clinic`, and the tagline with the subheading under a `<br>`. Recorded as an addition to
 [[ADR-159 How Clinic Presents Itself]]; the order it set is unchanged.
+## 2026-09-16 — Composer drafts and saved prompts
+*"save any typed text in the new session screen as a draft if we close it (per project) and maybe a way to save
+prompts as drafts that we could pull from again."* Recorded as [[ADR-160 Composer Drafts Persist And Prompts Can Be
+Saved]]. Chose the defaults without a grill: ✕ now closes (it said *Discard (⌘W)* while ⌘W kept the text), Discard
+Draft sits in the footer, saved prompts are text only and scoped to one project or every project. `ComposerLibrary`
++ `ComposerLibraryStore` in ClinicCore (8 tests), `composer.json` beside `state.json` so typing never rewrites state
+or redraws the sidebar. Smoke instance in `~/Library/Caches/clinic-drafts`, driven through the accessibility API with
+`-ClinicDraftPromptOnLaunch`: draft on disk, bookmark saved it, ✕ + kill + relaunch restored the text, Discard Draft
+emptied `drafts` and kept the saved prompt. Defaults domain unchanged; the smoke dir was deleted.
