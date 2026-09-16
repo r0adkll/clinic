@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # `make screenshots` (ADR-159): stages invented projects and sessions, photographs Clinic in dark and light,
-# and composes the social preview. Writes .github/assets/{hero-dark,hero-light,social-preview}.png.
+# and composes the social preview. Writes .github/assets/{hero-dark,hero-light,social-preview,icon}.png.
 #
 # Isolation, because this runs on a Mac with a live Clinic:
 #   - the app runs as a copy re-identified as com.r0adkll.clinic.screenshots, so its preferences (theme,
@@ -107,6 +107,9 @@ shoot() {
 
 shoot dark
 shoot light
+
+# The README's header icon, kept in step with the app's.
+cp "$ROOT/Sources/Clinic/Assets.xcassets/AppIcon.appiconset/icon_512.png" "$OUT/icon.png"
 
 "$WORK/social-preview" "$ROOT/Sources/Clinic/Assets.xcassets/AppIcon.appiconset/icon_512.png" \
   "$OUT/hero-dark.png" "$OUT/social-preview.png"

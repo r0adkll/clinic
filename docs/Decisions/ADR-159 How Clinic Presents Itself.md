@@ -75,3 +75,10 @@ theme and one-phrase taglines, not strings of fragments.
   the running user's own Ghostty theme, so the terminal's look varies with who runs the script.
 - The GitHub About line and topics were set on 2026-09-16. The cask description reaches the tap with the next
   `make publish`, and the social preview is uploaded by hand.
+
+## Addition (2026-09-16)
+User: *"Let's dress up the readme with putting the icon at the top, the app name under it, then the tagline. Then
+the screenshot. The first three should be horizontally centered."* The README now opens with a centred block: the
+app icon (`.github/assets/icon.png`, 128 pt, copied from the asset catalog by `make screenshots` so it follows the
+app's), "Clinic" as the heading, then the tagline with the subheading beneath it. The hero, the Homebrew line and
+everything after keep their order and stay left-aligned. The order above is unchanged; only the icon is new.

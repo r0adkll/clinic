@@ -4306,3 +4306,8 @@ the build still succeeds, so the script checks for `** BUILD SUCCEEDED **`. Then
 read back). The cask desc waits for the next `make publish`; the user uploads the social preview by hand.
 Also this session: the log entries for 09-16 were each written *over* the one before instead of beside it (an
 insert that dropped the tail); rebuilt from their text before committing.
+## 2026-09-16 — README header centred, with the icon
+*"putting the icon at the top, the app name under it, then the tagline … The first three should be horizontally
+centered."* `<p align="center">` icon (128 pt, `.github/assets/icon.png`, now copied by `make screenshots`),
+`<h1 align="center">Clinic`, and the tagline with the subheading under a `<br>`. Recorded as an addition to
+[[ADR-159 How Clinic Presents Itself]]; the order it set is unchanged.

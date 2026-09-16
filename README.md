@@ -1,8 +1,13 @@
-# Clinic
+<p align="center">
+  <img src=".github/assets/icon.png" alt="Clinic's app icon" width="128" height="128">
+</p>
 
-**All your Claude Code sessions, in good hands.**
+<h1 align="center">Clinic</h1>
 
-See what every agent is doing, and know which one needs you, from one native Mac window.
+<p align="center">
+  <strong>All your Claude Code sessions, in good hands.</strong><br>
+  See what every agent is doing, and know which one needs you, from one native Mac window.
+</p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.png">
