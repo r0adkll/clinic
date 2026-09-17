@@ -54,7 +54,8 @@ struct PRPage: View {
             GitHubUnavailableView(availability: availability) { await prs.refreshAvailability() }
         } else if let pr = prs.pullRequest(for: ref) {
             let stack = prs.stack(for: ref)
-            let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin, stack: stack)
+            let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin, stack: stack,
+                                           mergeOptions: prs.mergeOptions(for: ref))
             if let stack {
                 PRStackMap(stack: stack, current: ref) { layer in tabs.showPane(.pr(layer), in: tab) }
             }
@@ -255,12 +256,18 @@ struct PRPage: View {
                 }
                 .disabled(acting != nil)
             } else {
-                MergeSplitButton(host: host, method: prs.mergeMethod, enabled: status.canMerge,
+                // A stacked merge lands every open layer under this one too, and the button counts them
+                // rather than reading exactly as it would for this pull request alone (ADR-164).
+                let stack = prs.stack(for: ref)
+                let landing = (stack?.landsWith.map(\.ref) ?? []) + [ref]
+                MergeSplitButton(host: host, methods: prs.mergeOptions(for: ref).methods, method: prs.mergeMethod(for: ref),
+                                 count: landing.count, enabled: status.canMerge,
                                  busy: acting?.control == .merge ? acting?.verb : nil,
                                  idle: acting == nil) { method in
                     confirmMerge(pr, method)
                 }
-                .help(status.mergeBlockedReason ?? "Merge into \(prs.stack(for: ref)?.baseRefName ?? pr.baseRefName)")
+                .help(status.mergeBlockedReason
+                      ?? "Merge \(ListFormatter.localizedString(byJoining: landing.map { host.reference($0.number) })) into \(stack?.baseRefName ?? pr.baseRefName)")
                 if pr.autoMergeEnabled {
                     Button(title(.autoMerge, host.disableAutoMergeTitle)) {
                         Task {
@@ -268,10 +275,10 @@ struct PRPage: View {
                         }
                     }
                     .disabled(acting != nil)
-                } else {
+                } else if status.offersAutoMerge {
                     Button(title(.autoMerge, host.autoMergeTitle)) {
                         confirm = PendingAction(title: host.autoMergeTitle, message: "Merge \(host.reference(ref.number)) automatically when checks pass?") {
-                            await prs.perform(ref, .init(control: .autoMerge, verb: "Enabling…")) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) }
+                            await prs.perform(ref, .init(control: .autoMerge, verb: "Enabling…")) { try await $0.merge(ref, method: prs.mergeMethod(for: ref), auto: true) }
                         }
                     }
                     .disabled(!status.canAutoMerge || acting != nil)
@@ -295,7 +302,7 @@ struct PRPage: View {
         if let stack = prs.stack(for: ref) {
             let lower = stack.landsWith.map { host.reference($0.ref.number) }
             let with = lower.isEmpty ? "" : " This also merges " + ListFormatter.localizedString(byJoining: lower) + " below it."
-            confirm = PendingAction(title: host.mergeTitle(method),
+            confirm = PendingAction(title: host.mergeTitle(method, count: lower.count + 1),
                                     message: "Merge \(host.reference(ref.number)) into \(stack.baseRefName) with \(host.mergeMethodTitle(method).lowercased())?\(with)") {
                 await prs.mergeStacked(ref, method: method, sha: pr.headRefOid, verb: mergingVerb(method))
             }
@@ -648,12 +655,20 @@ private struct ChecksFreshness: View {
 /// this merge (as on github.com) while the Settings method stays the default. Drawn by hand because
 /// macOS ignores `.borderedProminent` and `.tint` on a `Menu`.
 ///
+/// It offers only the methods the repository allows, and like github.com drops the menu segment when
+/// that is one (ADR-164).
+///
 /// While its own merge runs it *is* the progress indicator (ADR-129): a spinner and the method in the
 /// progressive replace the title, and the method menu goes with them — there is nothing to pick for a
 /// merge already on its way.
 private struct MergeSplitButton: View {
     let host: CodeHost
+    /// What the repository allows, in menu order.
+    let methods: [GitHubService.MergeMethod]
     let method: GitHubService.MergeMethod
+    /// How many pull requests the merge lands: more than one for a stacked pull request with open
+    /// layers under it.
+    let count: Int
     let enabled: Bool
     /// Non-nil while this button's own merge is running: what to call it.
     let busy: String?
@@ -672,18 +687,21 @@ private struct MergeSplitButton: View {
                 .padding(.leading, 9).padding(.trailing, 11).frame(maxHeight: .infinity)
             } else {
                 Button { merge(method) } label: {
-                    Text(host.mergeTitle(method)).padding(.leading, 10).padding(.trailing, 9).frame(maxHeight: .infinity)
+                    Text(host.mergeTitle(method, count: count)).padding(.leading, 10).padding(.trailing, methods.count > 1 ? 9 : 10)
+                        .frame(maxHeight: .infinity)
                 }
-                Rectangle().fill(.black.opacity(0.2)).frame(width: 1)
-                Menu {
-                    ForEach(GitHubService.MergeMethod.allCases, id: \.self) { m in
-                        Button(host.mergeMethodTitle(m)) { merge(m) }
+                if methods.count > 1 {
+                    Rectangle().fill(.black.opacity(0.2)).frame(width: 1)
+                    Menu {
+                        ForEach(methods, id: \.self) { m in
+                            Button(host.mergeMethodTitle(m)) { merge(m) }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).frame(width: 22).frame(maxHeight: .infinity)
                     }
-                } label: {
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).frame(width: 22).frame(maxHeight: .infinity)
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
                 }
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
             }
         }
         .buttonStyle(.plain)

@@ -38,6 +38,12 @@ import Testing
         #expect(gh.mergeTitle(.merge) == "Merge pull request")
         #expect(gh.mergeMethodTitle(.merge) == "Create a merge commit")
         #expect(gl.mergeTitle(.squash) == "Merge")
+        // A stacked merge that lands more than the pull request on screen says how many (ADR-164).
+        #expect(gh.mergeTitle(.squash, count: 3) == "Squash and merge 3 pull requests")
+        #expect(gh.mergeTitle(.rebase, count: 2) == "Rebase and merge 2 pull requests")
+        #expect(gh.mergeTitle(.merge, count: 2) == "Merge 2 pull requests")
+        #expect(gh.mergeTitle(.merge, count: 1) == "Merge pull request")
+        #expect(gl.mergeTitle(.merge, count: 2) == "Merge 2 merge requests")
         #expect((gh.autoMergeTitle, gl.autoMergeTitle) == ("Enable auto-merge", "Set to auto-merge"))
     }
 

@@ -69,12 +69,17 @@ public struct CodeHost: Hashable, Sendable {
     }
 
     /// The merge button's title, which on GitHub names the method.
-    public func mergeTitle(_ method: GitHubService.MergeMethod) -> String {
-        switch (kind, method) {
-        case (.github, .merge): "Merge pull request"
-        case (.github, .squash): "Squash and merge"
-        case (.github, .rebase): "Rebase and merge"
-        case (.gitlab, _): "Merge"
+    ///
+    /// - Parameter count: how many pull requests the merge lands. Above one — a stacked pull request
+    ///   with open layers under it (ADR-164) — the title says so, because the button no longer merges
+    ///   only the pull request on screen.
+    public func mergeTitle(_ method: GitHubService.MergeMethod, count: Int = 1) -> String {
+        let many = count > 1 ? "\(count) \(noun.lowercased())s" : nil
+        return switch (kind, method) {
+        case (.github, .merge): many.map { "Merge \($0)" } ?? "Merge pull request"
+        case (.github, .squash): "Squash and merge" + (many.map { " \($0)" } ?? "")
+        case (.github, .rebase): "Rebase and merge" + (many.map { " \($0)" } ?? "")
+        case (.gitlab, _): "Merge" + (many.map { " \($0)" } ?? "")
         }
     }
 

@@ -49,6 +49,10 @@ final class PRStore {
     /// asked for — including the asks that found no stack, so an unstacked PR is not re-asked every read.
     private(set) var stacks: [String: PullRequestStack] = [:]
     private var stackFetchedAt: [String: Date] = [:]
+    /// What each repository lets a pull request be merged with (ADR-164), by `repositoryKey`, and when
+    /// each was last asked for.
+    private(set) var mergeOptions: [String: RepositoryMergeOptions] = [:]
+    private var mergeOptionsFetchedAt: [String: Date] = [:]
     /// The head commit each cached diff was fetched at, so a push invalidates the Files tab.
     private var diffHeads: [String: String] = [:]
     /// When a read was last attempted, successful or not, so a repository `gh` cannot read is retried
@@ -245,6 +249,9 @@ final class PRStore {
             errors[ref.id] = nil
             announceChecks(ref, previous: cached, fresh: pr)
             reloadDiffIfHeadMoved(ref, pr)
+            if policy == .force || PullRequestRefresh.needsMergeOptions(fresh: pr, fetchedAt: mergeOptionsFetchedAt[Self.repositoryKey(ref)]) {
+                await loadMergeOptions(ref)
+            }
             if PullRequestRefresh.needsStack(fresh: pr, cached: cached, stackFetchedAt: stackFetchedAt[ref.id]) {
                 await loadStack(ref)
             }
@@ -290,6 +297,21 @@ final class PRStore {
             Self.log.warning("pr stack \(ref.url.absoluteString, privacy: .public): \(error, privacy: .public)")
         }
     }
+
+    /// The repository's merge options (ADR-164). Non-fatal: a failed read keeps what was known, or leaves
+    /// the merge box offering every method as it did before, and waits out the TTL.
+    func loadMergeOptions(_ ref: PullRequestRef) async {
+        let key = Self.repositoryKey(ref)
+        mergeOptionsFetchedAt[key] = Date()
+        do {
+            if let options = try await service.mergeOptions(ref) { mergeOptions[key] = options }
+        } catch {
+            Self.log.warning("pr merge options \(ref.repository, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    /// Pull requests in one repository share its settings.
+    private static func repositoryKey(_ ref: PullRequestRef) -> String { "\(ref.host)/\(ref.repository)".lowercased() }
 
     /// The head commit the cached diff was read at; the Files tab keys its tree on it so a reload
     /// after a push rebuilds even when the same files changed (ADR-127).
@@ -350,7 +372,14 @@ final class PRStore {
         guard acting[ref.id] == nil else { return }
         acting[ref.id] = action
         defer { acting[ref.id] = nil }
-        do { try await op(service); errors[ref.id] = nil } catch { errors[ref.id] = "\(error)" }
+        do {
+            try await op(service); errors[ref.id] = nil
+        } catch {
+            errors[ref.id] = "\(error)"
+            // The likeliest merge error the panel could have prevented is a method the repository stopped
+            // allowing since it was read, so the read below asks again (ADR-164).
+            if action.control != .ready { mergeOptionsFetchedAt[Self.repositoryKey(ref)] = nil }
+        }
         await refresh(ref)
     }
 
@@ -367,8 +396,19 @@ final class PRStore {
         }
     }
 
-    var mergeMethod: GitHubService.MergeMethod {
+    /// The method chosen in Settings, whatever any repository allows.
+    var preferredMergeMethod: GitHubService.MergeMethod {
         GitHubService.MergeMethod(rawValue: UserDefaults.standard.string(forKey: "ClinicMergeMethod") ?? "squash") ?? .squash
+    }
+
+    /// What this pull request's repository allows, or everything until it has said (ADR-164).
+    func mergeOptions(for ref: PullRequestRef) -> RepositoryMergeOptions {
+        mergeOptions[Self.repositoryKey(ref)] ?? .unrestricted
+    }
+
+    /// The method the merge button leads with for this pull request.
+    func mergeMethod(for ref: PullRequestRef) -> GitHubService.MergeMethod {
+        mergeOptions(for: ref).method(preferred: preferredMergeMethod)
     }
 
     // MARK: Watching for pushes

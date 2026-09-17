@@ -428,12 +428,17 @@ private struct SessionsPane: View {
                 }
             }
 
-            Section("Pull requests") {
+            Section {
                 Picker("Merge with", selection: $mergeMethod) {
                     Text("Squash").tag("squash")
                     Text("Merge commit").tag("merge")
                     Text("Rebase").tag("rebase")
                 }
+            } header: {
+                Text("Pull requests")
+            } footer: {
+                Text("Used where the repository allows it. Elsewhere the merge button starts on the repository's "
+                     + "default, and only offers the methods its settings allow.")
             }
 
             Section("Agent tools") {

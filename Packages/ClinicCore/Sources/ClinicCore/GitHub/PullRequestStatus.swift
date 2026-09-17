@@ -59,17 +59,24 @@ public struct PullRequestStatus: Equatable, Sendable {
     public var canAutoMerge: Bool
     /// Why auto-merge is off, when it is.
     public var autoMergeBlockedReason: String?
+    /// There is an auto-merge button at all. False where GitHub has none to offer — in a stack, or in a
+    /// repository that does not allow auto-merge — as opposed to one that is only off for now (ADR-164).
+    public var offersAutoMerge: Bool
 
     public init(lines: [Line], action: Action?, canMerge: Bool, mergeBlockedReason: String?,
-                canAutoMerge: Bool? = nil, autoMergeBlockedReason: String? = nil) {
+                canAutoMerge: Bool? = nil, autoMergeBlockedReason: String? = nil, offersAutoMerge: Bool = true) {
         self.lines = lines; self.action = action; self.canMerge = canMerge; self.mergeBlockedReason = mergeBlockedReason
         self.canAutoMerge = canAutoMerge ?? canMerge
         self.autoMergeBlockedReason = autoMergeBlockedReason ?? mergeBlockedReason
+        self.offersAutoMerge = offersAutoMerge
     }
 
-    /// - Parameter stack: the stack the pull request is in, when one has been read (ADR-163). Its layers
-    ///   below this one merge with it, so what holds them up holds this merge up too.
-    public init(pr: PullRequest, viewerLogin: String?, stack: PullRequestStack? = nil) {
+    /// - Parameters:
+    ///   - stack: the stack the pull request is in, when one has been read (ADR-163). Its layers
+    ///     below this one merge with it, so what holds them up holds this merge up too.
+    ///   - mergeOptions: what the repository allows, when it has been read (ADR-164).
+    public init(pr: PullRequest, viewerLogin: String?, stack: PullRequestStack? = nil,
+                mergeOptions: RepositoryMergeOptions? = nil) {
         let ref = pr.ref
         guard pr.state == .open else {
             let merged = pr.state == .merged
@@ -81,6 +88,7 @@ public struct PullRequestStatus: Equatable, Sendable {
             mergeBlockedReason = merged ? "Already merged" : "Closed"
             canAutoMerge = false
             autoMergeBlockedReason = mergeBlockedReason
+            offersAutoMerge = false
             return
         }
 
@@ -209,8 +217,12 @@ public struct PullRequestStatus: Equatable, Sendable {
             : !lowerDrafts.isEmpty ? Self.below(lowerDrafts, "is still a draft", "are still drafts")
             : !lowerConflicts.isEmpty ? Self.below(lowerConflicts, "has conflicts", "have conflicts")
             : nil
-        canAutoMerge = canMerge && stack == nil
-        autoMergeBlockedReason = mergeBlockedReason ?? (stack != nil ? "Auto-merge isn't available for stacked pull requests" : nil)
+        let autoMergeAllowed = mergeOptions?.autoMergeAllowed ?? true
+        canAutoMerge = canMerge && stack == nil && autoMergeAllowed
+        autoMergeBlockedReason = mergeBlockedReason
+            ?? (stack != nil ? "Auto-merge isn't available for stacked pull requests"
+                : !autoMergeAllowed ? "Auto-merge isn't allowed in this repository" : nil)
+        offersAutoMerge = stack == nil && autoMergeAllowed
     }
 
     /// "#1, #2 and #3", then "+N more" past three.

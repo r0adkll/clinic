@@ -4380,3 +4380,25 @@ Built:
 30 new tests, 523 core tests pass, app builds. Smoke instance (`~/Library/Caches/clinic-stk`, deleted) against
 live `cli/cli` #14450 and #14452: map, status lines, disabled merge and ordering all as the ADR says. Not
 driven: clicking a layer, and a real stacked merge. Defaults domain unchanged.
+## 2026-09-17 — The merge box follows the repository's settings
+*"the PR merge options don't respect the repository settings … our panel should respect whatever setting is
+set. Also … we should make the "merge" button clearer"* for stacked PRs. Recorded as [[ADR-164 The Merge Box
+Offers What The Repository Allows]].
+
+Research: GraphQL `Repository.{mergeCommit,squashMerge,rebaseMerge,autoMerge}Allowed` and
+`viewerDefaultMergeMethod` answer for a READ viewer (`cli/cli`). GitHub's stack docs say stacks support every
+method but do not give the stacked button's wording.
+
+Built:
+- `RepositoryMergeOptions` (parse, `method(preferred:)`, `.unrestricted`).
+- `GitHubService.mergeOptions` and `PullRequestRefresh.needsMergeOptions` (600 s).
+- `PRStore` caches the options per repository and forgets them after a failed merge.
+- `PullRequestStatus.offersAutoMerge`, and `CodeHost.mergeTitle(_:count:)`.
+- `MergeSplitButton` lists only the allowed methods and drops its caret for one. The auto-merge button is
+  hidden in a stack or a repository without auto-merge.
+- A footer on Settings' *Merge with*.
+
+9 new tests plus CodeHost expectations, 532 core tests pass, app builds. Smoke instance (`~/Library/Caches/clinic-mrg`,
+opened with `-ClinicOpenSessionOnLaunch` and `-ClinicOpenPRPageOnLaunch`, no clicks) against `cli/cli` #14452 and
+`r0adkll/upload-google-play` #288: both as the ADR says. It wrote `ClinicPanelWidth` and the sidebar split frames into
+the real domain; both were written back and the domain diffed identical to the export taken before.

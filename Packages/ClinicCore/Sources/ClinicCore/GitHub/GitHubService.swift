@@ -31,6 +31,8 @@ public actor GitHubService {
         /// Nil `sha` lets GitHub take the head at request time.
         case mergeAsync(PullRequestRef, MergeMethod, sha: String?)
         case mergeAsyncResult(PullRequestRef, uuid: String)
+        /// The repository's allowed merge methods (ADR-164).
+        case mergeOptions(PullRequestRef)
         // Issues (ADR-113)
         /// `gh repo view` run *in* the project, so the answer is whatever `gh` would use there.
         case repoView(projectPath: String)
@@ -133,6 +135,9 @@ public actor GitHubService {
              "-f", "merge_method=\(method.rawValue)"] + (sha.map { ["-f", "sha=\($0)"] } ?? [])
         case .mergeAsyncResult(let ref, let uuid):
             ["api", "--hostname", ref.host, "repos/\(ref.owner)/\(ref.name)/pulls/\(ref.number)/merge-async/\(uuid)"]
+        case .mergeOptions(let ref):
+            ["api", "graphql", "--hostname", ref.host, "-F", "owner=\(ref.owner)", "-F", "repo=\(ref.name)",
+             "-f", "query=\(RepositoryMergeOptions.query)"]
         }
     }
 
@@ -256,6 +261,15 @@ public actor GitHubService {
             throw r.error(Self.arguments(for: .stack(ref)))
         }
         return try PullRequestStack.parse(r.stdout)
+    }
+
+    // MARK: Merge options (ADR-164)
+
+    /// What the pull request's repository lets it be merged with. Nil for a host `gh` does not speak
+    /// for, whose merge box keeps offering everything.
+    public func mergeOptions(_ ref: PullRequestRef) async throws -> RepositoryMergeOptions? {
+        guard ref.codeHost.kind == .github else { return nil }
+        return try RepositoryMergeOptions.parse(try await gh(.mergeOptions(ref)).stdout)
     }
 
     /// Merges a stacked pull request, and every open layer under it, through the asynchronous endpoint

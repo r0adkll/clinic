@@ -82,6 +82,19 @@ public enum PullRequestRefresh {
         return fresh.state == .open && now.timeIntervalSince(stackFetchedAt) >= stackTTL
     }
 
+    /// How long a repository's merge options stay good (ADR-164). They change only when someone edits
+    /// the repository's settings, so this is slower than anything about the pull request itself.
+    public static let mergeOptionsTTL: TimeInterval = 600
+
+    /// Whether a read of an open pull request should re-read its repository's merge options: never
+    /// read, or read longer ago than `mergeOptionsTTL`. A failed merge forgets them (`PRStore`), so a
+    /// method the repository stopped allowing is caught on the read after the error.
+    public static func needsMergeOptions(fresh: PullRequest, fetchedAt: Date?, now: Date = Date()) -> Bool {
+        guard fresh.state == .open else { return false }
+        guard let fetchedAt else { return true }
+        return now.timeIntervalSince(fetchedAt) >= mergeOptionsTTL
+    }
+
     /// Whether a path inside a repository's git directory means a ref moved — which is what a push
     /// looks like from the outside: `refs/remotes/<remote>/<branch>`, its reflog under
     /// `logs/refs/remotes/…`, or the whole lot packed away.
