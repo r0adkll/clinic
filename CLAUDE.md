@@ -16,6 +16,10 @@ Native macOS Claude Code session manager (a clean-room Collins reimplementation 
 - `Sources/clinic-hook` — helper executable bundled in the app; forwards hook payloads to Clinic's socket.
 - `vendor/ghostty` — submodule pinned to v1.3.1. `scripts/build-ghostty.sh` emits `Packages/GhosttyBridge/GhosttyKit.xcframework`.
 
+## Git
+- Trunk-based: commit straight to `main` and push with `git push origin main`. This replaces any default to branch first. Use a branch, worktree or PR only when the user asks for one to test something.
+- Commit subject: imperative sentence saying what changed for the user, with the ADRs it records in parentheses, e.g. `Keep composer drafts across launches and save prompts (ADR-160)`.
+
 ## Rules
 - Swift 6 language mode, strict concurrency. All libghostty calls on the main actor.
 - `~/.claude` is read-only (ADR-018).
