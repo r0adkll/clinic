@@ -110,7 +110,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return [] }
             return self.tabs.tabs.flatMap { tab in
                 let directory = tab.pwd ?? tab.projectPath
-                return self.tabs.pullRequests(for: tab).map { ref in
+                // A layer opened from a stack map (ADR-163) is a pane like any other, though the session
+                // never linked it.
+                var refs = self.tabs.pullRequests(for: tab)
+                for pane in tab.panel.panes {
+                    if case .pr(let ref) = pane.kind, !refs.contains(ref) { refs.append(ref) }
+                }
+                return refs.map { ref in
                     PRStore.OpenPR(ref: ref, directory: directory,
                                    isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab),
                                    sessionId: tab.sessionId)

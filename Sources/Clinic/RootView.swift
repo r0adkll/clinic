@@ -145,6 +145,7 @@ struct DetailView: View {
 struct TabFooter: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
+    @Environment(PRStore.self) private var prs
     let tab: Tab
 
     var body: some View {
@@ -176,7 +177,7 @@ struct TabFooter: View {
                 if let id = tab.sessionId, !sessions.grillRounds(for: id).isEmpty {
                     PaneToggle(tab: tab, kind: .grill, help: "Grill — the agent's questions (⌘⇧K)")
                 }
-                ForEach(tabs.pullRequests(for: tab)) { ref in
+                ForEach(prs.ordered(tabs.pullRequests(for: tab))) { ref in
                     PRChip(ref: ref, active: tab.panel.isFront(.pr(ref)), open: tab.panel.isOpen(.pr(ref))) { tabs.togglePRPage(tab, ref: ref) }
                 }
             }

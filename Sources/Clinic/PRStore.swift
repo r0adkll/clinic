@@ -45,6 +45,10 @@ final class PRStore {
     /// than blanking the timeline back to Markdown until a second round trip lands (ADR-127).
     private var renderedHTML: [String: PullRequest.RenderedHTML] = [:]
     private var htmlFetchedAt: [String: Date] = [:]
+    /// The stack each pull request is in, for those that are in one (ADR-163), and when each was last
+    /// asked for — including the asks that found no stack, so an unstacked PR is not re-asked every read.
+    private(set) var stacks: [String: PullRequestStack] = [:]
+    private var stackFetchedAt: [String: Date] = [:]
     /// The head commit each cached diff was fetched at, so a push invalidates the Files tab.
     private var diffHeads: [String: String] = [:]
     /// When a read was last attempted, successful or not, so a repository `gh` cannot read is retried
@@ -117,6 +121,13 @@ final class PRStore {
 
     func aggregateMark(for refs: [PullRequestRef]) -> PullRequestMark? {
         PullRequestMark.aggregate(refs.compactMap { mark(for: $0) })
+    }
+
+    func stack(for ref: PullRequestRef) -> PullRequestStack? { stacks[ref.id] }
+
+    /// A session's pull requests with each stack's layers in order (ADR-163).
+    func ordered(_ refs: [PullRequestRef]) -> [PullRequestRef] {
+        PullRequestStack.ordered(refs) { stacks[$0.id] }
     }
 
     // MARK: Watching (ADR-128)
@@ -234,6 +245,9 @@ final class PRStore {
             errors[ref.id] = nil
             announceChecks(ref, previous: cached, fresh: pr)
             reloadDiffIfHeadMoved(ref, pr)
+            if PullRequestRefresh.needsStack(fresh: pr, cached: cached, stackFetchedAt: stackFetchedAt[ref.id]) {
+                await loadStack(ref)
+            }
             let html = policy == .force || PullRequestRefresh.needsRenderedHTML(fresh: pr, cached: cached,
                                                                                 htmlFetchedAt: htmlFetchedAt[ref.id])
             // What ADR-127's cadence actually did, for `log stream` (ADR-038): which PR, what state it
@@ -263,6 +277,17 @@ final class PRStore {
             pullRequests[ref.id] = pr.applying(html)
         } catch {
             Self.log.warning("pr html \(ref.url.absoluteString, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    /// The pull request's stack (ADR-163). Non-fatal like the rendered bodies: a failed read keeps
+    /// whatever stack was already known and waits out `stackTTL` before asking again.
+    func loadStack(_ ref: PullRequestRef) async {
+        stackFetchedAt[ref.id] = Date()
+        do {
+            stacks[ref.id] = try await service.stack(ref)
+        } catch {
+            Self.log.warning("pr stack \(ref.url.absoluteString, privacy: .public): \(error, privacy: .public)")
         }
     }
 
@@ -327,6 +352,19 @@ final class PRStore {
         defer { acting[ref.id] = nil }
         do { try await op(service); errors[ref.id] = nil } catch { errors[ref.id] = "\(error)" }
         await refresh(ref)
+    }
+
+    /// Merges a stacked pull request and the open layers under it (ADR-163). Every other layer Clinic
+    /// has read changed too — merged with it, or retargeted onto the stack's base — so each is re-read
+    /// with its stack rather than left showing the stack as it was.
+    func mergeStacked(_ ref: PullRequestRef, method: GitHubService.MergeMethod, sha: String?, verb: String) async {
+        let layers = stacks[ref.id]?.entries.map(\.ref).filter { $0 != ref } ?? []
+        await perform(ref, .init(control: .merge, verb: verb)) { try await $0.mergeStacked(ref, method: method, sha: sha) }
+        await loadStack(ref)
+        for layer in layers where pullRequests[layer.id] != nil {
+            stackFetchedAt[layer.id] = nil
+            Task { await read(layer) }
+        }
     }
 
     var mergeMethod: GitHubService.MergeMethod {

@@ -26,6 +26,11 @@ public actor GitHubService {
         case disableAutoMerge(PullRequestRef)
         case checks(PullRequestRef)
         case bodyHTML(PullRequestRef)
+        // Stacks (ADR-163)
+        case stack(PullRequestRef)
+        /// Nil `sha` lets GitHub take the head at request time.
+        case mergeAsync(PullRequestRef, MergeMethod, sha: String?)
+        case mergeAsyncResult(PullRequestRef, uuid: String)
         // Issues (ADR-113)
         /// `gh repo view` run *in* the project, so the answer is whatever `gh` would use there.
         case repoView(projectPath: String)
@@ -119,6 +124,15 @@ public actor GitHubService {
             ["api", "graphql", "--hostname", ref.host,
              "-F", "owner=\(ref.owner)", "-F", "repo=\(ref.name)", "-F", "number=\(ref.number)",
              "-f", "query=\(bodyHTMLQuery)"]
+        case .stack(let ref):
+            ["api", "graphql", "--hostname", ref.host,
+             "-F", "owner=\(ref.owner)", "-F", "repo=\(ref.name)", "-F", "number=\(ref.number)",
+             "-f", "query=\(PullRequestStack.query)"]
+        case .mergeAsync(let ref, let method, let sha):
+            ["api", "--hostname", ref.host, "-X", "PUT", "repos/\(ref.owner)/\(ref.name)/pulls/\(ref.number)/merge-async",
+             "-f", "merge_method=\(method.rawValue)"] + (sha.map { ["-f", "sha=\($0)"] } ?? [])
+        case .mergeAsyncResult(let ref, let uuid):
+            ["api", "--hostname", ref.host, "repos/\(ref.owner)/\(ref.name)/pulls/\(ref.number)/merge-async/\(uuid)"]
         }
     }
 
@@ -130,6 +144,8 @@ public actor GitHubService {
     private var availability: (value: Availability, checkedAt: Date)?
     private var cachedViewer: String?
     private var cachedViewers: [String: String] = [:]
+    /// Hosts whose GraphQL schema has no `stack` field (ADR-163), asked once per launch.
+    private var stacklessHosts: Set<String> = []
     private static let availabilityTTL: TimeInterval = 60
 
     public init(executable: String = "gh") { self.executable = executable }
@@ -226,6 +242,61 @@ public actor GitHubService {
     /// GitHub's rendered HTML for the body and every comment (ADR-090).
     public func renderedHTML(_ ref: PullRequestRef) async throws -> PullRequest.RenderedHTML {
         try PullRequest.parseRenderedHTML(try await gh(.bodyHTML(ref)).stdout)
+    }
+
+    // MARK: Stacks (ADR-163)
+
+    /// The stack this pull request is in, or nil when it is in none — or when its host predates stacks,
+    /// which is remembered so that host is not asked again.
+    public func stack(_ ref: PullRequestRef) async throws -> PullRequestStack? {
+        guard ref.codeHost.kind == .github, !stacklessHosts.contains(ref.host) else { return nil }
+        let r = await run(.stack(ref))
+        if r.status != 0 {
+            if PullRequestStack.isUnsupported(stderr: r.stderr, stdout: r.stdout) { stacklessHosts.insert(ref.host); return nil }
+            throw r.error(Self.arguments(for: .stack(ref)))
+        }
+        return try PullRequestStack.parse(r.stdout)
+    }
+
+    /// Merges a stacked pull request, and every open layer under it, through the asynchronous endpoint
+    /// (the only one that can), and waits for GitHub to say how it ended. `sha` is the head the reader
+    /// saw, so a push in between cancels the merge rather than landing something unreviewed.
+    public func mergeStacked(_ ref: PullRequestRef, method: MergeMethod, sha: String?) async throws {
+        let op = Operation.mergeAsync(ref, method, sha: sha)
+        let r = await run(op)
+        // A 409 exits non-zero but carries the merge already in flight, which is worth following.
+        guard let first = AsyncMergeResult.parse(r.stdout) else { throw r.error(Self.arguments(for: op)) }
+        let result = try await Self.settle(first) { uuid in
+            let poll = try await self.gh(.mergeAsyncResult(ref, uuid: uuid))
+            guard let next = AsyncMergeResult.parse(poll.stdout) else {
+                throw GitHubError(command: "api merge-async", exitCode: 0, stderr: "unexpected response while merging")
+            }
+            return next
+        }
+        if result.status == .failed {
+            throw GitHubError(command: "api merge-async", exitCode: 0, stderr: result.message ?? "GitHub could not merge the stack")
+        }
+    }
+
+    /// Polls a pending asynchronous merge until it finishes or `timeout` passes. Separate from the
+    /// process calls so the loop is a unit test.
+    static func settle(_ first: AsyncMergeResult, interval: Duration = .seconds(2), timeout: Duration = .seconds(180),
+                       sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+                       next: @Sendable (String) async throws -> AsyncMergeResult) async throws -> AsyncMergeResult {
+        var result = first
+        var waited: Duration = .zero
+        while !result.isFinished {
+            guard let uuid = result.uuid else {
+                throw GitHubError(command: "api merge-async", exitCode: 0, stderr: "GitHub accepted the merge without an id to follow")
+            }
+            guard waited < timeout else {
+                throw GitHubError(command: "api merge-async", exitCode: 0, stderr: "Still merging after \(timeout.components.seconds / 60) minutes; check GitHub")
+            }
+            try await sleep(interval)
+            waited += interval
+            result = try await next(uuid)
+        }
+        return result
     }
 
     /// `gh pr diff <url>`.

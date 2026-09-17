@@ -53,7 +53,11 @@ struct PRPage: View {
             Divider()
             GitHubUnavailableView(availability: availability) { await prs.refreshAvailability() }
         } else if let pr = prs.pullRequest(for: ref) {
-            let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin)
+            let stack = prs.stack(for: ref)
+            let status = PullRequestStatus(pr: pr, viewerLogin: prs.viewerLogin, stack: stack)
+            if let stack {
+                PRStackMap(stack: stack, current: ref) { layer in tabs.showPane(.pr(layer), in: tab) }
+            }
             mergeBox(pr, status)
             if pr.state == .open { sessionActions(pr, status) } else { Spacer().frame(height: 12) }
             panePicker(pr)
@@ -256,7 +260,7 @@ struct PRPage: View {
                                  idle: acting == nil) { method in
                     confirmMerge(pr, method)
                 }
-                .help(status.mergeBlockedReason ?? "Merge into \(pr.baseRefName)")
+                .help(status.mergeBlockedReason ?? "Merge into \(prs.stack(for: ref)?.baseRefName ?? pr.baseRefName)")
                 if pr.autoMergeEnabled {
                     Button(title(.autoMerge, host.disableAutoMergeTitle)) {
                         Task {
@@ -270,8 +274,8 @@ struct PRPage: View {
                             await prs.perform(ref, .init(control: .autoMerge, verb: "Enabling…")) { try await $0.merge(ref, method: prs.mergeMethod, auto: true) }
                         }
                     }
-                    .disabled(!status.canMerge || acting != nil)
-                    .help(status.mergeBlockedReason ?? "Merge once the checks pass")
+                    .disabled(!status.canAutoMerge || acting != nil)
+                    .help(status.autoMergeBlockedReason ?? "Merge once the checks pass")
                 }
             }
             if let acting, acting.control != .merge {
@@ -286,6 +290,17 @@ struct PRPage: View {
     }
 
     private func confirmMerge(_ pr: PullRequest, _ method: GitHubService.MergeMethod) {
+        // A stacked pull request lands on the stack's base with every open layer under it, and only the
+        // asynchronous merge can do that (ADR-163).
+        if let stack = prs.stack(for: ref) {
+            let lower = stack.landsWith.map { host.reference($0.ref.number) }
+            let with = lower.isEmpty ? "" : " This also merges " + ListFormatter.localizedString(byJoining: lower) + " below it."
+            confirm = PendingAction(title: host.mergeTitle(method),
+                                    message: "Merge \(host.reference(ref.number)) into \(stack.baseRefName) with \(host.mergeMethodTitle(method).lowercased())?\(with)") {
+                await prs.mergeStacked(ref, method: method, sha: pr.headRefOid, verb: mergingVerb(method))
+            }
+            return
+        }
         confirm = PendingAction(title: host.mergeTitle(method),
                                 message: "Merge \(host.reference(ref.number)) into \(pr.baseRefName) with \(host.mergeMethodTitle(method).lowercased())?") {
             await prs.perform(ref, .init(control: .merge, verb: mergingVerb(method))) {

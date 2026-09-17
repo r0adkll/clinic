@@ -4357,3 +4357,26 @@ windows, `LiveRateLimits` + `UsageSnapshot.combining` (1 new test, 1 extended), 
 `UsageService`, the token is read via `security` and held until expiry, the poll is 15 min, and the panel and the
 Preferences toggle work before connecting. 496 core tests pass, app builds. Not checked in a running instance: this
 session runs in the live app, so relaunching it is left to the user.
+## 2026-09-17 — GitHub stacked pull requests
+*"Is it possible to support Githubs new PR Stacks feature in our UI?"*, then *"Lets do it"*. Recorded as [[ADR-163 A
+Pull Request Knows Its Stack]]. Research findings:
+- Stacks went into public preview on 2026-07-30.
+- GraphQL `PullRequest.stack` / `stackEntry` are read-only. `gh pr view --json` has no stack field.
+- The legacy merge (what `gh pr merge` calls) cannot merge a stack. Only `PUT …/pulls/{n}/merge-async` can,
+  polled with `GET …/merge-async/{uuid}`. It is in the default API version.
+- Auto-merge is unsupported for stacked PRs.
+- The query was checked live on `cli/cli` stack #14457 and `github/gh-stack` #476. A server without the field
+  fails the whole query with `undefinedField`.
+
+Built:
+- `PullRequestStack` (parse, `Entry.mark`, `landsWith`, `ordered`) and `AsyncMergeResult`.
+- `GitHubService.stack` (a host without the field is remembered for the launch), `mergeStacked` with the
+  testable `settle` loop, and `PullRequestRefresh.needsStack`.
+- `PullRequestStatus` gains its stack lines, lower-layer blockers and `canAutoMerge`.
+- `PRStore` caches stacks and `mergeStacked` re-reads every layer. `PRStackMap` sits above the merge box.
+- Footer chips and card rows are ordered by stack position. Open `.pr` panes outside the session's list are
+  polled too.
+
+30 new tests, 523 core tests pass, app builds. Smoke instance (`~/Library/Caches/clinic-stk`, deleted) against
+live `cli/cli` #14450 and #14452: map, status lines, disabled merge and ordering all as the ADR says. Not
+driven: clicking a layer, and a real stacked merge. Defaults domain unchanged.

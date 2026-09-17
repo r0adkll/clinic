@@ -136,7 +136,7 @@ struct SessionCardContent {
         }
 
         // Open pull requests (ADR-087). Merged and closed ones stay in the header's badge.
-        for ref in summary.pullRequests {
+        for ref in prs.ordered(summary.pullRequests) {
             let mark = prs.mark(for: ref)
             guard mark == nil || mark?.state == .open else { continue }
             let status: SessionCardChild.Status = switch mark?.attention {

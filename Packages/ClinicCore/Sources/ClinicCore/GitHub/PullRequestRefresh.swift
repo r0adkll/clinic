@@ -66,6 +66,22 @@ public enum PullRequestRefresh {
         [pr.body] + pr.comments.map { "\($0.id)\u{1}\($0.body)" }
     }
 
+    /// How long a stack read stays good for an open pull request (ADR-163). The layers under it change
+    /// on GitHub without any local ref moving, so age is the only signal short of a retarget.
+    public static let stackTTL: TimeInterval = 240
+
+    /// Whether a read that has just landed should re-read the pull request's stack too (ADR-163).
+    ///
+    /// A lower layer merging retargets this one onto the layer below it or the trunk, so a moved base is
+    /// the one event from GitHub's side that a status read does notice. Otherwise the stack rides the
+    /// same four-minute clock as the rendered bodies, and a fifteen-second poll never pays for it.
+    public static func needsStack(fresh: PullRequest, cached: PullRequest?, stackFetchedAt: Date?,
+                                  now: Date = Date()) -> Bool {
+        guard let cached, let stackFetchedAt else { return true }
+        if fresh.baseRefName != cached.baseRefName || fresh.state != cached.state { return true }
+        return fresh.state == .open && now.timeIntervalSince(stackFetchedAt) >= stackTTL
+    }
+
     /// Whether a path inside a repository's git directory means a ref moved — which is what a push
     /// looks like from the outside: `refs/remotes/<remote>/<branch>`, its reflog under
     /// `logs/refs/remotes/…`, or the whole lot packed away.

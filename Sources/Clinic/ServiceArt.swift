@@ -92,6 +92,12 @@ struct ServiceArt {
         case ("review", _): eye
         case ("comments", _): comment
         case ("auto", _): autoMerge
+        // A stack (ADR-163): the line naming the layer, then what the layers under it hold up.
+        case ("stack", _): open
+        case ("stack-draft", _): draft
+        case ("stack-conflicts", _): alert
+        case ("stack-checks", _): cross
+        case ("stack-review", _): changesRequested
         default: pending
         }
     }
