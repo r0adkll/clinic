@@ -265,6 +265,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // `-ClinicPullOnLaunch <path>` (ADR-165): open the Git Pull sheet on a project, so each outcome
+        // can be screenshotted without a click into the project menu.
+        if let path = UserDefaults.standard.string(forKey: "ClinicPullOnLaunch"), !path.isEmpty {
+            Task { try? await Task.sleep(for: .seconds(1.5)); NotificationCenter.default.post(name: .clinicGitPull, object: path) }
+        }
+
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
@@ -761,6 +767,7 @@ extension Notification.Name {
     /// Object: the project path whose task source to edit (ADR-113).
     static let clinicTaskSource = Notification.Name("com.r0adkll.clinic.taskSource")
     static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
+    static let clinicGitPull = Notification.Name("com.r0adkll.clinic.gitPull")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")
 }

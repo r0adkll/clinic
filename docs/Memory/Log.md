@@ -4402,3 +4402,20 @@ Built:
 opened with `-ClinicOpenSessionOnLaunch` and `-ClinicOpenPRPageOnLaunch`, no clicks) against `cli/cli` #14452 and
 `r0adkll/upload-google-play` #288: both as the ADR says. It wrote `ClinicPanelWidth` and the sidebar split frames into
 the real domain; both were written back and the domain diffed identical to the export taken before.
+
+## 2026-09-17 — Git Pull says what arrived
+*"The git pull dialog leaves a-lot to be desired."* Recorded as [[ADR-165 Git Pull Says What Arrived]].
+
+Before: a warning `NSAlert` of git's raw stdout, even on success, with no progress while git ran, and
+`GitError`'s description on failure.
+
+Built:
+- `GitRepository.pullReport` with `GitPullReport`, `GitPullFailure.classify` and `GitPullError`, replacing `pull()`.
+- `PullSheet` with running, up-to-date, pulled and refused states.
+- *Open Shell Here*, *Try Again*, and *Check Out main* for a deleted upstream.
+- `-ClinicPullOnLaunch`.
+
+12 new tests (classifier samples, plus real bare-remote clones for each outcome). 544 core tests pass and the
+app builds. Smoke instance (`~/Library/Caches/clinic-pl`, deleted) against scratch repos in five states: all
+render as the ADR says. The defaults domain diffed identical to the export taken before the run. Not driven:
+clicking the buttons.

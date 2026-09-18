@@ -149,7 +149,7 @@ struct ProjectMenu: View {
         }
         .disabled(!ProjectIconGenerator.hasGeneratedIcon(projectPath: project.path))
         Divider()
-        Button("Git Pull") { Task { if let out = await RepoUpkeep.pull(project: project) { RepoUpkeep.showError("Git pull", out) } } }
+        Button("Git Pull") { NotificationCenter.default.post(name: .clinicGitPull, object: project.path) }
         Button("Checkout \(checkoutTarget ?? "default branch")") { Task { await RepoUpkeep.checkoutDefault(project: project) } }
             .disabled(checkoutTarget == nil)
             .task { checkoutTarget = await RepoUpkeep.checkoutTarget(project: project) }

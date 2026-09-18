@@ -208,7 +208,11 @@ public actor GitRepository {
         guard await refExists("HEAD") else { return [] }
         var args = ["log", "--no-color", "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s", "-n", String(max(limit, 1))]
         if let base = await branchBaseRef() { args.append("\(base)..HEAD") }
-        let out = try await git(args).stdoutString
+        return Self.parseCommits(try await git(args).stdoutString)
+    }
+
+    /// Records of `--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s`, one per line.
+    static func parseCommits(_ out: String) -> [GitCommit] {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         return out.split(separator: "\n").compactMap { record in
@@ -229,11 +233,6 @@ public actor GitRepository {
     /// Short branch name; nil when detached or not a repository.
     // MARK: Upkeep (ADR-065)
 
-    /// `git pull --ff-only`; returns git's output.
-    public func pull() async throws -> String {
-        let r = try await git(["pull", "--ff-only"])
-        return r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 
     public func checkout(_ branch: String) async throws {
         _ = try await git(["checkout", branch])

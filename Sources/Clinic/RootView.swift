@@ -16,6 +16,7 @@ struct RootView: View {
     @State private var showSwitcher = false
     @State private var detailsFor: SessionSummary?
     @State private var iconProject: IconGenerationTarget?
+    @State private var pullProject: Project?
     @State private var newSessionProject: String?
     @State private var runSheet: RunSheetRequest?
     @AppStorage("ClinicShowTabBar") private var showTabBar = true
@@ -41,6 +42,7 @@ struct RootView: View {
         .sheet(isPresented: $showSwitcher) { QuickSwitcher() }
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
+        .sheet(item: $pullProject) { PullSheet(target: $0) }
         .sheet(item: $runSheet) { RunSheet(request: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .clinicRunSheet)) { n in
             guard isActive, let request = n.object as? RunSheetRequest else { return }
@@ -59,6 +61,10 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clinicGenerateIcon)) { n in
             guard isActive, let path = n.object as? String else { return }
             iconProject = IconGenerationTarget(path: path)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clinicGitPull)) { n in
+            guard isActive, let path = n.object as? String else { return }
+            pullProject = Project(path: path)
         }
         .onReceive(NotificationCenter.default.publisher(for: .clinicOpenSettings)) { _ in if isActive { openWindow(id: PreferencesView.windowID) } }
         .onReceive(NotificationCenter.default.publisher(for: .clinicOpenWindow)) { n in

@@ -2,16 +2,10 @@ import AppKit
 import ClinicCore
 import os
 
-/// Git pull / checkout default / archive project / worktree trash with undo (ADR-065).
+/// Checkout default / archive project / worktree trash with undo (ADR-065).
 @MainActor
 enum RepoUpkeep {
     private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "upkeep")
-
-    static func pull(project: Project) async -> String? {
-        guard let repo = await GitRepository.discover(from: project.path) else { showError("Not a git repository", project.path); return nil }
-        do { let out = try await repo.pull(); return out.isEmpty ? "Already up to date." : out }
-        catch { showError("Git pull failed", "\(error)"); return nil }
-    }
 
     /// The default branch when the project is currently on a different one.
     static func checkoutTarget(project: Project) async -> String? {
