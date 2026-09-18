@@ -21,7 +21,25 @@ final class Tab: Identifiable {
     var replay: ReplayModel?
     /// Persistent AppKit host for the tab's surfaces and right page (never re-parented by SwiftUI).
     @ObservationIgnored let contentView: TabContentView
-    var state: SessionState? { didSet { if state != .waitingForInput { waitingOn = nil } } }
+    var state: SessionState? {
+        didSet {
+            if state != .waitingForInput { waitingOn = nil }
+            if state != oldValue { stateSince = Date() }
+        }
+    }
+    /// When `state` last changed. A transcript record only ends a state that began before it (ADR-166).
+    @ObservationIgnored private(set) var stateSince = Date()
+    /// The terminal's OSC 9;4 report, and whether it has ever said busy: a CLI that never does sends one
+    /// `remove` at startup, which is then no evidence of anything (ADR-166).
+    @ObservationIgnored var progressBusy = false
+    @ObservationIgnored var sawProgressBusy = false
+    /// The terminal's verdict waiting out its grace period.
+    @ObservationIgnored var pendingVerdict: DispatchWorkItem?
+    /// Ids this tab's process has had: `/clear` starts a new one, but the MCP shim was launched with the
+    /// first and keeps sending it (ADR-166).
+    @ObservationIgnored var formerSessionIds: Set<SessionID> = []
+    /// `SessionEnd(reason: clear)` arrived; the `SessionStart` that follows carries the tab's next id.
+    @ObservationIgnored var clearedAt: Date?
     /// The notification type behind `waitingForInput`: `idle_prompt` still means Claude is at its prompt.
     var waitingOn: String?
     var unread = false
@@ -214,7 +232,9 @@ final class TabStore {
     /// Set by the app so the end of a turn re-reads that session's pull requests (ADR-127).
     weak var prs: PRStore?
     /// Set by the app so a hook reads the session's transcript straight away (ADR-156).
-    weak var activities: SessionActivityStore?
+    weak var activities: SessionActivityStore? {
+        didSet { activities?.onChange = { [weak self] id, activity in self?.transcriptChanged(id, activity) } }
+    }
     /// Set by the app so the status line's plan windows reach the usage panel (ADR-162).
     weak var usage: UsageService?
 
@@ -297,6 +317,11 @@ final class TabStore {
     // MARK: Opening
 
     func tab(for sessionId: SessionID) -> Tab? { tabs.first { $0.sessionId == sessionId } }
+
+    /// The tab a message from the CLI belongs to: also one that has since moved on to a new id (ADR-166).
+    func tab(routing sessionId: SessionID) -> Tab? {
+        tab(for: sessionId) ?? tabs.first { $0.formerSessionIds.contains(sessionId) }
+    }
 
     /// Opens (or focuses, ADR-041) a session known from disk.
     func open(session summary: SessionSummary) {
@@ -460,7 +485,7 @@ final class TabStore {
         }
     }
 
-    private func launchNewSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String?, worktreeBaseRef: String?,
+    func launchNewSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String?, worktreeBaseRef: String?,
                                   effort: String?, prompt: String?, workItem: WorkItemRef?, spawnedBy parent: SessionID? = nil) {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree,
@@ -1046,12 +1071,16 @@ final class TabStore {
         if let report = event.statusLine {
             // The plan windows are the account's, so they count whether or not the session has a tab here.
             usage?.absorb(report, at: event.receivedAt)
-            if let tab = tab(for: event.sessionId), tab.statusLine != report { tab.statusLine = report }
+            if let tab = tab(routing: event.sessionId), tab.statusLine != report { tab.statusLine = report }
             return
         }
         // A hook usually means the transcript just grew; the card should not wait for the watcher's debounce.
         activities?.nudge()
-        var found = tab(for: event.sessionId)
+        var found = tab(routing: event.sessionId)
+        if found == nil, event.hookEventName == "SessionStart", event.source == "clear", let cleared = clearedTab(for: event) {
+            rekey(cleared, to: event.sessionId, cwd: event.cwd)
+            found = cleared
+        }
         if found == nil, event.hookEventName == "SessionStart", let waiting = tabs.first(where: { $0.awaitingId && $0.sessionId != nil }) {
             // Fork / continue: adopt the id the CLI reports (ADR-063).
             waiting.kind = .session(event.sessionId)
@@ -1064,7 +1093,8 @@ final class TabStore {
             found = waiting
         }
         guard let tab = found else {
-            Self.log.debug("hook for unknown session \(event.sessionId.rawValue, privacy: .public): \(event.hookEventName, privacy: .public)")
+            // At `notice`, which the log keeps: a run of these is what a disconnected session looks like.
+            Self.log.notice("hook for unknown session \(event.sessionId.rawValue, privacy: .public): \(event.hookEventName, privacy: .public)")
             return
         }
         // ADR-080: turn boundaries become snapshots. Before any early return below, and before the
@@ -1072,6 +1102,7 @@ final class TabStore {
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         let endedTurn = event.hookEventName == "Stop"
         if endedTurn { runs.turnEnded(in: tab, snapshots: snapshots) }
+        if event.hookEventName == "SessionEnd", event.reason == "clear" { tab.clearedAt = event.receivedAt }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }
@@ -1091,22 +1122,91 @@ final class TabStore {
             refreshFooter(tab)
         }
         guard let old = tab.state, let new = SessionStateMachine.reduce(old, event: event) else { return }
-        let waitingOn = SessionStateMachine.waitingOn(tab.waitingOn, from: old, to: new, event: event)
+        // A hook is the first witness: whatever the terminal was about to conclude is out of date.
+        tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
+        transition(tab, to: new, waitingOn: SessionStateMachine.waitingOn(tab.waitingOn, from: old, to: new, event: event),
+                   failed: event.hookEventName == "StopFailure", message: event.message)
+    }
+
+    /// Moves a tab to a state and tells the user what the move means (ADR-033). Hooks come through here,
+    /// and so do the terminal and the transcript when they correct what the hooks left behind (ADR-166).
+    private func transition(_ tab: Tab, to new: SessionState, waitingOn: String? = nil, failed: Bool = false, message: String? = nil) {
+        guard let old = tab.state, let sessionId = tab.sessionId else { return }
         tab.state = new
         tab.waitingOn = waitingOn
-        tab.errorBadge = (event.hookEventName == "StopFailure")
+        tab.errorBadge = failed
         let isFrontAndSelected = isFrontAndSelected(tab)
-        if event.hookEventName == "StopFailure" {
-            notify(tab, sessionId: event.sessionId, body: event.message ?? "The turn ended with an API error", kind: .error)
+        if failed {
+            notify(tab, sessionId: sessionId, body: message ?? "The turn ended with an API error", kind: .error)
         } else if SessionStateMachine.isFinishedEdge(from: old, to: new) {
-            if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: event.sessionId, body: "Finished", kind: .finished) }
+            if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: sessionId, body: "Finished", kind: .finished) }
         } else if new.isWaiting && !old.isWaiting {
             if !isFrontAndSelected {
                 let permission = new == .waitingForPermission
-                notify(tab, sessionId: event.sessionId, body: permission ? "Needs permission" : (event.message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
+                notify(tab, sessionId: sessionId, body: permission ? "Needs permission" : (message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
             }
         }
         updateBadge()
+    }
+
+    // MARK: /clear (ADR-166)
+
+    /// The tab whose `SessionEnd(reason: clear)` just arrived, or, when that hook was lost, the only
+    /// live session tab in the directory the new session reports.
+    private func clearedTab(for event: HookEvent) -> Tab? {
+        let recent = tabs.filter { tab in tab.clearedAt.map { event.receivedAt.timeIntervalSince($0) < 10 } ?? false }
+        if let tab = recent.max(by: { ($0.clearedAt ?? .distantPast) < ($1.clearedAt ?? .distantPast) }) { return tab }
+        let sameDirectory = tabs.filter { $0.sessionId != nil && $0.state != nil && $0.state != .exited && !$0.childExited && $0.pwd == event.cwd }
+        return sameDirectory.count == 1 ? sameDirectory[0] : nil
+    }
+
+    /// `/clear` keeps the process and starts a session with a new id and a new transcript. The tab
+    /// follows the process; the transcript it leaves stays in the sidebar as a session of its own.
+    private func rekey(_ tab: Tab, to id: SessionID, cwd: String?) {
+        guard let old = tab.sessionId, old != id else { return }
+        Self.log.notice("session \(old.rawValue, privacy: .public) cleared; tab follows \(id.rawValue, privacy: .public)")
+        tab.formerSessionIds.insert(old)
+        tab.clearedAt = nil
+        tab.kind = .session(id)
+        tab.statusLine = nil
+        tab.unread = false
+        sessions.registerPending(id: id, cwd: cwd ?? tab.pwd ?? tab.projectPath)
+        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        resume.mcpConfigPath = mcp?.configPath(for: id)
+        tab.lastResume = resume
+        if tab.state == .exited, !tab.childExited { tab.state = .idle }   // an older build's reducer, or a lost ordering
+    }
+
+    // MARK: The terminal and the transcript as witnesses (ADR-166)
+
+    private func progressReported(_ tab: Tab, busy: Bool) {
+        tab.progressBusy = busy
+        if busy { tab.sawProgressBusy = true }
+        tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
+        guard let state = tab.state else { return }
+        guard case .after(let delay, let target) = TerminalWitness.progress(busy: busy, sawBusy: tab.sawProgressBusy, state: state, waitingOn: tab.waitingOn) else { return }
+        let work = DispatchWorkItem { [weak self, weak tab] in
+            guard let self, let tab, let state = tab.state else { return }
+            tab.pendingVerdict = nil
+            guard TerminalWitness.stillHolds(target, busy: tab.progressBusy, state: state, waitingOn: tab.waitingOn) else { return }
+            Self.log.notice("terminal progress moved \(tab.sessionId?.rawValue ?? "?", privacy: .public) from \(state.rawValue, privacy: .public) to \(target.rawValue, privacy: .public); no hook did")
+            self.transition(tab, to: target)
+        }
+        tab.pendingVerdict = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func titleReported(_ tab: Tab, title: String) {
+        guard let state = tab.state, let new = TerminalWitness.title(title, state: state) else { return }
+        transition(tab, to: new)
+    }
+
+    private func transcriptChanged(_ id: SessionID, _ activity: SessionActivity) {
+        guard let tab = tab(for: id), let state = tab.state,
+              TerminalWitness.transcriptEndsTurn(lastTurnEnd: activity.lastTurnEnd, state: state, since: tab.stateSince) else { return }
+        Self.log.notice("transcript ended the turn of \(id.rawValue, privacy: .public) in \(state.rawValue, privacy: .public); no hook did")
+        tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
+        transition(tab, to: .idle)
     }
 
     func updateBadge() {
@@ -1143,7 +1243,11 @@ extension TabStore: GhosttySurfaceDelegate {
                 notify(tab, sessionId: tab.sessionId, title: tab.title, body: "Rang the bell", kind: .bell)
             } else { NSSound.beep() }
             return true
-        case .setTitle(let t): if let tab, tab.kind == .shell, !isPanel { tab.title = t.isEmpty ? "Shell" : t }; return true
+        case .setTitle(let t):
+            if let tab, !isPanel {
+                if tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t } else { titleReported(tab, title: t) }
+            }
+            return true
         case .pwd(let p):
             if let tab, !isPanel {
                 let changed = tab.pwd != p
@@ -1152,7 +1256,13 @@ extension TabStore: GhosttySurfaceDelegate {
                 if changed { refreshFooter(tab) }
             }
             return true
-        case .progressReport, .commandFinished, .mouseShape, .colorScheme: return true
+        case .progressReport(let state, _):
+            // `pause` and `error` are not the CLI's; they say nothing about whether a turn is running.
+            if let tab, !isPanel, tab.sessionId != nil, state == .remove || state == .set || state == .indeterminate {
+                progressReported(tab, busy: state != .remove)
+            }
+            return true
+        case .commandFinished, .mouseShape, .colorScheme: return true
         case .quit: NSApp.terminate(nil); return true
         case .unhandled(let kind): Self.log.debug("unhandled surface action \(kind, privacy: .public)"); return false
         }
@@ -1173,6 +1283,8 @@ extension TabStore: GhosttySurfaceDelegate {
         if tab.panelSurface === surface { closePanel(tab); return }
         if tab.detaching { close(tab, confirm: false); Task { await backgroundAgents?.refresh() }; return }
         tab.childExited = true
+        tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
+        tab.progressBusy = false; tab.sawProgressBusy = false
         if tab.state != nil { tab.state = .exited }
         updateBadge()
     }

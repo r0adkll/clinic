@@ -15,6 +15,8 @@ final class SessionActivityStore {
 
     /// Live sessions and their transcript paths. Set by the app delegate.
     @ObservationIgnored var liveProvider: (() -> [SessionID: String])?
+    /// Called with each activity that changed. `TabStore` reads turn endings off it (ADR-166).
+    @ObservationIgnored var onChange: ((SessionID, SessionActivity) -> Void)?
     @ObservationIgnored private var followers: [SessionID: TranscriptFollower] = [:]
     @ObservationIgnored private let watcher = PathWatcher(debounce: 0.25)
     @ObservationIgnored private var watchTask: Task<Void, Never>?
@@ -69,6 +71,7 @@ final class SessionActivityStore {
             // The session may have closed, or its transcript moved, while the read was in flight.
             guard followers[id] === follower, activities[id] != activity else { continue }
             activities[id] = activity
+            onChange?(id, activity)
         }
     }
 }

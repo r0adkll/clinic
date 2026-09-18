@@ -16,11 +16,20 @@ final class HookService {
     let traceDirectory: URL
     var traceEnabled: Bool { UserDefaults.standard.bool(forKey: Prefs.hookTrace) }
 
+    /// Empty for the first Clinic on this Application Support directory, `-<pid>` for any other, which
+    /// then keeps sockets and settings files of its own and leaves the first one's alone (ADR-167).
+    /// Decided once, before either server binds.
+    static let instanceSuffix: String = {
+        SocketClaim.sweepStale(in: ClinicPaths.directory)
+        return SocketClaim.instanceSuffix(appSupport: ClinicPaths.appSupport)
+    }()
+
     init(appSupport: URL = ClinicPaths.appSupport) {
         let dir = appSupport.appendingPathComponent("Clinic", isDirectory: true)
-        settingsFileURL = dir.appendingPathComponent("hooks.json")
+        let suffix = Self.instanceSuffix
+        settingsFileURL = dir.appendingPathComponent("hooks\(suffix).json")
         traceDirectory = dir.appendingPathComponent("trace", isDirectory: true)
-        server = HookServer(socketPath: HookServer.defaultSocketPath(appSupport: appSupport))
+        server = HookServer(socketPath: HookServer.defaultSocketPath(appSupport: appSupport, suffix: suffix))
     }
 
     /// The `--settings` file for a launch: plain `hooks.json`, or for a worktree launch a twin that also
@@ -28,7 +37,7 @@ final class HookService {
     /// hooks and all, so the base has to ride in the same file.
     func settingsFileURL(worktreeBaseRef: String?) -> URL {
         guard let worktreeBaseRef else { return settingsFileURL }
-        return settingsFileURL.deletingLastPathComponent().appendingPathComponent("hooks-worktree-\(worktreeBaseRef).json")
+        return settingsFileURL.deletingLastPathComponent().appendingPathComponent("hooks\(Self.instanceSuffix)-worktree-\(worktreeBaseRef).json")
     }
 
     static let worktreeBaseRefs = ["fresh", "head"]
@@ -50,8 +59,14 @@ final class HookService {
             server.onUndecodable = { data, error in
                 Self.log.error("undecodable hook payload (\(data.count) bytes): \(error, privacy: .public)")
             }
+            server.onRebind = { why in
+                Self.log.error("hook socket was \(why, privacy: .public); bound again. Hooks sent in between were lost.")
+            }
             try server.start()
             isRunning = true
+            if !Self.instanceSuffix.isEmpty {
+                Self.log.notice("another Clinic owns hook.sock; this instance uses \(self.server.socketPath, privacy: .public)")
+            }
             let events = server.events
             pumpTask = Task { [weak self] in
                 for await event in events {
@@ -67,7 +82,11 @@ final class HookService {
         }
     }
 
-    func stop() { pumpTask?.cancel(); server.stop() }
+    func stop() {
+        pumpTask?.cancel(); server.stop()
+        guard !Self.instanceSuffix.isEmpty else { return }
+        for url in [settingsFileURL] + Self.worktreeBaseRefs.map({ settingsFileURL(worktreeBaseRef: $0) }) { try? FileManager.default.removeItem(at: url) }
+    }
 
     private func trace(_ event: HookEvent) {
         do {

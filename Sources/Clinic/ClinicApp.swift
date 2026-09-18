@@ -271,6 +271,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { try? await Task.sleep(for: .seconds(1.5)); NotificationCenter.default.post(name: .clinicGitPull, object: path) }
         }
 
+        // Hidden smoke-test keys (ADR-166): `-ClinicSessionOnLaunch <dir> -ClinicSessionPrompt <text>` starts
+        // a session with a first prompt and `-ClinicSessionModel <alias>` picks its model.
+        // `-ClinicInterruptAfter <seconds>` then sends it Ctrl-C: an interrupted turn fires no hook, so this
+        // is the way to watch the terminal bring the state to rest with nobody at the keyboard.
+        if let dir = UserDefaults.standard.string(forKey: "ClinicSessionOnLaunch"), !dir.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                tabs.launchNewSession(projectPath: dir, model: UserDefaults.standard.string(forKey: "ClinicSessionModel"), worktree: false, worktreeName: nil,
+                                      worktreeBaseRef: nil, effort: nil, prompt: UserDefaults.standard.string(forKey: "ClinicSessionPrompt"), workItem: nil)
+                let interrupt = UserDefaults.standard.double(forKey: "ClinicInterruptAfter")
+                guard interrupt > 0 else { return }
+                try? await Task.sleep(for: .seconds(interrupt))
+                tabs.selectedTab?.surface.sendInterrupt()
+            }
+        }
+
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))

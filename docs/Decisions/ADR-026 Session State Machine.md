@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (amended by ADR-166: the terminal and the transcript may correct hook state; `clear` and `compact` are not exits or starts)
 date: 2026-09-07
 tags: [adr, architecture, sessions, hooks]
 ---
@@ -18,7 +18,7 @@ States for an open session:
 - `exited` — `SessionEnd`, or the surface reports the child gone
 `StopFailure` → `idle` with an error badge. Orthogonal `unread` flag: set on the working→idle edge when the session is not the selected tab of a frontmost window; cleared on selection.
 Sessions not open in Clinic have no state, only last activity (transcript mtime).
-libghostty's `PROGRESS_REPORT` action is a corroborating signal only, never a state source.
+~~libghostty's `PROGRESS_REPORT` action is a corroborating signal only, never a state source.~~ Superseded by [[ADR-166 Session State Has More Than One Witness]]: hooks fire nothing on an interrupt, so the report ends and starts turns the hooks missed.
 
 ## Consequences
 - The machine is a pure value type in ClinicCore with exhaustive tests over hook sequences.

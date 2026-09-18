@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (amended by ADR-157: `statusLine`; by ADR-166: `terminalProgressBarEnabled`; by ADR-167: timeout 15)
 date: 2026-09-07
 tags: [adr, hooks]
 ---

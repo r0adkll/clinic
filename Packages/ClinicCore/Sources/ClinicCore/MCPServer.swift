@@ -27,8 +27,8 @@ public final class MCPServer: @unchecked Sendable {
 
     public init(socketPath: String) { self.socketPath = socketPath }
 
-    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport) -> String {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("mcp.sock").path
+    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport, suffix: String = "") -> String {
+        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("mcp\(suffix).sock").path
     }
 
     public func start() throws {
@@ -69,6 +69,9 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func serve(_ fd: Int32) {
+        // A shim that gave up waiting has closed its end; answering it must not raise SIGPIPE in the app.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))

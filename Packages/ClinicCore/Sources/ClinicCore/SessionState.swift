@@ -14,6 +14,10 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var transcriptPath: String?
     public var cwd: String?
     public var source: String?            // SessionStart: startup | resume | clear | compact | fork
+    /// SessionEnd: clear | resume | logout | prompt_input_exit | other. `clear` is not an exit (ADR-166).
+    public var reason: String?
+    /// Present only when the hook fired inside a subagent.
+    public var agentId: String?
     public var notificationType: String?  // Notification
     public var message: String?
     /// UserPromptSubmit: the text the user submitted. Labels a turn snapshot (ADR-080).
@@ -28,16 +32,17 @@ public struct HookEvent: Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name", sessionId = "session_id", transcriptPath = "transcript_path", cwd, source
+        case reason, agentId = "agent_id"
         case notificationType = "notification_type", message, prompt, toolName = "tool_name", permissionMode = "permission_mode"
         case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
         case statusLine = "_clinic_status_line"
     }
 
     public init(hookEventName: String, sessionId: SessionID, transcriptPath: String? = nil, cwd: String? = nil, source: String? = nil,
-                notificationType: String? = nil, message: String? = nil, prompt: String? = nil, toolName: String? = nil, permissionMode: String? = nil,
+                reason: String? = nil, agentId: String? = nil, notificationType: String? = nil, message: String? = nil, prompt: String? = nil, toolName: String? = nil, permissionMode: String? = nil,
                 model: String? = nil, stopHookActive: Bool? = nil, receivedAt: Date = Date()) {
         self.hookEventName = hookEventName; self.sessionId = sessionId; self.transcriptPath = transcriptPath; self.cwd = cwd
-        self.source = source; self.notificationType = notificationType; self.message = message; self.prompt = prompt; self.toolName = toolName
+        self.source = source; self.reason = reason; self.agentId = agentId; self.notificationType = notificationType; self.message = message; self.prompt = prompt; self.toolName = toolName
         self.permissionMode = permissionMode; self.model = model; self.stopHookActive = stopHookActive; self.receivedAt = receivedAt
     }
 
@@ -48,6 +53,8 @@ public struct HookEvent: Codable, Sendable, Hashable {
         transcriptPath = try c.decodeIfPresent(String.self, forKey: .transcriptPath)
         cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
         source = try c.decodeIfPresent(String.self, forKey: .source)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        agentId = try c.decodeIfPresent(String.self, forKey: .agentId)
         notificationType = try c.decodeIfPresent(String.self, forKey: .notificationType)
         message = try c.decodeIfPresent(String.self, forKey: .message)
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
@@ -75,7 +82,10 @@ public enum SessionStateMachine {
     public static func reduce(_ state: SessionState, event: HookEvent) -> SessionState? {
         switch event.hookEventName {
         case "SessionStart":
-            return .idle
+            // Compaction restarts the session record in the middle of a turn: an automatic one is
+            // followed by more work and a `Stop`, a manual one began at the prompt. Neither moves the
+            // state (ADR-166, verified against 2.1.276).
+            return event.source == "compact" ? nil : .idle
         case "UserPromptSubmit":
             return .working
         case "PermissionRequest":
@@ -91,7 +101,9 @@ public enum SessionStateMachine {
         case "Stop", "StopFailure":
             return .idle
         case "SessionEnd":
-            return .exited
+            // `/clear` ends the session id, not the process: a `SessionStart` with a new id follows
+            // within milliseconds and the tab is re-keyed to it (ADR-166).
+            return event.reason == "clear" ? nil : .exited
         default:
             return nil
         }
@@ -116,6 +128,77 @@ public enum SessionStateMachine {
     /// The working→idle edge that sets `unread` and fires "finished" notifications (ADR-033).
     public static func isFinishedEdge(from old: SessionState, to new: SessionState) -> Bool {
         old == .working && new == .idle
+    }
+}
+
+/// What the terminal itself says about a session, judged against the state the hooks built (ADR-166).
+///
+/// Hooks are delivered by a helper process per event and some endings fire none at all: an interrupt,
+/// and a permission dialog dismissed with Esc (verified against 2.1.276). The CLI's own terminal output
+/// is in-band and ordered, so it is the second witness:
+/// - **OSC 9;4** is sent once when a turn starts (`indeterminate`) and once when it is over (`remove`).
+///   It stays set through a permission dialog and, per the CLI's docs, while background subagents run.
+/// - **The title** starts with `✳` at rest *and* while a dialog blocks the turn, and with a spinner
+///   glyph while the turn is moving. It is the only signal that a permission was granted: `PreToolUse`
+///   arrives before `PermissionRequest`, so no hook follows the approval until the tool has finished.
+public enum TerminalWitness {
+    /// A quiet report has to outlast this before it ends a turn. A `Stop` hook normally lands within
+    /// milliseconds and wins; Collins measured the CLI clearing the report briefly between tool calls.
+    public static let quietGrace: TimeInterval = 3
+    /// A busy report has to outlast this before it starts one. `/exit` and other local commands set the
+    /// report for a fraction of a second, and a turn that short is not worth a "finished" notification.
+    public static let busyGrace: TimeInterval = 1.5
+
+    public enum Verdict: Sendable, Hashable {
+        /// Re-check after the delay and move to `state` if `stillHolds` says the evidence stands.
+        case after(TimeInterval, SessionState)
+        /// The report contradicts nothing; drop any verdict still pending.
+        case settle
+    }
+
+    /// - Parameter sawBusy: whether this terminal has ever reported busy. A CLI that never emits OSC 9;4
+    ///   (the setting off, an old version) sends a `remove` at startup and nothing else, so a quiet
+    ///   report only counts from a terminal that has shown it reports both edges.
+    public static func progress(busy: Bool, sawBusy: Bool, state: SessionState, waitingOn: String?) -> Verdict {
+        if busy {
+            return SessionStateMachine.acceptsPrompt(state, waitingOn: waitingOn) ? .after(busyGrace, .working) : .settle
+        }
+        guard sawBusy else { return .settle }
+        return state == .working || state == .waitingForPermission ? .after(quietGrace, .idle) : .settle
+    }
+
+    /// Whether a pending verdict should still be applied once its delay has run out.
+    public static func stillHolds(_ target: SessionState, busy: Bool, state: SessionState, waitingOn: String?) -> Bool {
+        switch target {
+        case .working: return busy && SessionStateMachine.acceptsPrompt(state, waitingOn: waitingOn)
+        case .idle: return !busy && (state == .working || state == .waitingForPermission)
+        default: return false
+        }
+    }
+
+    public enum TitleActivity: Sendable { case moving, resting }
+
+    /// The glyph the CLI prefixes its title with. Braille frames are what it drew before 2.1.228.
+    public static func titleActivity(_ title: String) -> TitleActivity? {
+        guard let first = title.unicodeScalars.first else { return nil }
+        switch first.value {
+        case 0x2733: return .resting                       // ✳
+        case 0x25D0...0x25D3, 0x2800...0x28FF: return .moving   // ◐◑◒◓, braille
+        default: return nil
+        }
+    }
+
+    /// A moving title while the state says "needs permission" means the dialog was answered.
+    public static func title(_ title: String, state: SessionState) -> SessionState? {
+        state == .waitingForPermission && titleActivity(title) == .moving ? .working : nil
+    }
+
+    /// A turn the transcript says is over (`SessionActivity.lastTurnEnd`) ends a state that began before
+    /// it. The margin keeps the *previous* turn's closing record, which can be written in the same few
+    /// milliseconds as a queued prompt's `UserPromptSubmit`, from ending the turn that prompt started.
+    public static func transcriptEndsTurn(lastTurnEnd: Date?, state: SessionState, since: Date) -> Bool {
+        guard let lastTurnEnd, state == .working || state == .waitingForPermission else { return false }
+        return lastTurnEnd.timeIntervalSince(since) > 0.5
     }
 }
 

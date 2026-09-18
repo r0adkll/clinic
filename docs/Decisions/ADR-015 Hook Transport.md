@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (amended by ADR-167: a live instance's socket is never taken, and the helper retries)
 date: 2026-09-07
 tags: [adr, architecture, hooks]
 ---

@@ -54,11 +54,31 @@ func roundTrip(socketPath: String, payload: Data) -> Data? {
 
 // MARK: - Hook mode
 
+/// Delays before each further attempt to connect (ADR-167). A refused connection is a full backlog or
+/// a socket Clinic is in the middle of taking back, and both pass; the hook is `async`, so waiting costs
+/// the CLI nothing. The events that end or begin a state get the long schedule, because losing one leaves
+/// the sidebar wrong until something else corrects it. `PreToolUse` fires per tool call and only ever
+/// confirms a state, so it gets the short one.
+let patientRetryDelaysMs: [UInt32] = [50, 100, 200, 400, 800, 1600, 3000]
+let briefRetryDelaysMs: [UInt32] = [50, 150]
+
+func connectWithRetry(_ path: String, delaysMs: [UInt32]) -> Int32? {
+    if let fd = connectSocket(path) { return fd }
+    for delay in delaysMs {
+        usleep(delay * 1000)
+        if let fd = connectSocket(path) { return fd }
+    }
+    return nil
+}
+
 func runHookMode(socketPath: String) {
     var payload = FileHandle.standardInput.readDataToEndOfFile()
     guard !payload.isEmpty else { return }
     payload.append(0x0A)
-    if let fd = connectSocket(socketPath) {
+    let event = (try? JSONSerialization.jsonObject(with: payload) as? [String: Any])?["hook_event_name"] as? String
+    // SessionEnd hooks share a 1.5 s budget with the CLI's exit, and Clinic also learns of an exit from the surface.
+    let brief = event == "PreToolUse" || event == "SessionEnd"
+    if let fd = connectWithRetry(socketPath, delaysMs: brief ? briefRetryDelaysMs : patientRetryDelaysMs) {
         _ = writeAll(fd, payload); shutdown(fd, SHUT_WR); close(fd)
     } else if let traceDir = ProcessInfo.processInfo.environment["CLINIC_HOOK_TRACE_DIR"] {
         let sessionId = (try? JSONSerialization.jsonObject(with: payload) as? [String: Any])?["session_id"] as? String ?? "unknown"

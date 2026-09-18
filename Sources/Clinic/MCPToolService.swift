@@ -15,7 +15,7 @@ final class MCPToolService {
     private weak var prs: PRStore?
 
     init(appSupport: URL = ClinicPaths.appSupport) {
-        server = MCPServer(socketPath: MCPServer.defaultSocketPath(appSupport: appSupport))
+        server = MCPServer(socketPath: MCPServer.defaultSocketPath(appSupport: appSupport, suffix: HookService.instanceSuffix))
         configDirectory = appSupport.appendingPathComponent("Clinic/mcp", isDirectory: true)
     }
 
@@ -65,9 +65,10 @@ final class MCPToolService {
                 return MCPToolSpec.textResult("Unknown tool", isError: true)
             }
             guard Self.isEnabled(spec) else { return MCPToolSpec.textResult("The user has disabled \(name) in Clinic.", isError: true) }
-            guard let tab = tabs?.tab(for: req.sessionId) else { return MCPToolSpec.textResult("Session is not open in Clinic.", isError: true) }
+            guard let tab = tabs?.tab(routing: req.sessionId) else { return MCPToolSpec.textResult("Session is not open in Clinic.", isError: true) }
             Self.log.info("tool \(name, privacy: .public) for \(req.sessionId.rawValue, privacy: .public)")
-            return call(name, args: req.arguments, tab: tab, sessionId: req.sessionId)
+            // The shim was launched with the tab's first id; after `/clear` the tab has another (ADR-166).
+            return call(name, args: req.arguments, tab: tab, sessionId: tab.sessionId ?? req.sessionId)
         default:
             return ["error": ["code": -32601, "message": "Unsupported method \(req.method)"]]
         }

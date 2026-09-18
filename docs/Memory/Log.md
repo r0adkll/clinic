@@ -4419,3 +4419,33 @@ Built:
 app builds. Smoke instance (`~/Library/Caches/clinic-pl`, deleted) against scratch repos in five states: all
 render as the ADR says. The defaults domain diffed identical to the export taken before the run. Not driven:
 clicking the buttons.
+
+## 2026-09-18 — Sessions no longer stick on `working` (ADR-166, ADR-167)
+User: the hooks "kinda disconnect" and sessions stay `working` while idle; look at orca and Collins. Then: "Lets do it".
+
+Research is in [[Session State Reliability]]. The facts that decided the design were measured, not read: the real
+CLI (2.1.276) in a pty with every hook forwarded to a logging socket and every OSC recorded. The timeline is the
+table in [[ADR-166 Session State Has More Than One Witness]]. What it showed: Esc fires no hook but clears OSC 9;4
+in 60 ms; `/clear` changes the `session_id`, which marked the tab `exited` and dropped every later hook;
+`PreToolUse` arrives *before* `PermissionRequest`, so an approved permission stayed orange; a background task's
+wake-up does fire `UserPromptSubmit`, so that suspected gap was not real.
+
+Built:
+- `TerminalWitness` (ClinicCore): OSC 9;4 ends a turn after 3 s and starts one after 1.5 s, a spinner title ends
+  `waitingForPermission`, a transcript `turn_duration` or interrupt record ends a state that began before it.
+- `TabStore`: one `transition` for hooks and witnesses, `/clear` re-keys the tab, `tab(routing:)` for the MCP shim's
+  old id, dropped hooks and corrections logged at `notice`.
+- Reducer: `SessionStart(compact)` and `SessionEnd(clear)` change nothing.
+- `SocketClaim` and `HookServer` (ADR-167): a second instance takes `hook-<pid>.sock` and its own settings files, the
+  server re-binds a lost path, `stop` unlinks only its own inode, 1 s receive timeout, backlog 256.
+  `MCPServer` sets `SO_NOSIGPIPE`.
+- `clinic-hook` retries the connect for six seconds (150 ms for `PreToolUse` and `SessionEnd`).
+- `HookSettings` forces `terminalProgressBarEnabled` and raises the hook timeout to 15.
+- Seams: `-ClinicSessionOnLaunch`, `-ClinicSessionPrompt`, `-ClinicSessionModel`, `-ClinicInterruptAfter`.
+
+20 new tests; 564 core tests pass and the app builds. Smoke instances on `~/Library/Caches/clinic-sw` (deleted):
+an interrupted session with no `Stop` in its hook trace went `idle` 3 s later, logged as "terminal progress moved …
+no hook did"; a second instance on the same directory came up on `hook-65022.sock` and took nothing from the first;
+the next launch swept a killed instance's files. The smoke runs wrote the window and split frames into the real
+defaults domain; both were written back. They left one short transcript under the clinic project.
+Not driven in the app: `/clear`, the permission title, the transcript witness.

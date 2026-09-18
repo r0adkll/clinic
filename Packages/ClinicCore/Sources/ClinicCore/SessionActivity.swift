@@ -54,6 +54,9 @@ public struct SessionActivity: Sendable, Hashable {
     public private(set) var currentTool: Tool?
     /// The latest `away_summary`, cleared by the next prompt it no longer describes.
     public private(set) var recap: String?
+    /// When the transcript last said a turn was over: a `turn_duration` record, or the user record the
+    /// CLI writes for an interrupt, which fires no hook (ADR-166).
+    public private(set) var lastTurnEnd: Date?
     /// Input plus cache tokens of the last main-chain assistant message: what the context holds.
     public private(set) var contextTokens: Int?
     /// The raw model id of the last assistant message.
@@ -109,6 +112,7 @@ public struct SessionActivity: Sendable, Hashable {
                 if let content = obj["content"] as? String { recap = Self.cleanRecap(content) }
             case "turn_duration":
                 currentTool = nil
+                if let date { lastTurnEnd = date }
             default: break
             }
         default:
@@ -144,6 +148,8 @@ public struct SessionActivity: Sendable, Hashable {
         }
     }
 
+    static let interruptMarker = "[Request interrupted by user"
+
     private mutating func applyUser(_ obj: [String: Any], date: Date?) {
         let message = obj["message"] as? [String: Any]
         let content = message?["content"]
@@ -161,6 +167,12 @@ public struct SessionActivity: Sendable, Hashable {
         let text: String? = (content as? String) ?? (content as? [[String: Any]])?
             .compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
         guard let text else { return }
+        // "[Request interrupted by user]" and "[Request interrupted by user for tool use]".
+        if text.hasPrefix(Self.interruptMarker) {
+            currentTool = nil
+            if let date { lastTurnEnd = date }
+            return
+        }
         let origin = (obj["origin"] as? [String: Any])?["kind"] as? String
         if origin == "task-notification" || text.contains("<task-notification>") {
             applyNotifications(in: text, date: date)

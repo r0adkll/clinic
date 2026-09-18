@@ -114,11 +114,18 @@ public enum HookSettings {
             "type": "command",
             "command": [helperPath, socketPath].map(ClaudeLaunch.shellQuote).joined(separator: " "),
             "async": true,
-            "timeout": 5,
+            // Room for the helper's retries (ADR-167); the hook is async, so the CLI never waits on it.
+            "timeout": 15,
         ]
         var hooks: [String: Any] = [:]
         for event in events { hooks[event] = [["hooks": [hook]]] }
-        var root: [String: Any] = ["hooks": hooks, "statusLine": statusLine(helperPath: helperPath, socketPath: socketPath)]
+        var root: [String: Any] = [
+            "hooks": hooks,
+            "statusLine": statusLine(helperPath: helperPath, socketPath: socketPath),
+            // OSC 9;4 is the second witness to a session's state (ADR-166), so a user who turned the
+            // progress report off for their own terminal still gets it in Clinic's, which draws no bar.
+            "terminalProgressBarEnabled": true,
+        ]
         if let worktreeBaseRef { root["worktree"] = ["baseRef": worktreeBaseRef] }
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])
     }

@@ -11,24 +11,58 @@ public final class HookServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.r0adkll.clinic.hook-server")
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
+    private var watchdog: DispatchSourceTimer?
+    /// The inode bound at `socketPath`. A different one there means another process rebound the path.
+    private var boundInode: ino_t = 0
     private let lock = NSLock()
+    /// The socket path was taken or removed by another process and has been bound again (ADR-167).
+    public var onRebind: (@Sendable (String) -> Void)?
     /// Raw payloads that failed to decode, for diagnostics.
     public var onUndecodable: (@Sendable (Data, Error) -> Void)?
 
-    public init(socketPath: String) {
+    private let watchdogInterval: TimeInterval
+
+    public init(socketPath: String, watchdogInterval: TimeInterval = 5) {
         self.socketPath = socketPath
+        self.watchdogInterval = watchdogInterval
         var c: AsyncStream<HookEvent>.Continuation!
         events = AsyncStream(bufferingPolicy: .unbounded) { c = $0 }
         continuation = c
     }
 
-    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport) -> String {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("hook.sock").path
+    /// - Parameter suffix: `SocketClaim.instanceSuffix`, empty for the first instance on the directory.
+    public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport, suffix: String = "") -> String {
+        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("hook\(suffix).sock").path
     }
 
     public func start() throws {
         lock.lock(); defer { lock.unlock() }
         guard listenFD < 0 else { return }
+        try bind()
+        // An older build, or anything else that unlinks the path, still cuts a live server off. Look
+        // every few seconds and take the path back once nobody is listening on it (ADR-167).
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + watchdogInterval, repeating: watchdogInterval)
+        timer.setEventHandler { [weak self] in self?.checkBinding() }
+        timer.resume()
+        watchdog = timer
+    }
+
+    private func checkBinding() {
+        lock.lock(); defer { lock.unlock() }
+        guard listenFD >= 0 else { return }
+        var st = stat()
+        let present = stat(socketPath, &st) == 0
+        if present, st.st_ino == boundInode { return }
+        // Someone else's live socket is theirs; fighting over the path helps neither instance.
+        if present, SocketClaim.isLive(socketPath) { return }
+        acceptSource?.cancel(); acceptSource = nil; listenFD = -1
+        do { try bind(); onRebind?(present ? "replaced by a socket nobody listens on" : "removed") }
+        catch { onRebind?("rebind failed: \(error)") }
+    }
+
+    /// Caller holds `lock`.
+    private func bind() throws {
         guard socketPath.utf8.count < 104 else { throw HookServerError.pathTooLong(socketPath) }
         try FileManager.default.createDirectory(atPath: (socketPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         unlink(socketPath)
@@ -41,10 +75,13 @@ public final class HookServer: @unchecked Sendable {
             socketPath.withCString { strncpy(UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self), $0, 103) }
         }
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let bindResult = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) } }
+        let bindResult = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, len) } }
         guard bindResult == 0 else { let e = errno; close(fd); throw HookServerError.posix("bind", e) }
         chmod(socketPath, 0o600)
-        guard listen(fd, 64) == 0 else { let e = errno; close(fd); throw HookServerError.posix("listen", e) }
+        var st = stat()
+        boundInode = stat(socketPath, &st) == 0 ? st.st_ino : 0
+        // A full backlog refuses the connection outright on macOS, and the status line shares this socket.
+        guard listen(fd, 256) == 0 else { let e = errno; close(fd); throw HookServerError.posix("listen", e) }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
 
         listenFD = fd
@@ -57,9 +94,15 @@ public final class HookServer: @unchecked Sendable {
 
     public func stop() {
         lock.lock(); defer { lock.unlock() }
+        watchdog?.cancel(); watchdog = nil
         acceptSource?.cancel()
         acceptSource = nil
-        if listenFD >= 0 { listenFD = -1; unlink(socketPath) }
+        if listenFD >= 0 {
+            listenFD = -1
+            // Only our own socket: the path may by now belong to another instance.
+            var st = stat()
+            if stat(socketPath, &st) == 0, st.st_ino == boundInode { unlink(socketPath) }
+        }
         continuation.finish()
     }
 
@@ -74,7 +117,10 @@ public final class HookServer: @unchecked Sendable {
     private func readAll(from fd: Int32) {
         defer { close(fd) }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
-        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        // Reads stay on the accept queue so events keep the order they connected in: `/clear` sends a
+        // `SessionEnd` and a `SessionStart` ten milliseconds apart. The helper writes the moment it
+        // connects, so one second is generous, and it bounds what a stalled helper costs everyone else.
+        var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
