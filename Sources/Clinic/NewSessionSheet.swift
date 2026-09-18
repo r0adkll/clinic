@@ -42,7 +42,12 @@ struct NewSessionSheet: View {
         .frame(width: Metrics.width)
         .overlay { if dropTargeted { dropOverlay } }
         .dropDestination(for: URL.self) { urls, _ in
-            guard let folder = urls.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }) else { return false }
+            guard let folder = urls.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }) else {
+                // A repository's web address: clone it, then carry on to its composer (ADR-168).
+                guard let remote = CloneRequest.remote(in: urls) else { return false }
+                CloneRequest.post(CloneRequest(url: remote, continueToSession: true))
+                return true
+            }
             startInFolder(folder.path)
             return true
         } isTargeted: { dropTargeted = $0 }
@@ -242,6 +247,9 @@ struct NewSessionSheet: View {
             Button { chooseFolder() } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
                 .controlSize(.large)
                 .help("Start in a folder that isn't a project yet. Dropping one on this sheet works too.")
+            Button { CloneRequest.post(CloneRequest(continueToSession: true)) } label: { Label("Clone…", systemImage: "square.and.arrow.down.on.square") }
+                .controlSize(.large)
+                .help("Start in a repository that isn't on this Mac yet: clone it from a URL")
             Spacer(minLength: 8)
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction).controlSize(.large)

@@ -124,15 +124,12 @@ private struct WaitingItem: Identifiable {
 /// New Session, New Chat, New Shell, Add Project: four across, two by two when the pane is narrow.
 private struct StartActions: View {
     @Environment(TabStore.self) private var tabs
-    @Environment(SessionStore.self) private var sessions
 
     var body: some View {
         let newSession = HomeActionCard(symbol: "square.and.pencil", title: "New Session", action: .newSession) { tabs.startNewSession() }
         let newChat = HomeActionCard(symbol: "bubble.left.and.bubble.right", title: "New Chat", action: .newChat) { tabs.newChat() }
         let newShell = HomeActionCard(symbol: "terminal", title: "New Shell", action: .newShell) { tabs.newShell() }
-        let addProject = HomeActionCard(symbol: "folder.badge.plus", title: "Add Project…", action: nil) {
-            if let path = ProjectFolderPicker.choose() { sessions.addProject(path) }
-        }
+        let addProject = HomeAddProjectCard()
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) { newSession; newChat; newShell; addProject }
             VStack(spacing: 12) {
@@ -291,6 +288,8 @@ private struct FirstLaunchHome: View {
                 Button("Choose Folder…") { if let path = ProjectFolderPicker.choose() { sessions.addProject(path) } }
                     .buttonStyle(.borderedProminent)
                     .padding(.top, 4)
+                Button("Or clone one from a URL…") { CloneRequest.post() }
+                    .buttonStyle(.plain).font(.callout).foregroundStyle(Color.accent)
             }
             .padding(.horizontal, 24).padding(.top, 34).padding(.bottom, 28)
             .frame(maxWidth: 560)
@@ -313,6 +312,8 @@ private struct FirstLaunchHome: View {
         .dropDestination(for: URL.self) { urls, _ in
             let folders = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
             for url in folders { sessions.addProject(url.path) }
+            // A repository's address dragged out of a browser: not here yet, so it opens the Clone sheet (ADR-168).
+            if folders.isEmpty, let remote = CloneRequest.remote(in: urls) { CloneRequest.post(CloneRequest(url: remote)); return true }
             return !folders.isEmpty
         } isTargeted: { targeted = $0 }
     }
@@ -345,26 +346,56 @@ private struct HomeActionCard: View {
     @State private var hovering = false
 
     var body: some View {
-        let chord = action.flatMap { bindings.chord(for: $0) }
         Button(action: perform) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top) {
-                    AccentTile(symbol: symbol, size: 30, glyph: 15)
-                    Spacer(minLength: 4)
-                    if let chord { KeyCap(chord.display) }
-                }
-                Spacer(minLength: 8)
-                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-            }
-            .padding(14)
-            .frame(minWidth: 128, maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .leading)
-            .background(Color.primary.opacity(hovering ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(hovering ? 0.12 : 0.07)))
-            .contentShape(Rectangle())
+            HomeCardFace(symbol: symbol, title: title, chord: action.flatMap { bindings.chord(for: $0) }?.display, hovering: hovering)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(title.replacingOccurrences(of: "…", with: "") + (action.map { bindings.hint($0) } ?? ""))
+    }
+}
+
+/// What a start card looks like, whether a click acts or opens a menu.
+private struct HomeCardFace: View {
+    let symbol: String
+    let title: String
+    var chord: String? = nil
+    let hovering: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                AccentTile(symbol: symbol, size: 30, glyph: 15)
+                Spacer(minLength: 4)
+                if let chord { KeyCap(chord) }
+            }
+            Spacer(minLength: 8)
+            Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+        }
+        .padding(14)
+        .frame(minWidth: 128, maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .leading)
+        .background(Color.primary.opacity(hovering ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(hovering ? 0.12 : 0.07)))
+        .contentShape(Rectangle())
+    }
+}
+
+/// Add Project opens the same two choices as the sidebar's control (ADR-168): a folder, or a clone.
+private struct HomeAddProjectCard: View {
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            AddProjectMenuItems()
+        } label: {
+            HomeCardFace(symbol: "folder.badge.plus", title: "Add Project…", hovering: hovering)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .onHover { hovering = $0 }
+        .help("Add a project: a folder, or a repository cloned from a URL")
+        .accessibilityLabel("Add Project")
     }
 }
 

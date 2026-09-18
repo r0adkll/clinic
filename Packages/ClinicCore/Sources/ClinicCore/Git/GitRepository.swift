@@ -398,18 +398,24 @@ enum GitProcess {
         }
     }
 
-    private static func runSync(_ args: [String], in directory: String, stdin: Data?, environment: [String: String]) -> Result {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = ["git", "-C", directory] + args
+    /// What every git subprocess runs under: the tool `PATH` (ADR-086), the C locale so stderr can be
+    /// classified, and no terminal prompt, which would hang a process that has no terminal.
+    static func environment(adding extra: [String: String] = [:]) -> [String: String] {
         var env = ProcessEnvironment.withToolPaths()
         env["LANG"] = "C"
         env["LC_ALL"] = "C"
         env["GIT_OPTIONAL_LOCKS"] = "0"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_PAGER"] = "cat"
-        for (k, v) in environment { env[k] = v }
-        p.environment = env
+        for (k, v) in extra { env[k] = v }
+        return env
+    }
+
+    private static func runSync(_ args: [String], in directory: String, stdin: Data?, environment: [String: String]) -> Result {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        p.arguments = ["git", "-C", directory] + args
+        p.environment = Self.environment(adding: environment)
 
         let out = Pipe(), err = Pipe()
         p.standardOutput = out

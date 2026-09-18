@@ -43,6 +43,7 @@ struct RootView: View {
         .sheet(item: $detailsFor) { SessionDetailsSheet(summary: $0) }
         .sheet(item: $iconProject) { GenerateIconSheet(target: $0) }
         .sheet(item: $pullProject) { PullSheet(target: $0) }
+        .modifier(CloneRouting(isActive: isActive, showNewSession: $showNewSession))
         .sheet(item: $runSheet) { RunSheet(request: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .clinicRunSheet)) { n in
             guard isActive, let request = n.object as? RunSheetRequest else { return }
@@ -87,6 +88,27 @@ struct RootView: View {
         if let screen = window.screen { return screen.title }
         if window.editingDraft != nil { return "New session" }
         return tabs.selectedTab(in: window)?.title ?? "Clinic"
+    }
+}
+
+/// Presents the Clone sheet (ADR-168). Its own modifier because `RootView.body` is already as long
+/// a chain as the type checker will take.
+private struct CloneRouting: ViewModifier {
+    let isActive: Bool
+    @Binding var showNewSession: Bool
+    @State private var request: CloneRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $request) { CloneSheet(request: $0) }
+            .onReceive(NotificationCenter.default.publisher(for: .clinicCloneProject)) { n in
+                guard isActive else { return }
+                let asked = n.object as? CloneRequest ?? CloneRequest()
+                // Asked for from the New Session sheet: one sheet at a time, so that one leaves first.
+                guard showNewSession else { request = asked; return }
+                showNewSession = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { request = asked }
+            }
     }
 }
 

@@ -70,15 +70,11 @@ struct SidebarView: View {
                 .disabled(!canExpand)
             SessionRowStyleMenu(style: $rowStyle)
             Divider().frame(height: 14).padding(.horizontal, 4)
-            ToolbarIcon("folder.badge.plus", help: "Add project folder") { addProject() }
+            AddProjectMenu()
         }
         // 12 pt above, 4 below: the extra 8 pt is what separates the destinations above from the
         // project list this row heads, which it otherwise sat as tight against as a fourth nav row.
         .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
-    }
-
-    private func addProject() {
-        if let path = ProjectFolderPicker.choose() { sessions.addProject(path) }
     }
 
     private var sessionList: some View {
@@ -537,6 +533,46 @@ struct RowAction: View {
 
 /// A sidebar toolbar button: secondary until hovered, tertiary when there is nothing for it to do,
 /// and latched — accent glyph on an accent wash — while its mode is on (ADR-109).
+/// The sidebar's add-project control (ADR-168): a folder already on this Mac, or a repository that is
+/// not here yet. `ToolbarIcon`'s metrics, as a menu.
+struct AddProjectMenu: View {
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            AddProjectMenuItems()
+        } label: {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(hovering ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(.secondary))
+                .frame(width: 28, height: 24)
+                .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Add a project: a folder, or a repository cloned from a URL")
+        .accessibilityLabel("Add project")
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The two ways a project arrives, shared by every Add Project menu.
+struct AddProjectMenuItems: View {
+    @Environment(SessionStore.self) private var sessions
+
+    var body: some View {
+        Button { if let path = ProjectFolderPicker.choose() { sessions.addProject(path) } } label: {
+            Label("Add Folder…", systemImage: "folder.badge.plus")
+        }
+        Button { CloneRequest.post() } label: {
+            Label("Clone from URL…", systemImage: "square.and.arrow.down.on.square")
+        }
+    }
+}
+
 struct ToolbarIcon: View {
     @Environment(\.isEnabled) private var isEnabled
     let systemName: String

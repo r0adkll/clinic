@@ -4449,3 +4449,27 @@ no hook did"; a second instance on the same directory came up on `hook-65022.soc
 the next launch swept a killed instance's files. The smoke runs wrote the window and split frames into the real
 defaults domain; both were written back. They left one short transcript under the clinic project.
 Not driven in the app: `/clear`, the permission title, the transcript witness.
+
+## 2026-09-18 — Projects can be cloned from a git URL (ADR-168)
+User: "It would be nice if we could import projects from git (ssh/https) urls".
+
+Every Add Project ended in one folder picker, so a repository not on this Mac meant a trip to a terminal. Now
+there is a Clone sheet in the manner of ADR-165's Pull sheet.
+
+Built:
+- `GitRemoteURL` (ClinicCore): parses https, ssh, git and scp-like URLs, `git clone …` lines, bare
+  `host/owner/repo` and browser addresses; refuses leading `-`, `ext::`, `file://`. `sshProbeCommand` only for
+  plain-word users and hosts, because it is typed into a shell.
+- `GitClone` (ClinicCore): `run` with streamed `GitCloneProgress`, cancellation by `SIGTERM`, `GitCloneFailure`
+  classifier, `destination(at:)`, `commonParent(of:)`. `GitProcess.environment` is now shared.
+- `CloneSheet` with form, cloning, done and refused states; `CloneRouting` presents it.
+- `AddProjectMenu` in the sidebar and a menu card on the home screen (*Add Folder…*, *Clone from URL…*), a link
+  on first launch, *Clone…* in the New Session sheet, two File menu items, and web-address drops.
+- `-ClinicCloneOnLaunch`, `-ClinicCloneStartOnLaunch`, `-ClinicCloneDirectory`.
+
+16 new tests (parser, progress, classifier, destination, and real clones from a local bare remote, including
+cancel). 580 core tests pass and the app builds. The fixture commit needs `commit.gpgsign=false`: without it
+the test waited 60 s on the signing prompt and failed. Smoke instance on `~/Library/Caches/clinic-cl` (deleted):
+real HTTPS and SSH clones from github.com, a missing repository, *Edit…*, *already a project*, both menus.
+`ClinicCloneDirectory` was written to the real defaults domain and deleted; the domain diffed identical
+afterwards. Not driven: *Stop* in the app, the New Session hand-off, the drops, a host key refusal.

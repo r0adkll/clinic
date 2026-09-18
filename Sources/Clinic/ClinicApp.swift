@@ -271,6 +271,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { try? await Task.sleep(for: .seconds(1.5)); NotificationCenter.default.post(name: .clinicGitPull, object: path) }
         }
 
+        // `-ClinicCloneOnLaunch <url>` (ADR-168) opens the Clone sheet on that URL (`YES` for an empty one),
+        // and `-ClinicCloneStartOnLaunch YES` presses Clone, so each outcome can be read without a click.
+        // `-ClinicCloneDirectory <dir>` seeds where it clones into.
+        if let url = UserDefaults.standard.string(forKey: "ClinicCloneOnLaunch"), !url.isEmpty {
+            let start = UserDefaults.standard.bool(forKey: "ClinicCloneStartOnLaunch")
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                CloneRequest.post(CloneRequest(url: url == "YES" ? "" : url, autoStart: start))
+            }
+        }
+
         // Hidden smoke-test keys (ADR-166): `-ClinicSessionOnLaunch <dir> -ClinicSessionPrompt <text>` starts
         // a session with a first prompt and `-ClinicSessionModel <alias>` picks its model.
         // `-ClinicInterruptAfter <seconds>` then sends it Ctrl-C: an interrupted turn fires no hook, so this
@@ -678,6 +689,9 @@ struct ClinicCommands: Commands {
             Button("New Shell") { tabs.newShell() }.keyboardShortcut(key(.newShell))
             Button("New Window") { tabs.openNewWindow() }.keyboardShortcut(key(.newWindow))
             Divider()
+            Button("Add Project Folder…") { if let path = ProjectFolderPicker.choose() { sessions.addProject(path) } }
+            Button("Clone Repository…") { CloneRequest.post() }
+            Divider()
             Button("Close Tab") { tabs.closeFront() }.keyboardShortcut(key(.closeTab)).disabled(tabs.selectedTab == nil && tabs.editingDraft == nil)
         }
         CommandMenu("Session") {
@@ -784,6 +798,8 @@ extension Notification.Name {
     static let clinicTaskSource = Notification.Name("com.r0adkll.clinic.taskSource")
     static let clinicGenerateIcon = Notification.Name("com.r0adkll.clinic.generateIcon")
     static let clinicGitPull = Notification.Name("com.r0adkll.clinic.gitPull")
+    /// Object: a `CloneRequest`, or nil for an empty sheet (ADR-168).
+    static let clinicCloneProject = Notification.Name("com.r0adkll.clinic.cloneProject")
     static let clinicOpenWindow = Notification.Name("com.r0adkll.clinic.openWindow")
     static let clinicOpenSettings = Notification.Name("com.r0adkll.clinic.openSettings")
 }
