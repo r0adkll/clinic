@@ -139,6 +139,10 @@ final class MCPShim {
     /// produce a valid `initialize` result and exit cleanly (ADR-056).
     static let fallbackInstructions = "Tools provided by Clinic, the macOS app hosting this session. Use set_session_title once you know what the session is about. Use notify_user when you need the user's attention."
 
+    /// The shim ships in Clinic.app's `Contents/MacOS`, so `Bundle.main` is the app and this is the one
+    /// version in `Version.xcconfig` (ADR-153). Run loose from a build folder it has no plist to read.
+    static let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+
     func instructions() -> String {
         guard let r = relay(method: "instructions", params: [:]),
               let result = r["result"] as? [String: Any],
@@ -155,7 +159,7 @@ final class MCPShim {
             send(JSONRPC.response(id: id ?? NSNull(), result: [
                 "protocolVersion": requested,
                 "capabilities": ["tools": ["listChanged": false]],
-                "serverInfo": ["name": "clinic", "version": "0.1.0"],
+                "serverInfo": ["name": "clinic", "version": Self.appVersion],
                 "instructions": instructions(),
             ]))
         case "notifications/initialized", "notifications/cancelled":

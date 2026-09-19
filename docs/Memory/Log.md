@@ -4473,3 +4473,29 @@ the test waited 60 s on the signing prompt and failed. Smoke instance on `~/Libr
 real HTTPS and SSH clones from github.com, a missing repository, *Edit…*, *already a project*, both menus.
 `ClinicCloneDirectory` was written to the real defaults domain and deleted; the domain diffed identical
 afterwards. Not driven: *Stop* in the app, the New Session hand-off, the drops, a host key refusal.
+
+## 2026-09-19 — Preparing 0.2.0 (ADR-153)
+User: "I want to prepare the next release for Clinic, 0.2.0", then "Lets do the version bump, hook string fix,
+and log entry".
+
+Took stock first. 18 first-parent commits since the `0.1.0` tag (ADR-154 to ADR-168), tree clean, CI green on
+`0378d60`. `scripts/publish --dry-run --yes` passed `main`, `gh`, the Developer ID certificate and the
+`clinic-notary` profile, and stopped only at "tag 0.1.0 already exists". The tap's README regenerates itself
+from the cask by its own workflow, so a release need not touch it.
+
+Done:
+- `Version.xcconfig`: `MARKETING_VERSION` 0.1.0 → **0.2.0**.
+- `clinic-hook` said `"version": "0.1.0"` in its MCP `serverInfo`, a second copy of the version that ADR-153
+  exists to prevent. It now reads `CFBundleShortVersionString` from `Bundle.main`: the shim is embedded in
+  `Clinic.app/Contents/MacOS`, so `Bundle.main` is the app. No build settings changed. Run loose from a build
+  folder there is no plist and it says `0.0.0`.
+
+Verified: `make build` succeeds and the Debug plist reads 0.2.0. An `initialize` request piped to the embedded
+shim, with a socket path that does not exist so the live app was not involved, answered
+`serverInfo.version` `0.2.0`; the loose binary answered `0.0.0`.
+
+Not done, for the user at the keyboard: `make publish` (build, notarize, smoke test, notes, tag, Release,
+cask). Worth doing in the smoke test: the paths the last two entries left undriven (*Stop* during a clone,
+the New Session hand-off, URL drops, `/clear`, the transcript witness). The README hero images date from
+2026-09-16 and predate the Pull, Clone and merge box work; `make screenshots` re-shoots them. The backlog's
+"Before tagging 0.1.0" section is stale.
