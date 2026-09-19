@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Guided, interactive release of Clinic from main (ADR-153).
+Guided, interactive release of Clinic from main (ADR-153, ADR-169).
 
-The version being released is MARKETING_VERSION in Version.xcconfig. The script walks
-through these steps, stopping at each blocker with a concrete way to resolve it:
+The version being released is MARKETING_VERSION in Version.xcconfig. Name a version and the
+script writes it there and commits the bump itself, once preflight has passed; name none and it
+releases the version the file already holds. The script walks through these steps, stopping at
+each blocker with a concrete way to resolve it:
 
   1. Preflight   on main, clean tree, up to date with origin, gh authenticated, Developer ID
-                 certificate and the clinic-notary profile present, version is semver and not
-                 yet tagged or released
+                 certificate and the clinic-notary profile present, version is semver, newer
+                 than the last tag and not yet tagged or released. Then, if a version was
+                 named, Version.xcconfig is rewritten and the bump committed.
   2. Build       scripts/release.sh — archive, Developer ID export, notarize, staple, zip.
                  Output is quiet; it is captured to build/publish/*.log. A zip already built
                  for this version can be reused.
@@ -19,7 +22,9 @@ through these steps, stopping at each blocker with a concrete way to resolve it:
                  Casks/clinic.rb rewritten and pushed in r0adkll/homebrew-tap
 
 Usage:
-  scripts/publish                  # the guided flow
+  scripts/publish                  # the guided flow, for the version in Version.xcconfig
+  scripts/publish 0.3.0            # bump Version.xcconfig to 0.3.0, commit, then the guided flow
+  make publish VERSION=0.3.0       # the same, through make (ARGS="--dry-run" passes flags)
   scripts/publish --reuse-build    # preselect reusing build/release/Clinic-<version>.zip
   scripts/publish --skip-smoke     # don't launch the app
   scripts/publish --notes FILE     # release notes from a file instead of the commit list
@@ -279,6 +284,43 @@ def read_version():
     return version
 
 
+def parse_version(text):
+    """A named version, checked the way the file's is. A leading "v" is a slip, not a scheme (ADR-153)."""
+    if not SEMVER_REGEX.match(text):
+        hint = f" — tags carry no 'v', try {text[1:]}" if text[:1] in "vV" and SEMVER_REGEX.match(text[1:]) else ""
+        raise Abort(f"'{text}' is not semver (MAJOR.MINOR.PATCH[-prerelease]){hint}")
+    return text
+
+
+def precedence(version):
+    """Sort key in semver's order: 0.2.0-beta.1 < 0.2.0-beta.2 < 0.2.0-rc.1 < 0.2.0 < 0.2.1."""
+    major, minor, patch, pre = SEMVER_REGEX.match(version).groups()
+    if pre is None:
+        return (int(major), int(minor), int(patch), 1, ())
+    identifiers = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre[1:].split("."))
+    return (int(major), int(minor), int(patch), 0, identifiers)
+
+
+def bump_subject(version):
+    return f"Bump the version to {version} (ADR-169)"
+
+
+BUMP_SUBJECT_REGEX = re.compile(r"^Bump the version to \S+ \(ADR-169\)$")
+
+
+def write_version(version):
+    """Rewrites the one MARKETING_VERSION line and commits only that file."""
+    text = VERSION_XCCONFIG.read_text()
+    updated, count = re.subn(r"^(MARKETING_VERSION\s*=\s*).+?\s*$", lambda m: m.group(1) + version, text, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise Abort("could not find MARKETING_VERSION in Version.xcconfig")
+    VERSION_XCCONFIG.write_text(updated)
+    if read_version() != version:
+        raise Abort(f"Version.xcconfig does not read {version} after the edit; look at the file")
+    git("add", "--", str(VERSION_XCCONFIG))
+    git("commit", "--quiet", "-m", bump_subject(version), "--", str(VERSION_XCCONFIG))
+
+
 def is_prerelease(version):
     return SEMVER_REGEX.match(version).group(4) is not None
 
@@ -302,7 +344,10 @@ def app_path():
 # =========================================================================== steps
 
 
-def step_preflight(ui, version, dry_run):
+def step_preflight(ui, version, current, dry_run):
+    """`version` is what goes out; `current` is what Version.xcconfig holds now. They differ when a
+    version was named on the command line, and the bump is the last thing preflight does — so nothing
+    is committed on a machine that could not have released it (ADR-169)."""
     header(1, f"Preflight — releasing {style(version, BOLD)}")
 
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
@@ -333,16 +378,23 @@ def step_preflight(ui, version, dry_run):
         raise Abort(f"xcrun notarytool store-credentials {NOTARY_PROFILE} --apple-id <id> --team-id <team> --password <app-specific-password>")
     ok("notary credentials work")
 
-    if tag_exists(version):
-        error(f"tag {version} already exists")
-        raise Abort("bump MARKETING_VERSION in Version.xcconfig to the version you want to release")
-    if run(["gh", "release", "view", version, "--repo", REPO], check=False).returncode == 0:
-        error(f"GitHub release {version} already exists")
-        raise Abort("bump MARKETING_VERSION in Version.xcconfig to the version you want to release")
-    ok(f"{version} is not tagged or released yet" + (" (prerelease)" if is_prerelease(version) else ""))
-
     with Spinner("fetching origin"):
         run(["git", "fetch", "--quiet", "origin", "main", "--tags"])
+
+    name_one = "name the version to release: make publish VERSION=<version>"
+    if tag_exists(version):
+        error(f"tag {version} already exists")
+        raise Abort(name_one)
+    if run(["gh", "release", "view", version, "--repo", REPO], check=False).returncode == 0:
+        error(f"GitHub release {version} already exists")
+        raise Abort(name_one)
+    last = previous_tag()
+    if last and SEMVER_REGEX.match(last) and precedence(version) <= precedence(last):
+        error(f"{version} does not come after {last}, the last release")
+        raise Abort(name_one)
+    ok(f"{version} is not tagged or released yet" + (f", and follows {last}" if last else "")
+       + (" (prerelease)" if is_prerelease(version) else ""))
+
     behind = int(git("rev-list", "--count", "HEAD..origin/main"))
     ahead = int(git("rev-list", "--count", "origin/main..HEAD"))
     if behind:
@@ -360,6 +412,14 @@ def step_preflight(ui, version, dry_run):
         block("\n".join(line[3:] for line in status.splitlines()))
         raise Abort("commit or stash the changes so the tag points at what was built")
     ok("working tree clean")
+
+    if version != current:
+        if dry_run:
+            info(f"would set MARKETING_VERSION {current} → {version} in Version.xcconfig and commit “{bump_subject(version)}”")
+        else:
+            write_version(version)
+            ahead += 1
+            ok(f"Version.xcconfig {current} → {version}, committed as “{bump_subject(version)}” (goes out with the release)")
     return ahead
 
 
@@ -504,6 +564,7 @@ def build_notes(version, prev_tag):
     lines = []   # no title line: GitHub shows the release name above the body, and the name is the version
     if prev_tag:
         subjects = git("log", "--first-parent", "--reverse", "--format=%s", f"{prev_tag}..HEAD").splitlines()
+        subjects = [s for s in subjects if not BUMP_SUBJECT_REGEX.match(s)]   # the script's own bump is not news
         lines += ["## What's Changed", "", *(f"- {s}" for s in subjects), "",
                   f"**Full Changelog**: {REPO_URL}/compare/{prev_tag}...{version}", ""]
     else:
@@ -621,6 +682,9 @@ def step_publish(ui, version, sha, notes_path, ahead, dry_run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("version", nargs="?", metavar="VERSION",
+                        help="version to release, e.g. 0.3.0: written to Version.xcconfig and committed after preflight "
+                             "(default: the version already there)")
     parser.add_argument("--reuse-build", action="store_true", help="reuse build/release/Clinic-<version>.zip if it exists")
     parser.add_argument("--skip-smoke", action="store_true", help="don't launch the app for a smoke test")
     parser.add_argument("--notes", metavar="FILE", help="release notes file (default: generated from commits)")
@@ -632,8 +696,9 @@ def main():
     try:
         if args.dry_run:
             print(style("dry run — nothing will be built, tagged, pushed or created", YELLOW))
-        version = read_version()
-        ahead = step_preflight(ui, version, args.dry_run)
+        current = read_version()
+        version = parse_version(args.version) if args.version else current
+        ahead = step_preflight(ui, version, current, args.dry_run)
         sha = step_build(ui, version, args, args.dry_run)
         step_smoke(ui, args, args.dry_run)
         notes_path = step_notes(ui, version, args, args.dry_run)

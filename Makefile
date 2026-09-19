@@ -22,8 +22,10 @@ test:
 release:
 	scripts/release.sh
 
+# make publish                    releases the version in Version.xcconfig
+# make publish VERSION=0.3.0      bumps to it and commits first (ADR-169); ARGS="--dry-run" passes flags
 publish:
-	scripts/publish
+	scripts/publish $(VERSION) $(ARGS)
 
 screenshots:
 	scripts/screenshots/run

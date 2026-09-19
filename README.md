@@ -53,7 +53,7 @@ make test         # runs the test suites
 make screenshots  # re-shoots the README and social preview images from staged sessions
 ```
 
-Releasing: bump `MARKETING_VERSION` in `Version.xcconfig`, commit, then `make publish` — a guided flow that builds and notarizes, launches the app for a smoke test, drafts the notes, tags, creates the GitHub Release and updates the Homebrew cask. `make release` alone produces the notarized zip.
+Releasing: `make publish VERSION=0.3.0` — it checks the machine can release, writes the version to `Version.xcconfig` and commits the bump, then runs a guided flow that builds and notarizes, launches the app for a smoke test, drafts the notes, tags, creates the GitHub Release and updates the Homebrew cask. Without `VERSION` it releases the version already in the file. `make release` alone produces the notarized zip.
 
 ## Documentation
 

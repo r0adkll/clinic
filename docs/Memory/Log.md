@@ -4499,3 +4499,18 @@ cask). Worth doing in the smoke test: the paths the last two entries left undriv
 the New Session hand-off, URL drops, `/clear`, the transcript witness). The README hero images date from
 2026-09-16 and predate the Pull, Clone and merge box work; `make screenshots` re-shoots them. The backlog's
 "Before tagging 0.1.0" section is stale.
+
+### Later the same day — publish can be told the version (ADR-169)
+User, mid-session: "it would be nice if we had a script or make command to update and publish to a specific
+version, automatically making the edits and committing them b4 cutting the release".
+
+`scripts/publish` takes an optional `VERSION` and `make publish VERSION=0.3.0 ARGS="--dry-run"` passes it
+through. The bump is the last act of preflight, so nothing is committed on a machine that could not release:
+the one line in `Version.xcconfig` is rewritten, re-read, and committed alone as
+`Bump the version to <version> (ADR-169)`, which goes to origin with the tag. Preflight now also refuses a
+version that does not come after the last tag in semver order, fetches before it looks at tags, and the
+generated notes skip the bump subject. README, the design tree and the comment in `Version.xcconfig` say so.
+
+Verified by module load (ordering, refusals), dry runs through `make` in the repo, and a real bump in a
+throwaway clone with `step_preflight` called directly so no build ran; details in the ADR. Not run: a whole
+release through the argument. 0.2.0 is already bumped, so cutting it is plain `make publish`.

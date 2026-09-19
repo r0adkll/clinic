@@ -1,5 +1,6 @@
 // The one place Clinic's version lives (ADR-153). Semantic versioning, 0.x until 1.0.
-// Bump MARKETING_VERSION here; `make publish` tags it as <MARKETING_VERSION> (no "v"), so the two never disagree.
+// `make publish VERSION=<version>` writes MARKETING_VERSION here and commits it (ADR-169), or bump it by hand;
+// either way `make publish` tags it as <MARKETING_VERSION> (no "v"), so the two never disagree.
 // CURRENT_PROJECT_VERSION is the build number: 1 for development builds, the commit count on main
 // for a release (scripts/release.sh overrides it on the command line).
 MARKETING_VERSION = 0.2.0
