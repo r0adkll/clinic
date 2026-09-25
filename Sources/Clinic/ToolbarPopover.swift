@@ -90,6 +90,9 @@ struct PopoverMenuDivider: View {
 struct PopoverMenuRow<Icon: View>: View {
     let title: String
     var subtitle: String? = nil
+    /// A subtitle with its own colours, drawn in place of `subtitle`. Given whether the row is highlighted,
+    /// so it can drop them on the accent fill, where green and red would not read.
+    var styledSubtitle: ((_ highlighted: Bool) -> Text)? = nil
     var trailing: String? = nil
     /// nil: no check column. Rows in a list that has checks all pass a value, so their titles line up.
     var checked: Bool? = nil
@@ -117,7 +120,13 @@ struct PopoverMenuRow<Icon: View>: View {
                 icon.frame(width: 16).opacity(highlighted ? 1 : 0.8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).lineLimit(1)
-                    if let subtitle {
+                    if let styledSubtitle {
+                        styledSubtitle(highlighted)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .opacity(0.7)
+                    } else if let subtitle {
                         Text(subtitle)
                             .font(.system(size: 10.5, design: .monospaced))
                             .lineLimit(1)
@@ -132,7 +141,7 @@ struct PopoverMenuRow<Icon: View>: View {
             }
             .font(.system(size: 13))
             .padding(.horizontal, 8)
-            .padding(.vertical, subtitle == nil ? 4 : 5)
+            .padding(.vertical, subtitle == nil && styledSubtitle == nil ? 4 : 5)
             .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
             .foregroundStyle(highlighted ? Color.white : Color.primary)
             .background(highlighted ? Color.accent : .clear, in: RoundedRectangle(cornerRadius: 5))

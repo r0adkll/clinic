@@ -13,6 +13,9 @@ final class SnapshotService {
     let store: SnapshotStore
     /// Bytes on disk, refreshed on demand for Preferences → Diagnostics.
     private(set) var diskUsage: Int64 = 0
+    /// Bumped each time a turn boundary has been recorded. The diff panel watches it: snapshots land
+    /// in Application Support, which its file watcher on the repository never sees (ADR-170).
+    private(set) var revision = 0
 
     /// Repo root per session, resolved once from the session's cwd. A session whose cwd is not in a
     /// repository maps to nil and is skipped for the rest of its life in this tab.
@@ -53,6 +56,7 @@ final class SnapshotService {
     private func perform(_ job: Job) async {
         guard let root = await repoRoot(for: job.session, cwd: job.cwd) else { return }
         await store.record(job.trigger, session: job.session, repoRoot: root, at: job.at)
+        revision &+= 1
     }
 
     private func repoRoot(for session: SessionID, cwd: String?) async -> String? {

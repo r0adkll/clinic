@@ -4514,3 +4514,44 @@ generated notes skip the bump subject. README, the design tree and the comment i
 Verified by module load (ordering, refusals), dry runs through `make` in the repo, and a real bump in a
 throwaway clone with `step_preflight` called directly so no build ran; details in the ADR. Not run: a whole
 release through the argument. 0.2.0 is already bumped, so cutting it is plain `make publish`.
+
+## 2026-09-24 — The Diff panel follows the last change (ADR-170)
+User: the Diff panel "almost never" shows a turn's diff, and the other scopes don't reliably show diffs either.
+
+Read against the recorded snapshots for this repo (58 sessions, 294 turns) and the unified log:
+- "Latest turn" was the newest turn, and 136 of 294 turns changed nothing (questions, *commit and push*). The
+  default view was blank in 29 of 53 sessions. The menu's `+n −n` never loaded, because `.onTapGesture` on a
+  `Menu` does not fire.
+- Branch is always empty on `main`, and Working tree is empty after every commit.
+- The panel's live snapshots and the hook snapshots raced for the scratch `index.lock`. The actor is re-entrant at
+  the git `await`. Twenty concurrent pairs failed 20 times out of 20 in a shell reproduction. The losing hook
+  snapshot meant a turn that was never opened or closed.
+- In linked worktrees the alternates pointed at `<root>/.git/objects`, which is a file path there. The log shows
+  `unable to normalize alternate object path` for the Campfire worktrees and `fatal: bad object` from Working tree.
+- The panel refreshed only on repo FSEvents, so a new or closed turn went unseen, and it did not rebind when
+  `/clear` re-keyed the tab.
+
+Built: *Latest changes* (the newest turn with a diff), eager turn stats with *no changes* marked, *Latest commit*
+on the default branch, `SnapshotStore.liveTree` with a task chain every live snapshot goes through,
+`GitRepository.diff(from:toWorktree:)` removed, stale `index.lock` recovery, alternates resolved via `gitdir:`/`commondir`,
+`SnapshotService.revision` driving panel reloads, and the panel bound on directory + session id.
+
+Verified: `make build` succeeds, and all 583 ClinicCore tests pass, 3 of them new (concurrent snapshots, stale
+lock, linked worktree). Replaying the recorded history, the new default is blank in 4 of 53 sessions, all four
+sessions that never changed a file. Not run: a smoke instance driving the panel through a live turn.
+
+## 2026-09-25 — The turn picker lists what changed (ADR-171)
+User: the turn drop-down "still shows a ton of junk that doesn't display anything".
+
+In the recorded turns, the junk was empty turns (half of most sessions) and turns the harness started, which
+were labelled `<task-notification>` or `<agent-message from=…>` even when they held the only changes. The turn
+`Menu` is now a scrolling popover of `PopoverMenuRow`s. It lists turns with changes plus the running one, with
+a second line of `#n · +a −d · files · age`. A checkbox reveals the hidden empty turns, greyed out.
+`TurnSnapshot.origin` and the new optional `detail` (a background task's `<summary>`) give those turns labels
+in words.
+
+Verified: 26 snapshot tests pass, 2 of them new (labels, filtering). `make build` succeeds. The popover's
+real rows were rendered in a throwaway harness with turns shaped like the recorded ones and screenshotted: they
+size to their content, and the empty turns collapse to one checkbox line. Not run: the popover inside the live
+app.
+Later: the counts in the second line take the header's green and red (dropped on the highlighted row), via `PopoverMenuRow.styledSubtitle`; checked in the harness.

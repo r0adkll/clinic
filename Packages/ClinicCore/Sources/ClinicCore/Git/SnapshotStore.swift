@@ -8,6 +8,9 @@ import os
 /// One actor for the whole app: a snapshot is a `git add -A` against a shared index file, so two of
 /// them running at once on the same repository would corrupt it. Serialising across repositories as
 /// well costs nothing — a snapshot is 20–45 ms — and removes a whole class of bug.
+///
+/// Being an actor is not what serialises them: an actor is re-entrant at every `await`, and the git
+/// call is one. `exclusive` is (ADR-170). Every live snapshot, the diff panel's included, goes through it.
 public actor SnapshotStore {
     private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "snapshots")
 
@@ -18,6 +21,8 @@ public actor SnapshotStore {
 
     private var cache: [Key: SessionSnapshots] = [:]
     private let fm = FileManager.default
+    /// The last scratch-index write queued; the next waits for it (see `exclusive`).
+    private var tail: Task<Void, Never>?
 
     private struct Key: Hashable { var repoKey: String; var sessionId: SessionID }
 
@@ -100,7 +105,8 @@ public actor SnapshotStore {
         if s.openTurn != nil { s.turns[s.turns.count - 1].headTree = tree; s.turns[s.turns.count - 1].endedAt = date }
         if s.baselineTree == nil { s.baselineTree = tree; s.baselineAt = date }
         let turn = TurnSnapshot(sessionId: session, repoRoot: repoRoot, index: s.turns.count + 1,
-                                prompt: Self.firstLine(prompt), startedAt: date, baseTree: tree)
+                                prompt: Self.firstLine(prompt), detail: Self.notificationSummary(prompt),
+                                startedAt: date, baseTree: tree)
         s.turns.append(turn)
         save(s)
         return turn
@@ -128,11 +134,31 @@ public actor SnapshotStore {
 
     private func snapshot(_ repoRoot: String) async -> String? {
         do {
-            return try await GitRepository(root: repoRoot).writeSnapshotTree(scratch(for: repoRoot))
+            return try await liveTree(repoRoot: repoRoot)
         } catch {
             Self.log.error("snapshot of \(repoRoot, privacy: .public) failed: \(error, privacy: .public)")
             return nil
         }
+    }
+
+    /// A tree of the working tree as it is right now. The one way anything in the app writes a snapshot.
+    public func liveTree(repoRoot: String) async throws -> String {
+        let repo = GitRepository(root: repoRoot)
+        let scratch = scratch(for: repoRoot)
+        return try await exclusive { try await repo.writeSnapshotTree(scratch) }
+    }
+
+    /// Runs `work` after every write queued before it. Without this a hook's snapshot and the diff
+    /// panel's refresh raced for the scratch `index.lock`; the loser failed, and a turn whose
+    /// `UserPromptSubmit` or `Stop` snapshot lost was never opened or never closed (ADR-170).
+    private func exclusive<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task {
+            await previous?.value
+            return try await work()
+        }
+        tail = Task { _ = try? await task.value }
+        return try await task.value
     }
 
     static func firstLine(_ prompt: String?) -> String? {
@@ -143,23 +169,37 @@ public actor SnapshotStore {
         return line.count > 200 ? String(line.prefix(200)) + "…" : line
     }
 
+    /// The `<summary>` of a `<task-notification>` prompt, e.g. `Background command "make build" completed
+    /// (exit code 0)`. nil for any other prompt.
+    static func notificationSummary(_ prompt: String?) -> String? {
+        guard let prompt, prompt.hasPrefix("<task-notification"),
+              let open = prompt.range(of: "<summary>"),
+              let close = prompt.range(of: "</summary>", range: open.upperBound..<prompt.endIndex) else { return nil }
+        return firstLine(String(prompt[open.upperBound..<close.lowerBound]))
+    }
+
     // MARK: Diffing
 
     /// The diff a turn produced: tree to tree once it has stopped, tree to live working tree while
     /// it is still running.
     public func diff(turn: TurnSnapshot) async throws -> UnifiedDiff {
-        let repo = GitRepository(root: turn.repoRoot)
-        let scratch = scratch(for: turn.repoRoot)
         if let head = turn.headTree {
-            return try await repo.diff(from: turn.baseTree, to: head, scratch: scratch)
+            return try await GitRepository(root: turn.repoRoot).diff(from: turn.baseTree, to: head, scratch: scratch(for: turn.repoRoot))
         }
-        return try await repo.diff(from: turn.baseTree, toWorktree: scratch)
+        return try await diff(from: turn.baseTree, toWorktreeOf: turn.repoRoot)
     }
 
     /// Everything this attach has changed: the session baseline against the live working tree.
     public func diffSinceSessionStart(_ session: SessionID, repoRoot: String) async throws -> UnifiedDiff? {
         guard let baseline = snapshots(session: session, repoRoot: repoRoot).baselineTree else { return nil }
-        return try await GitRepository(root: repoRoot).diff(from: baseline, toWorktree: scratch(for: repoRoot))
+        return try await diff(from: baseline, toWorktreeOf: repoRoot)
+    }
+
+    /// A tree (a snapshot, or a commit's tree reached through alternates) against the working tree
+    /// as it is right now.
+    public func diff(from base: String, toWorktreeOf repoRoot: String) async throws -> UnifiedDiff {
+        let head = try await liveTree(repoRoot: repoRoot)
+        return try await GitRepository(root: repoRoot).diff(from: base, to: head, scratch: scratch(for: repoRoot))
     }
 
     // MARK: Retention

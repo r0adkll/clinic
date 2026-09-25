@@ -48,10 +48,11 @@ final class DiffPanelModel {
     // MARK: Selection
 
     var scope: Scope = .turn { didSet { if scope != oldValue { reloadDiff() } } }
-    /// nil means "the newest turn", so a running session keeps following the live one.
+    /// nil means "the newest turn that changed something" (ADR-170), so a running session keeps
+    /// following the live one and a question or a commit turn does not blank the panel.
     var selectedTurnId: String? { didSet { if selectedTurnId != oldValue { reloadDiff() } } }
     var workingSide: WorkingSide = .all { didSet { if workingSide != oldValue { reloadDiff() } } }
-    /// nil means "every commit on the branch".
+    /// nil means "every commit on the branch", or on the default branch "the newest commit".
     var selectedCommit: String? { didSet { if selectedCommit != oldValue { reloadDiff() } } }
 
     // MARK: Content
@@ -59,6 +60,9 @@ final class DiffPanelModel {
     private(set) var repo: GitRepository?
     private(set) var status: GitStatusSnapshot?
     private(set) var commits: [GitCommit] = []
+    /// What the Branch scope diffs from; nil on the default branch, where there is nothing to diff
+    /// the branch against and the scope shows the newest commit instead (ADR-170).
+    private(set) var branchBase: String?
     /// Newest first, as the turn menu lists them.
     private(set) var turns: [TurnSnapshot] = []
     private(set) var files: [UnifiedDiffFile] = []
@@ -69,8 +73,10 @@ final class DiffPanelModel {
     private(set) var isLoading = false
     private(set) var isBound = false
     private(set) var error: String?
-    /// `+n −n` for a turn, filled in lazily when the menu asks (a patch per turn would be wasteful).
+    /// `+n −n` per closed turn, numstat only, filled in whenever the turns are re-read.
     private(set) var turnStats: [String: DiffStat] = [:]
+    /// The turn "Latest changes" resolved to on the last load.
+    private(set) var followedTurnId: String?
 
     private var sessionId: SessionID?
     private var snapshots: SnapshotService?
@@ -86,10 +92,10 @@ final class DiffPanelModel {
                  deletions: files.reduce(0) { $0 + $1.deletions })
     }
 
-    /// The turn the panel is showing: the pinned selection, else the newest.
+    /// The turn the panel is showing: the pinned selection, else the one "Latest changes" found.
     var selectedTurn: TurnSnapshot? {
-        if let id = selectedTurnId { return turns.first { $0.id == id } }
-        return turns.first
+        guard let id = selectedTurnId ?? followedTurnId else { return nil }
+        return turns.first { $0.id == id }
     }
 
     var selectedCommitSummary: GitCommit? {
@@ -101,7 +107,9 @@ final class DiffPanelModel {
     private var followsWorktree: Bool {
         switch scope {
         case .session, .workingTree: true
-        case .turn: selectedTurn?.isInFlight ?? false
+        // Following: the newest turn may be in flight and not yet have changed anything, so the
+        // shown turn is an older one, and the first write of the live turn must still move the panel.
+        case .turn: selectedTurnId == nil ? (turns.first?.isInFlight ?? false) : (selectedTurn?.isInFlight ?? false)
         case .branch: false
         }
     }
@@ -120,7 +128,7 @@ final class DiffPanelModel {
         }
         stopWatching()
         repo = found
-        status = nil; commits = []; turns = []; files = []; error = nil
+        status = nil; commits = []; branchBase = nil; turns = []; followedTurnId = nil; files = []; error = nil
         turnStats.removeAll()
         guard let found else { return }
         let root = found.root
@@ -157,6 +165,7 @@ final class DiffPanelModel {
         do {
             status = try await repo.status()
             commits = try await repo.commits(limit: 100)
+            branchBase = await repo.branchBaseRef()
             error = nil
         } catch {
             self.error = "\(error)"
@@ -166,6 +175,7 @@ final class DiffPanelModel {
             turns = await snapshots.snapshots(for: sessionId, repoRoot: root).recentTurns
             // A turn pinned by id that no longer exists (snapshots cleared) falls back to the newest.
             if let id = selectedTurnId, !turns.contains(where: { $0.id == id }) { selectedTurnId = nil }
+            loadTurnStats()
         }
         // Decided after the turns refresh, not before: the first file change of a new turn arrives while
         // `turns` does not hold that turn yet, so `followsWorktree` read false and the diff stayed empty until
@@ -197,8 +207,20 @@ final class DiffPanelModel {
     private func currentDiff(_ repo: GitRepository) async throws -> UnifiedDiff? {
         switch scope {
         case .turn:
-            guard let turn = selectedTurn, let snapshots else { return nil }
-            return try await snapshots.store.diff(turn: turn)
+            guard let snapshots else { return nil }
+            if let id = selectedTurnId {
+                guard let turn = turns.first(where: { $0.id == id }) else { return nil }
+                return try await snapshots.store.diff(turn: turn)
+            }
+            // Newest first. A closed turn whose trees match is skipped without running git, so this
+            // costs one diff unless the live turn has not changed anything yet.
+            for turn in turns where !turn.isEmpty {
+                let diff = try await snapshots.store.diff(turn: turn)
+                guard !Task.isCancelled else { return nil }
+                if !diff.files.isEmpty { followedTurnId = turn.id; return diff }
+            }
+            followedTurnId = nil
+            return nil
         case .session:
             guard let sessionId, let snapshots else { return nil }
             let root = repo.root
@@ -213,11 +235,16 @@ final class DiffPanelModel {
                 guard let snapshots else { return try await repo.diffAll(staged: false) }
                 let root = repo.root
                 guard let head = try? await repo.tree(of: "HEAD"), !head.isEmpty else { return try await repo.diffAll(staged: false) }
-                return try await repo.diff(from: head, toWorktree: await snapshots.store.scratch(for: root))
+                return try await snapshots.store.diff(from: head, toWorktreeOf: root)
             }
         case .branch:
             if let sha = selectedCommit { return try await repo.diff(commit: sha) }
-            guard let base = await repo.branchBaseRef() else { return UnifiedDiff() }
+            // On the default branch "the branch against its base" is always empty; the newest commit
+            // is what a reader there wants, and is what a trunk-based repo's last turn committed.
+            guard let base = branchBase else {
+                guard let newest = commits.first else { return UnifiedDiff() }
+                return try await repo.diff(commit: newest.sha)
+            }
             return try await repo.diff(branchFrom: base)
         }
     }
@@ -229,11 +256,12 @@ final class DiffPanelModel {
         Self.log.info("smokeSelect: \(path, privacy: .public) of \(self.files.count, privacy: .public) files")
     }
 
-    /// Fills `turnStats` for the turns the menu is about to show. Numstat only, never a patch.
-    func loadTurnStats() {
+    /// Fills `turnStats` for closed turns not yet counted. Numstat only, never a patch; a turn whose
+    /// trees match needs no git at all, and a closed turn's total never changes, so each is read once.
+    private func loadTurnStats() {
         guard let repo, let snapshots else { return }
         let root = repo.root
-        let missing = turns.filter { turnStats[$0.id] == nil }
+        let missing = turns.filter { turnStats[$0.id] == nil && !$0.isInFlight && !$0.isEmpty }
         guard !missing.isEmpty else { return }
         Task { [weak self] in
             let scratch = await snapshots.store.scratch(for: root)
@@ -253,14 +281,16 @@ final class DiffPanelModel {
         switch scope {
         case .turn:
             if sessionId == nil { return "Only sessions Clinic started record turns." }
-            return turns.isEmpty ? "No turns recorded yet. The next prompt in this session starts one."
-                                 : "This turn changed nothing on disk."
+            if turns.isEmpty { return "No turns recorded yet. The next prompt in this session starts one." }
+            return selectedTurnId == nil ? "No turn in this session has changed a file yet."
+                                         : "This turn changed nothing on disk."
         case .session:
             return sessionId == nil ? "Only sessions Clinic started record turns." : "Nothing has changed since this session started."
         case .workingTree:
             return workingSide == .staged ? "Nothing is staged." : "The working tree is clean."
         case .branch:
-            return selectedCommit == nil ? "This branch matches its base." : "This commit changed nothing."
+            if selectedCommit == nil, branchBase == nil, commits.isEmpty { return "This branch has no commits yet." }
+            return selectedCommit == nil && branchBase != nil ? "This branch matches its base." : "This commit changed nothing."
         }
     }
 }

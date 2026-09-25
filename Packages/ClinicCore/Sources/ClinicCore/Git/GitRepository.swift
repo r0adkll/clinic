@@ -320,6 +320,9 @@ public actor GitRepository {
     ///
     /// The scratch index is kept between calls on purpose: it carries git's stat cache, which is
     /// what makes a repeat snapshot a stat walk rather than a re-hash of every file.
+    ///
+    /// Two of these against one scratch index fight over its `index.lock`, and one fails. Callers go
+    /// through `SnapshotStore`, which runs them one at a time (ADR-170); tests call this directly.
     public func writeSnapshotTree(_ scratch: GitObjectScratch) async throws -> String {
         try scratch.prepare()
         let env = scratch.environment(repoRoot: root)
@@ -327,6 +330,9 @@ public actor GitRepository {
         let add = await GitProcess.run(["add", "-A", "."], in: root, environment: env)
         if add.status != 0 {
             // A truncated or version-mismatched index is the one failure worth retrying; drop it and rebuild.
+            // So is a lock left by a git that was killed mid-write: nothing else writes this index while
+            // the store holds it, and a stale lock would otherwise fail every snapshot from then on.
+            try? FileManager.default.removeItem(atPath: scratch.indexFile + ".lock")
             try? FileManager.default.removeItem(atPath: scratch.indexFile)
             let retry = await GitProcess.run(["add", "-A", "."], in: root, environment: env)
             guard retry.status == 0 else { throw retry.error(["add", "-A", "."]) }
@@ -361,13 +367,6 @@ public actor GitRepository {
         let env = scratch?.environment(repoRoot: root) ?? [:]
         let args = ["diff-tree", "-p", "-r", "--find-renames"] + Self.diffFlags + [base, head]
         return UnifiedDiff.parse(try await git(args, environment: env).stdoutString)
-    }
-
-    /// Diff from a snapshot tree to the working tree as it is right now, by taking a fresh snapshot
-    /// and comparing the pair. Used for the in-flight turn and every worktree-headed scope.
-    public func diff(from base: String, toWorktree scratch: GitObjectScratch) async throws -> UnifiedDiff {
-        let head = try await writeSnapshotTree(scratch)
-        return try await diff(from: base, to: head, scratch: scratch)
     }
 
     // MARK: Process plumbing

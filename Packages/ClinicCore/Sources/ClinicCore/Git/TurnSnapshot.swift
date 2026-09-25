@@ -19,9 +19,31 @@ public struct GitObjectScratch: Sendable, Hashable {
     public func environment(repoRoot: String) -> [String: String] {
         [
             "GIT_OBJECT_DIRECTORY": objectDirectory,
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES": URL(fileURLWithPath: repoRoot).appendingPathComponent(".git/objects").standardizedFileURL.path,
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": Self.repositoryObjects(repoRoot: repoRoot),
             "GIT_INDEX_FILE": indexFile,
         ]
+    }
+
+    /// Where the repository's own objects live (ADR-170). Usually `<root>/.git/objects`, but in a linked
+    /// worktree or a submodule `.git` is a *file* naming the real git dir, and a worktree's git dir names
+    /// the shared one in `commondir`. Pointing alternates at `<root>/.git/objects` there made git copy
+    /// every blob into the scratch store and fail to read `HEAD`'s tree at all (`fatal: bad object`).
+    static func repositoryObjects(repoRoot: String) -> String {
+        let dotGit = (repoRoot as NSString).appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dotGit, isDirectory: &isDirectory), !isDirectory.boolValue,
+              let pointer = try? String(contentsOfFile: dotGit, encoding: .utf8),
+              let line = pointer.split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("gitdir:") }) else {
+            return URL(fileURLWithPath: dotGit).appendingPathComponent("objects").standardizedFileURL.path
+        }
+        let gitDir = resolve(line.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespaces), against: repoRoot)
+        let common = (try? String(contentsOfFile: (gitDir as NSString).appendingPathComponent("commondir"), encoding: .utf8))
+            .map { resolve($0.trimmingCharacters(in: .whitespacesAndNewlines), against: gitDir) } ?? gitDir
+        return URL(fileURLWithPath: common).appendingPathComponent("objects").standardizedFileURL.path
+    }
+
+    private static func resolve(_ path: String, against base: String) -> String {
+        path.hasPrefix("/") ? path : (base as NSString).appendingPathComponent(path)
     }
 
     func prepare() throws {
@@ -40,17 +62,21 @@ public struct TurnSnapshot: Codable, Sendable, Hashable, Identifiable {
     public var index: Int
     /// First line of the `UserPromptSubmit` prompt, trimmed; nil when the hook carried none.
     public var prompt: String?
+    /// What a turn the harness started was about, when its prompt says (ADR-171): a background task's
+    /// `<summary>`. nil for the user's own prompts and for turns recorded before this existed.
+    public var detail: String?
     public var startedAt: Date
     public var endedAt: Date?
     public var baseTree: String
     public var headTree: String?
 
-    public init(sessionId: SessionID, repoRoot: String, index: Int, prompt: String? = nil,
+    public init(sessionId: SessionID, repoRoot: String, index: Int, prompt: String? = nil, detail: String? = nil,
                 startedAt: Date, endedAt: Date? = nil, baseTree: String, headTree: String? = nil) {
         self.sessionId = sessionId
         self.repoRoot = repoRoot
         self.index = index
         self.prompt = prompt
+        self.detail = detail
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.baseTree = baseTree
@@ -62,10 +88,27 @@ public struct TurnSnapshot: Codable, Sendable, Hashable, Identifiable {
     /// True when the turn ended having changed nothing on disk.
     public var isEmpty: Bool { headTree == baseTree }
 
-    /// What the turn menu shows: the prompt's first line, else a positional fallback.
+    /// Who started the turn. Claude Code submits a prompt of its own when a background task finishes
+    /// or a subagent hands back, and its first line is a tag, not words (ADR-171).
+    public enum Origin: Sendable { case user, backgroundTask, subagent }
+
+    public var origin: Origin {
+        guard let p = prompt else { return .user }
+        if p.hasPrefix("<task-notification") { return .backgroundTask }
+        if p.hasPrefix("<agent-message") { return .subagent }
+        return .user
+    }
+
+    /// What the turn menu shows: the prompt's first line, a sentence for a turn the harness started,
+    /// else a positional fallback.
     public var label: String {
-        guard let p = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty else { return "Turn \(index)" }
-        return p
+        switch origin {
+        case .backgroundTask: return detail ?? "Background task finished"
+        case .subagent: return "Subagent reported back"
+        case .user:
+            guard let p = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty else { return "Turn \(index)" }
+            return p
+        }
     }
 }
 
@@ -87,6 +130,11 @@ public struct SessionSnapshots: Codable, Sendable, Equatable {
         self.baselineTree = baselineTree
         self.baselineAt = baselineAt
         self.turns = turns
+    }
+
+    /// Turns worth offering a reader: those that changed something, and the one still running.
+    public static func withChanges(_ turns: [TurnSnapshot]) -> [TurnSnapshot] {
+        turns.filter { $0.isInFlight || !$0.isEmpty }
     }
 
     public var openTurn: TurnSnapshot? { turns.last.flatMap { $0.isInFlight ? $0 : nil } }

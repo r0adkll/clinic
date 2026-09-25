@@ -372,11 +372,105 @@ import Testing
         #expect(try await store.diff(turn: snaps.turns[0]).files.map(\.path) == ["a.txt"])
     }
 
+    // MARK: ADR-170
+
+    /// The diff panel refreshes on every file change while hooks snapshot the same repo; before the
+    /// store queued them, one of each concurrent pair lost the scratch `index.lock` and failed.
+    @Test func concurrentSnapshotsAllSucceed() async throws {
+        let (repo, dir, store, _) = try Self.makeStore()
+        try G.write(dir, "a.txt", "one\n")
+        try await repo.stage(paths: ["a.txt"])
+        try await repo.commit(message: "initial")
+        for i in 0..<40 { try G.write(dir, "f\(i).txt", String(repeating: "line \(i)\n", count: 200)) }
+
+        let trees = try await withThrowingTaskGroup(of: String.self) { group in
+            for _ in 0..<8 { group.addTask { try await store.liveTree(repoRoot: dir.path) } }
+            return try await group.reduce(into: [String]()) { $0.append($1) }
+        }
+        #expect(trees.count == 8)
+        #expect(Set(trees).count == 1, "nothing changed between them, so every snapshot is the same tree")
+    }
+
+    /// A git killed mid-write leaves `index.lock` behind; that must cost one retry, not every snapshot after.
+    @Test func aStaleIndexLockIsRecoveredFrom() async throws {
+        let (repo, dir, store, _) = try Self.makeStore()
+        try G.write(dir, "a.txt", "one\n")
+        try await repo.stage(paths: ["a.txt"])
+        try await repo.commit(message: "initial")
+        let scratch = await store.scratch(for: dir.path)
+        _ = try await store.liveTree(repoRoot: dir.path)
+        try Data().write(to: URL(fileURLWithPath: scratch.indexFile + ".lock"))
+        try G.write(dir, "a.txt", "one\ntwo\n")
+        let tree = try await store.liveTree(repoRoot: dir.path)
+        #expect(tree.count == 40)
+    }
+
+    /// In a linked worktree `.git` is a file; alternates must reach the shared object store through it,
+    /// or `HEAD`'s tree cannot be read against a snapshot and every blob is copied into Clinic's store.
+    @Test func snapshotsInALinkedWorktreeReadTheSharedObjects() async throws {
+        let (repo, dir, store, _) = try Self.makeStore()
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("src/deep"), withIntermediateDirectories: true)
+        try G.write(dir, "src/deep/a.txt", "one\n")
+        try await repo.stage(paths: ["src/deep/a.txt"])
+        try await repo.commit(message: "initial")
+        let worktree = dir.deletingLastPathComponent().appendingPathComponent("clinic-wt-\(UUID().uuidString)")
+        try G.sh(dir, ["worktree", "add", "-q", "-b", "feature", worktree.path])
+
+        let objects = GitObjectScratch.repositoryObjects(repoRoot: worktree.path)
+        // Symlinks resolved on both sides: git records `/private/var/…` where the temp dir says `/var/…`.
+        #expect(URL(fileURLWithPath: objects).resolvingSymlinksInPath().path
+                == dir.appendingPathComponent(".git/objects").resolvingSymlinksInPath().path)
+
+        try G.write(worktree, "src/deep/a.txt", "one\ntwo\n")
+        let wt = GitRepository(root: worktree.path)
+        let head = try await wt.tree(of: "HEAD")
+        let diff = try await store.diff(from: head, toWorktreeOf: worktree.path)
+        #expect(diff.files.map(\.path) == ["src/deep/a.txt"])
+    }
+
     @Test func hookEventDecodesThePrompt() throws {
         let json = Data(#"{"hook_event_name":"UserPromptSubmit","session_id":"S1","prompt":"rewrite the parser","cwd":"/tmp"}"#.utf8)
         let event = try HookEvent.decode(json)
         #expect(event.prompt == "rewrite the parser")
         #expect(SnapshotTrigger(event: event) == .beginTurn(prompt: "rewrite the parser"))
+    }
+
+    // MARK: ADR-171
+
+    @Test func harnessPromptsGetReadableLabels() async throws {
+        let notification = """
+        <task-notification>
+        <task-id>b5as7t74n</task-id>
+        <status>completed</status>
+        <summary>Background command "make build" completed (exit code 0)</summary>
+        </task-notification>
+        """
+        #expect(SnapshotStore.notificationSummary(notification) == #"Background command "make build" completed (exit code 0)"#)
+        #expect(SnapshotStore.notificationSummary("fix the parser") == nil)
+
+        let (repo, dir, store, _) = try Self.makeStore()
+        try G.write(dir, "a.txt", "one\n")
+        try await repo.stage(paths: ["a.txt"])
+        try await repo.commit(message: "initial")
+        let turn = try #require(await store.beginTurn(SessionID("s1"), repoRoot: dir.path, prompt: notification))
+        #expect(turn.origin == .backgroundTask)
+        #expect(turn.label == #"Background command "make build" completed (exit code 0)"#)
+
+        // Turns recorded before the summary was kept still read as a sentence, not a tag.
+        let old = TurnSnapshot(sessionId: SessionID("s1"), repoRoot: dir.path, index: 2, prompt: "<task-notification>",
+                               startedAt: Date(), baseTree: "a")
+        #expect(old.label == "Background task finished")
+        let agent = TurnSnapshot(sessionId: SessionID("s1"), repoRoot: dir.path, index: 3, prompt: #"<agent-message from="ad9c">"#,
+                                 startedAt: Date(), baseTree: "a")
+        #expect(agent.origin == .subagent && agent.label == "Subagent reported back")
+    }
+
+    @Test func onlyTurnsWithChangesAreOffered() {
+        func turn(_ i: Int, _ base: String, _ head: String?) -> TurnSnapshot {
+            TurnSnapshot(sessionId: SessionID("s"), repoRoot: "/r", index: i, startedAt: Date(), baseTree: base, headTree: head)
+        }
+        let turns = [turn(1, "a", "b"), turn(2, "b", "b"), turn(3, "b", nil)]
+        #expect(SessionSnapshots.withChanges(turns).map(\.index) == [1, 3], "an empty closed turn is dropped; a running one is kept")
     }
 
     @Test func firstLineTrimsAndBounds() {

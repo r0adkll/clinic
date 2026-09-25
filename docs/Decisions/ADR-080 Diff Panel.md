@@ -6,6 +6,10 @@ tags: [adr, git, diff, ui, panel, milestone-5]
 ---
 # ADR-080: The git page becomes a Diff panel
 
+> **Amended by [[ADR-170 The Diff Panel Follows The Last Change]] (2026-09-24).** The Turn scope defaults to the
+> newest turn that *changed* something. Branch shows the newest commit on the default branch. Every live snapshot
+> is queued through the store, and alternates follow a worktree's `.git` file.
+
 ## Context
 [[ADR-052 Git Page]] shipped a git client: status → stage → commit, with a diff as the detail view
 of the selected file. User (2026-09-08): *"I don't think a generic GIT interface is very useful in
