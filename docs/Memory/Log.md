@@ -4567,3 +4567,4 @@ new `-ClinicShowEmptyPanelOnLaunch` key opens the panel empty.
 
 Verified: `make build` succeeds, and a smoke instance with a shell tab showed the layout centred in the
 panel. The real defaults domain was unchanged. Not run: a session tab with PRs, runs or Grill rounds.
+Later: the header takes back the empty-state icon and becomes a centred column, with the title at 20 pt and the footer centred to match (user asked). Checked in a smoke instance screenshot; the defaults were unchanged.

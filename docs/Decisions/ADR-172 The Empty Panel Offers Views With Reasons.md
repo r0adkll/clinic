@@ -27,8 +27,12 @@ column of bordered buttons, and:
 `SidePanelEmptyState` becomes a small home in [[ADR-120 The Empty Screen Is A Home]]'s language:
 centred when it fits and scrolling from the top when it does not, 420 pt wide at most.
 
-- **Header:** *Open beside the session*, then one line saying views open as tabs here and their
-  shortcuts work anywhere in the tab.
+- **Header:** the empty state keeps its own icon (`sidebar.right`, 34 pt light, secondary) with
+  *Open beside the session* at 20 pt semibold beneath it and one line saying views open as tabs here
+  and their shortcuts work anywhere in the tab. All three are centred in a column, the way
+  `ContentUnavailableView` draws them, so the panel still reads as empty at a glance before it reads as
+  a list. The user asked for this after the first pass (2026-09-26), which had a small left-aligned title
+  and no icon.
 - **Views:** one row per openable view: an `AccentTile` ([[ADR-111 Nav Rows Wear Accent Tiles]]'s
   accent glyph on accent wash), the title, a line of what it would show, and the live `KeyCap` for its
   chord, read through `KeyBindings` so a rebinding shows ([[ADR-073 Rebindable Shortcuts]]). The lines:
@@ -40,7 +44,7 @@ centred when it fits and scrolling from the top when it does not, 420 pt wide at
   and state underneath. The newest one carries ⌘⇧P, because that is the PR the chord opens. Titles come
   from `PRStore.ensureLoaded`. After the PRs come the checkout's runs, with their status glyph and
   status. The section is left out when there are none.
-- **Footer:** *Hide ⌥⌘J · Zoom ⌥⇧⌘J* as key caps.
+- **Footer:** *Hide ⌥⌘J · Zoom ⌥⇧⌘J* as key caps, centred under the rows to match the header.
 - **Rows open through the same openers as the menu and the chords.** Grill goes through `toggleGrill`,
   so it takes the keyboard as it does from ⌘⇧… ([[ADR-139 A Round Takes The Keyboard]]).
 

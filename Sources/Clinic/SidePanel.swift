@@ -416,15 +416,23 @@ struct SidePanelEmptyState: View {
         .task(id: refs.map(\.id)) { prs.ensureLoaded(Array(refs)) }
     }
 
+    /// The empty state's own icon and title, centred over the rows the way `ContentUnavailableView`
+    /// draws them, so the panel still reads as empty at a glance before it reads as a list.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Open beside the session").font(.system(size: 15, weight: .semibold))
+        VStack(spacing: 8) {
+            Image(systemName: "sidebar.right")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text("Open beside the session").font(.system(size: 20, weight: .semibold))
                 .accessibilityAddTraits(.isHeader)
             Text("Views open as tabs in this panel. Their shortcuts work from anywhere in the tab.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8).padding(.bottom, 4)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -442,9 +450,8 @@ struct SidePanelEmptyState: View {
         HStack(spacing: 14) {
             footerHint("Hide", .togglePanelVisibility)
             footerHint("Zoom", .zoomPanel)
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
