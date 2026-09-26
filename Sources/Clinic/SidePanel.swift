@@ -350,26 +350,207 @@ struct SidePanelTabChip: View {
     }
 }
 
-/// What the panel shows when it is open but holds no tabs: the same actions the strip's "+" menu offers.
+/// What the panel shows when it is open but holds no tabs (ADR-172): the views it can hold, each
+/// saying what it would show for this tab and the chord that opens it from anywhere, then what this
+/// session has produced — its pull requests and runs — and the chords that hide or zoom the panel.
+///
+/// An empty panel is only ever asked for (ADR-130), so it is read by someone choosing what to put
+/// here; a row per view with a reason to pick it is that choice, where a stack of bare buttons was not.
 struct SidePanelEmptyState: View {
     @Environment(TabStore.self) private var tabs
+    @Environment(SessionStore.self) private var sessions
+    @Environment(PRStore.self) private var prs
+    @Environment(KeyBindings.self) private var bindings
     let tab: Tab
 
     var body: some View {
-        ContentUnavailableView {
-            Label("Nothing open here", systemImage: "sidebar.right")
-        } description: {
-            Text("Add a view to work beside the session.")
-        } actions: {
-            VStack(spacing: 6) {
-                ForEach(tabs.availablePanes(for: tab), id: \.self) { kind in
-                    Button { tabs.showPane(kind, in: tab) } label: {
-                        Label { Text(kind.defaultTitle) } icon: { kind.icon }.frame(maxWidth: 180)
+        let available = tabs.availablePanes(for: tab)
+        let views = available.filter(\.isView)
+        // Newest first: ⌘⇧P opens the newest PR, so the row carrying its chord leads.
+        let refs = available.compactMap { if case .pr(let ref) = $0 { ref } else { nil } }.reversed()
+        let runs = available.compactMap { if case .run(let key) = $0 { key } else { nil } }
+        // Centred in the pane when it fits, scrolling from the top when it does not (ADR-120's rule).
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    header
+                    section("Views") {
+                        ForEach(views, id: \.self) { kind in
+                            EmptyPanelRow(title: kind.defaultTitle, detail: detail(for: kind),
+                                          urgent: kind == .grill && waitingQuestions > 0,
+                                          chord: action(for: kind).flatMap { bindings.chord(for: $0) }?.display,
+                                          open: { open(kind) }) {
+                                AccentTile(symbol: kind.symbol, size: 26, glyph: 12)
+                            }
+                        }
                     }
+                    if !refs.isEmpty || !runs.isEmpty {
+                        section("This session") {
+                            ForEach(Array(refs.enumerated()), id: \.element) { index, ref in
+                                EmptyPanelRow(title: prTitle(ref), detail: prDetail(ref),
+                                              chord: index == 0 ? bindings.chord(for: .togglePRPage)?.display : nil,
+                                              open: { tabs.togglePRPage(tab, ref: ref) }) {
+                                    PRTabGlyph(ref: ref, size: 15).frame(width: 26, height: 26)
+                                }
+                            }
+                            ForEach(runs, id: \.self) { key in
+                                let run = tabs.runs.run(forKey: key)
+                                EmptyPanelRow(title: run?.name ?? key.configId, detail: "Run output · " + RunText.status(run),
+                                              open: { tabs.showPane(.run(key), in: tab) }) {
+                                    RunStatusGlyph(run: run, size: 13).frame(width: 26, height: 26)
+                                }
+                            }
+                        }
+                    }
+                    footer
                 }
+                .frame(maxWidth: 420)
+                .padding(.horizontal, 20).padding(.vertical, 28)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        // Titles, not refs: a row reading "#412" says nothing about which pull request it is.
+        .task(id: refs.map(\.id)) { prs.ensureLoaded(Array(refs)) }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Open beside the session").font(.system(size: 15, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Views open as tabs in this panel. Their shortcuts work from anywhere in the tab.")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // The home screen's section caption (ADR-120).
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 8).frame(height: 20)
+            content()
+        }
+    }
+
+    /// How to leave, in the same key caps: an empty panel's one other job is getting out of the way.
+    private var footer: some View {
+        HStack(spacing: 14) {
+            footerHint("Hide", .togglePanelVisibility)
+            footerHint("Zoom", .zoomPanel)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+    }
+
+    @ViewBuilder
+    private func footerHint(_ title: String, _ action: ShortcutAction) -> some View {
+        if let chord = bindings.chord(for: action) {
+            HStack(spacing: 6) {
+                Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+                KeyCap(chord.display)
+            }
+        }
+    }
+
+    // MARK: Facts
+
+    private var folder: String { Project(path: tab.pwd ?? tab.projectPath).name }
+
+    private var waitingQuestions: Int {
+        tab.sessionId.map { sessions.openGrillRounds(for: $0) }?
+            .reduce(0) { $0 + ($1.questions.count - $1.answeredCount) } ?? 0
+    }
+
+    /// What the view would show for this tab, from what is already known — never a fetch.
+    private func detail(for kind: PanelPane.Kind) -> String {
+        switch kind {
+        case .terminal: return "A shell in \(folder)"
+        case .diff: return tab.gitBranch.map { "Changes on \($0), by turn or branch" } ?? "Changes by turn or branch"
+        case .files: return "Browse and edit \(folder)"
+        case .attachments:
+            let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
+            return count > 0 ? "\(count) image\(count == 1 ? "" : "s") from this session" : "Images Claude shows you land here"
+        case .grill:
+            let waiting = waitingQuestions
+            return waiting > 0 ? "\(waiting) question\(waiting == 1 ? "" : "s") waiting for you" : "Answer Claude's question rounds as a form"
+        case .pr, .run: return ""
+        }
+    }
+
+    private func prTitle(_ ref: PullRequestRef) -> String {
+        let number = ref.codeHost.reference(ref.number)
+        return prs.pullRequest(for: ref).map { "\(number) \($0.title)" } ?? number
+    }
+
+    private func prDetail(_ ref: PullRequestRef) -> String {
+        guard let pr = prs.pullRequest(for: ref) else { return ref.repository }
+        let state = pr.isDraft && pr.state == .open ? "Draft" : pr.state.rawValue.capitalized
+        return "\(ref.repository) · \(state)"
+    }
+
+    private func action(for kind: PanelPane.Kind) -> ShortcutAction? {
+        switch kind {
+        case .terminal: .togglePanel
+        case .diff: .toggleDiffPage
+        case .files: .toggleEditor
+        case .attachments: .toggleAttachments
+        case .grill: .toggleGrill
+        case .pr, .run: nil
+        }
+    }
+
+    /// Through the same openers as the menu and the chords, so Grill takes the keyboard as it does there.
+    private func open(_ kind: PanelPane.Kind) {
+        if kind == .grill { tabs.toggleGrill(tab) } else { tabs.showPane(kind, in: tab) }
+    }
+}
+
+private extension PanelPane.Kind {
+    /// One of the fixed views, as opposed to something this session produced (a PR, a run).
+    var isView: Bool {
+        switch self {
+        case .pr, .run: false
+        default: true
+        }
+    }
+}
+
+/// One choice in the empty panel: glyph, title over a line of detail, and the chord that opens it.
+private struct EmptyPanelRow<Glyph: View>: View {
+    let title: String
+    let detail: String
+    /// The detail is something waiting on the reader, so it wears the sidebar's orange (ADR-096).
+    var urgent = false
+    var chord: String? = nil
+    let open: () -> Void
+    @ViewBuilder let glyph: Glyph
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                glyph
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 13)).lineLimit(1)
+                    Text(detail).font(.system(size: 11))
+                        .foregroundStyle(urgent ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if let chord { KeyCap(chord) }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 44)
+            .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Open \(title) in this panel" + (chord.map { " (\($0))" } ?? ""))
     }
 }

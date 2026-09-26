@@ -302,6 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
             tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
+            // `-ClinicShowEmptyPanelOnLaunch YES`: the panel shown with nothing in it (ADR-172).
+            if UserDefaults.standard.bool(forKey: "ClinicShowEmptyPanelOnLaunch") { tabs.togglePanelVisibility() }
             // `-ClinicCyclePanelAfter <seconds>` hides the panel and shows it again a second later, from a
             // settled window: the path where a newly added panel used to come up blank.
             let cycle = UserDefaults.standard.double(forKey: "ClinicCyclePanelAfter")

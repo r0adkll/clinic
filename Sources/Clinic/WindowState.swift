@@ -119,6 +119,7 @@ struct TerminalStack: NSViewRepresentable {
     @Environment(PRStore.self) private var prs
     @Environment(NotificationStore.self) private var history
     @Environment(UsageService.self) private var usage
+    @Environment(KeyBindings.self) private var bindings
     let live: [Tab]
     let selectedId: UUID?
     let visible: Bool
@@ -145,7 +146,7 @@ struct TerminalStack: NSViewRepresentable {
     /// stores; neither crosses from the window's root into a separate hosting view (ADR-152).
     private func inject<V: View>(_ view: V) -> AnyView {
         AnyView(view.environment(tabs).environment(sessions).environment(prs).environment(history).environment(usage)
-            .clinicAppearance())
+            .environment(bindings).clinicAppearance())
     }
 
     /// Panel pages fill their hosting view, so a page whose ideal size is small does not float in it.

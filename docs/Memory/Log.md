@@ -4555,3 +4555,15 @@ real rows were rendered in a throwaway harness with turns shaped like the record
 size to their content, and the empty turns collapse to one checkbox line. Not run: the popover inside the live
 app.
 Later: the counts in the second line take the header's green and red (dropped on the highlighted row), via `PopoverMenuRow.styledSubtitle`; checked in the harness.
+
+## 2026-09-26 — The empty panel offers views with reasons (ADR-172)
+User: "Let's do a UX improvement pass on the empty right panel".
+
+The empty state was a stock `ContentUnavailableView` over bare buttons. It is now a small home: a header,
+rows of views that each show what they would open here (folder, branch, image count, waiting questions,
+the last in orange) with a live key cap, then the session's PRs (titled, newest first, ⌘⇧P on the
+newest) and runs, then a Hide / Zoom footer. The panel's hosting roots now get `KeyBindings`, and the
+new `-ClinicShowEmptyPanelOnLaunch` key opens the panel empty.
+
+Verified: `make build` succeeds, and a smoke instance with a shell tab showed the layout centred in the
+panel. The real defaults domain was unchanged. Not run: a session tab with PRs, runs or Grill rounds.
