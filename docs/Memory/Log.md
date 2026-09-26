@@ -4568,3 +4568,14 @@ new `-ClinicShowEmptyPanelOnLaunch` key opens the panel empty.
 Verified: `make build` succeeds, and a smoke instance with a shell tab showed the layout centred in the
 panel. The real defaults domain was unchanged. Not run: a session tab with PRs, runs or Grill rounds.
 Later: the header takes back the empty-state icon and becomes a centred column, with the title at 20 pt and the footer centred to match (user asked). Checked in a smoke instance screenshot; the defaults were unchanged.
+
+## 2026-09-26 — Clinic's chords outrank Ghostty's defaults (ADR-173)
+User: the zoom chord shown on the empty panel "doesn't do anything and I think an OS default is catching it".
+
+The terminal took it: libghostty's default `super+alt+shift+j=write_screen_file:open` opened a dump of the
+screen. Five more Clinic chords (⇧⌘P, ⌘K, ⌘J, ⇧⌘G, ⇧⌘Z) were Ghostty defaults too. `GhosttyConfig` now
+unbinds Clinic's current chords by trigger right after Ghostty's defaults and before the user's files, and a
+rebind reloads the config into every open surface. ⌘K in a terminal is now Jump to Session, not clear.
+
+Verified: GhosttyBridge tests pass (7), one of them asking a live surface about the six chords before and after
+the reload, one showing a later user binding wins. `make build` succeeds. Not run: the chord in the live app.

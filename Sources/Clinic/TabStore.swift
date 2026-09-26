@@ -273,10 +273,30 @@ final class TabStore {
 
     var selectedTab: Tab? { selectedTab(in: activeWindow) }
 
+    /// Clinic's shortcuts, set before `start`: the terminals give their chords up (ADR-173).
+    var bindings: KeyBindings?
+
+    private func makeGhosttyConfig() throws -> GhosttyConfig {
+        try GhosttyConfig(yieldTriggers: bindings?.ghosttyTriggers ?? [])
+    }
+
+    /// A rebinding moves which trigger the terminals must give up. The user's Ghostty files are read
+    /// again with it, as Ghostty's own *Reload Configuration* would, and every open surface follows.
+    func reloadGhosttyKeybinds() {
+        guard let runtime else { return }
+        do {
+            let config = try makeGhosttyConfig()
+            for d in config.diagnostics { Self.log.warning("ghostty config: \(d, privacy: .public)") }
+            runtime.reloadConfig(config)
+        } catch {
+            Self.log.error("ghostty config reload failed: \(error, privacy: .public)")
+        }
+    }
+
     func start() {
         Self.adoptInstalledGhosttyResources()
         do {
-            let config = try GhosttyConfig()
+            let config = try makeGhosttyConfig()
             for d in config.diagnostics { Self.log.warning("ghostty config: \(d, privacy: .public)") }
             let runtime = try GhosttyRuntime(config: config)
             runtime.appActionHandler = { [weak self] action in self?.handleAppAction(action) ?? false }

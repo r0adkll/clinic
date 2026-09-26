@@ -172,7 +172,20 @@ final class KeyBindings {
     func reset(_ action: ShortcutAction) { overrides.raw[action.rawValue] = nil; save() }
     func resetAll() { overrides.raw = [:]; save() }
 
-    private func save() { UserDefaults.standard.set(overrides.raw, forKey: Self.defaultsKey) }
+    private func save() {
+        UserDefaults.standard.set(overrides.raw, forKey: Self.defaultsKey)
+        onChange?()
+    }
+
+    /// Called after any rebinding, so the terminals can give the new chord up (ADR-173).
+    var onChange: (() -> Void)?
+
+    /// Every bound chord as a Ghostty trigger. A terminal with the keyboard offers a key to its
+    /// keybinds before the menu sees it, so a Clinic chord that is also one of Ghostty's defaults —
+    /// ⌥⇧⌘J writes the screen to a file and opens it — never reached its menu item (ADR-173).
+    var ghosttyTriggers: [String] {
+        ShortcutAction.allCases.compactMap { chord(for: $0)?.ghosttyTrigger }
+    }
 
     static func keyboardShortcut(_ c: KeyChord) -> KeyboardShortcut? {
         var mods: EventModifiers = []
@@ -419,5 +432,30 @@ private struct ShortcutRow: View {
         } label: {
             Text(action.title)
         }
+    }
+}
+
+extension KeyChord {
+    /// This chord in Ghostty's trigger grammar (`super+alt+shift+j`), or nil for a key that grammar
+    /// cannot spell unambiguously.
+    var ghosttyTrigger: String? {
+        let name: String
+        switch key {
+        case "return": name = "enter"
+        case "delete": name = "backspace"
+        case "up", "down", "left", "right": name = "arrow_" + key
+        case "pageup": name = "page_up"
+        case "pagedown": name = "page_down"
+        case "+": name = "plus"
+        // `=` separates the trigger from its action and `>` chains triggers into a sequence.
+        case "=", ">": return nil
+        default: name = key
+        }
+        var parts: [String] = []
+        if modifiers.contains(.control) { parts.append("ctrl") }
+        if modifiers.contains(.option) { parts.append("alt") }
+        if modifiers.contains(.shift) { parts.append("shift") }
+        if modifiers.contains(.command) { parts.append("super") }
+        return (parts + [name]).joined(separator: "+")
     }
 }

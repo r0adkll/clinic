@@ -96,6 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hooks.start()
         sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }
         sessions.start()
+        tabs.bindings = bindings
+        bindings.onChange = { [weak self] in self?.tabs.reloadGhosttyKeybinds() }
         tabs.start()
         // The project menu's *Run ▸* reads each project's run.json, and a context menu cannot load one
         // on open (ADR-122); files only, detection waits until a project is actually looked at.

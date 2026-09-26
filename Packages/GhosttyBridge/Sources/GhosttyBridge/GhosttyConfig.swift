@@ -15,7 +15,7 @@ public struct GhosttyConfigOverride: Sendable, Hashable {
 ///
 /// Loading order (mirrors `Ghostty.Config.loadConfig` in Ghostty's macOS app, minus
 /// CLI args): `ghostty_config_new` (which installs Ghostty's default keybinds) →
-/// optionally `ghostty_config_load_default_files` + `ghostty_config_load_recursive_files`
+/// unbinds for the host's own chords (`yieldTriggers`, ADR-173) → optionally `ghostty_config_load_default_files` + `ghostty_config_load_recursive_files`
 /// → an override file generated from ``clinicUnboundActions`` and `overrides` →
 /// `ghostty_config_finalize`.
 ///
@@ -62,16 +62,24 @@ public final class GhosttyConfig {
     ///     (`ghostty_config_load_default_files`) plus any `config-file` includes.
     ///   - overrides: `key = value` lines applied after the user's files.
     ///   - unbindActions: keybind actions to unbind (see the class documentation).
+    ///   - yieldTriggers: triggers the host's own shortcuts use (`super+alt+shift+j`). They are unbound
+    ///     *before* the user's files load, so they take a trigger back from Ghostty's defaults but not
+    ///     from anything the user bound themselves (ADR-173).
     public init(
         loadUserDefaults: Bool = true,
         overrides: [GhosttyConfigOverride] = GhosttyConfig.clinicOverrides,
-        unbindActions: [String] = GhosttyConfig.clinicUnboundActions
+        unbindActions: [String] = GhosttyConfig.clinicUnboundActions,
+        yieldTriggers: [String] = []
     ) throws {
         // Config APIs use the global allocator installed by ghostty_init.
         try GhosttyRuntime.ensureInitialized()
 
         guard let cfg = ghostty_config_new() else { throw GhosttyError.configCreateFailed }
         self.handle = cfg
+
+        if !yieldTriggers.isEmpty {
+            Self.load(lines: yieldTriggers.map { "keybind = \($0)=unbind" }, into: cfg)
+        }
 
         if loadUserDefaults {
             ghostty_config_load_default_files(cfg)
