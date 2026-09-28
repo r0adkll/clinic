@@ -198,7 +198,7 @@ struct TabFooter: View {
                 PaneToggle(tab: tab, kind: .diff, help: "Diff panel (⌘⇧G)")
                 PaneToggle(tab: tab, kind: .files, help: "Editor (⌘⇧E)")
                 if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
-                    PaneToggle(tab: tab, kind: .attachments, help: "Attachments (⌘⇧I)")
+                    PaneToggle(tab: tab, kind: .attachments, help: "Media (⌘⇧I)")
                 }
                 // Like the Images chip: the footer only grows a Grill chip once there is a round to
                 // answer, so a session that never gets grilled never carries the control (ADR-131).

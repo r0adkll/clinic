@@ -91,13 +91,16 @@ final class MCPToolService {
 
         case "show_image":
             let path = (args["path"] as? String ?? "")
-            guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path), NSImage(contentsOfFile: path) != nil else {
-                return MCPToolSpec.textResult("Not a readable image file: \(path)", isError: true)
+            // A video is taken on its type: whether AVFoundation can play it is an asynchronous
+            // question, and the player says so in the pane if it cannot (ADR-174).
+            guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path),
+                  VideoFile.isVideo(path) || NSImage(contentsOfFile: path) != nil else {
+                return MCPToolSpec.textResult("Not a readable image or video file: \(path)", isError: true)
             }
             let caption = args["caption"] as? String
             sessions?.update { s in s.attachments[sessionId, default: []].append(ClinicState.Attachment(path: path, caption: caption)) }
             tabs?.showPane(.attachments, in: tab)
-            return MCPToolSpec.textResult("Image shown in Clinic's attachments panel.")
+            return MCPToolSpec.textResult("Shown in Clinic's Media panel.")
 
         case "ask_round":
             // ADR-131: post and return. The reader's answers come back as their next message, so this

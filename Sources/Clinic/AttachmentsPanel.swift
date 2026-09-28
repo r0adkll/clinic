@@ -2,8 +2,10 @@ import AppKit
 import ClinicCore
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// Images the agent showed with `show_image` (ADR-056). Right column, ⌘⇧I.
+/// Images, animations and videos the agent showed with `show_image` (ADR-056, ADR-174). Right
+/// column, ⌘⇧I.
 ///
 /// List-then-detail, in the chrome every other browser in the panel uses (ADR-102), around a viewer
 /// that zooms and pans (ADR-106). It was a grid of 160 pt thumbnails over a fixed-size sheet, which
@@ -28,24 +30,63 @@ final class ImageGallery {
     /// One slot: the image on screen. A full-size decode of every image a long session showed would
     /// hold tens of megabytes for pictures nobody is looking at.
     @ObservationIgnored private var open: (path: String, image: NSImage?)?
+    /// A video's facts and thumbnail come from AVFoundation, which only answers asynchronously.
+    @ObservationIgnored private var videoLoads: [String: Task<Void, Never>] = [:]
+    /// Bumped when a video's load lands. The only observed part of the caches, and read by the two
+    /// accessors below, so the rows that asked while it was loading ask again (ADR-174).
+    private var videosLoaded = 0
 
     static let thumbnailPixels: CGFloat = 96
 
     func thumbnail(_ path: String) -> NSImage? {
+        _ = videosLoaded
         if let cached = thumbs[path] { return cached }
+        if VideoFile.isVideo(path) { loadVideo(path); return nil }
         let image = ImageFile.thumbnail(path, maxPixel: Self.thumbnailPixels)
         thumbs[path] = image
         return image
     }
 
     func facts(_ path: String) -> ImageFacts? {
+        _ = videosLoaded
         if let cached = factsByPath[path] { return cached }
+        if VideoFile.isVideo(path) { loadVideo(path); return nil }
         let facts = ImageFile.facts(path)
         factsByPath[path] = facts
         return facts
     }
 
+    /// `facts`, waiting for a video's to load — for a window, which sizes itself to them.
+    func loadedFacts(_ path: String) async -> ImageFacts? {
+        if VideoFile.isVideo(path) { await loadVideo(path).value }
+        return facts(path)
+    }
+
+    /// True while a video's facts are still on their way, so a row can say "loading" rather than
+    /// "unreadable".
+    func isLoading(_ path: String) -> Bool {
+        VideoFile.isVideo(path) && factsByPath[path] == nil
+    }
+
+    @discardableResult
+    private func loadVideo(_ path: String) -> Task<Void, Never> {
+        if let running = videoLoads[path] { return running }
+        let pixels = Self.thumbnailPixels
+        let load = Task { [weak self] in
+            async let facts = VideoFile.facts(path)
+            async let thumb = VideoFile.thumbnail(path, maxPixel: pixels)
+            let (loaded, frame) = await (facts, thumb)
+            guard let self else { return }
+            factsByPath[path] = .some(loaded)
+            thumbs[path] = .some(frame.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) })
+            videosLoaded += 1
+        }
+        videoLoads[path] = load
+        return load
+    }
+
     func image(_ path: String) -> NSImage? {
+        if VideoFile.isVideo(path) { return nil }
         if let open, open.path == path { return open.image }
         let image = ImageFile.full(path)
         open = (path, image)
@@ -111,13 +152,13 @@ struct AttachmentsPanel: View {
             if items.isEmpty {
                 VStack(spacing: 0) {
                     PaneHeader {
-                        Label("Images", systemImage: "photo.on.rectangle")
+                        Label("Media", systemImage: "photo.on.rectangle")
                             .font(.system(size: PaneMetrics.label, weight: .medium))
                         Spacer(minLength: 0)
                     }
                     Divider()
-                    ContentUnavailableView("No images yet", systemImage: "photo",
-                                           description: Text("Images the agent shows with show_image appear here."))
+                    ContentUnavailableView("Nothing shown yet", systemImage: "photo",
+                                           description: Text("Screenshots, GIFs and videos the agent shows with show_image appear here."))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
@@ -162,7 +203,7 @@ struct AttachmentsPanel: View {
 
     private var listHeader: some View {
         PaneHeader {
-            TreeToggleButton(isOn: showList, shownHelp: "Hide the image list", hiddenHelp: "Show the image list")
+            TreeToggleButton(isOn: showList, shownHelp: "Hide the media list", hiddenHelp: "Show the media list")
             TreeFilterField(text: $gallery.filter, matches: rows.count, total: items.count)
         }
     }
@@ -171,7 +212,7 @@ struct AttachmentsPanel: View {
     private var list: some View {
         if rows.isEmpty {
             VStack {
-                Text("No matching images").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
+                Text("Nothing matches").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                 Spacer()
             }
             .padding(.top, 20)
@@ -184,6 +225,7 @@ struct AttachmentsPanel: View {
                             ImageRowView(item: item,
                                          thumbnail: gallery.thumbnail(item.path),
                                          facts: gallery.facts(item.path),
+                                         loading: gallery.isLoading(item.path),
                                          isSelected: item.id == selected?.id) {
                                 gallery.selectedId = item.id
                                 // Clicking a row hands the pane's keyboard to the viewer, so ↑/↓,
@@ -229,7 +271,7 @@ struct AttachmentsPanel: View {
     private var detailHeader: some View {
         PaneHeader {
             if !prefs.showList {
-                TreeToggleButton(isOn: showList, shownHelp: "Hide the image list", hiddenHelp: "Show the image list")
+                TreeToggleButton(isOn: showList, shownHelp: "Hide the media list", hiddenHelp: "Show the media list")
             }
             if let item = selected {
                 // The name only: the pixel dimensions and the file size live in the viewer's own
@@ -240,17 +282,17 @@ struct AttachmentsPanel: View {
                     .help(item.path)
                 Spacer(minLength: 4)
                 let index = rows.firstIndex { $0.id == item.id } ?? 0
-                PaneIconButton(symbol: "chevron.up", help: "Previous image (↑)") { run(.step(-1)) }
+                PaneIconButton(symbol: "chevron.up", help: "Previous (↑)") { run(.step(-1)) }
                     .disabled(index == 0)
-                PaneIconButton(symbol: "chevron.down", help: "Next image (↓)") { run(.step(1)) }
+                PaneIconButton(symbol: "chevron.down", help: "Next (↓)") { run(.step(1)) }
                     .disabled(index >= rows.count - 1)
-                PaneIconButton(symbol: "eye", help: "Quick Look (space)") { run(.quickLook) }
+                PaneIconButton(symbol: "eye", help: plays(item) ? "Quick Look (⌘Y)" : "Quick Look (space)") { run(.quickLook) }
                 PaneIconButton(symbol: "macwindow.badge.plus", help: "Open in a window (return)") {
                     ImageWindowController.show(item)
                 }
                 PaneIconMenu(symbol: "ellipsis.circle", help: "More actions") { verbs(for: item) }
             } else {
-                Text("Select an image").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
+                Text("Select something to view").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
         }
@@ -280,11 +322,14 @@ struct AttachmentsPanel: View {
         // The keys are spelled out in the titles rather than attached with `.keyboardShortcut`: a
         // bare space or return registered as a menu equivalent would be a key equivalent for the
         // whole window, and the terminal one keystroke away needs both of them.
-        Button("Quick Look  ·  Space") { ImageQuickLook.shared.show(paths: rows.map(\.path), showing: item.path) }
+        // Space plays and pauses anything that moves (ADR-174), so there the menu names ⌘Y instead.
+        Button(plays(item) ? "Quick Look  ·  ⌘Y" : "Quick Look  ·  Space") {
+            ImageQuickLook.shared.show(paths: rows.map(\.path), showing: item.path)
+        }
         Button("Open in Window  ·  Return") { ImageWindowController.show(item) }
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)]) }
         Divider()
-        Button("Copy Image  ·  ⌘C") { ImageClipboard.copy(item.path) }
+        Button(VideoFile.isVideo(item.path) ? "Copy Video  ·  ⌘C" : "Copy Image  ·  ⌘C") { ImageClipboard.copy(item.path) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.path, forType: .string)
@@ -295,17 +340,36 @@ struct AttachmentsPanel: View {
             sessions.update { state in state.attachments[id]?.removeAll { $0.id == item.id } }
         }
     }
+
+    private func plays(_ item: ClinicState.Attachment) -> Bool {
+        VideoFile.isVideo(item.path) || gallery.facts(item.path)?.kind == .animated
+    }
 }
 
 enum ImageClipboard {
     /// The image *and* its URL, so the clipboard works both in an editor that wants pixels and in
     /// Finder, which wants a file.
+    ///
+    /// A video is its URL alone; an animation is its URL and the file's own bytes under its own type,
+    /// because `NSImage` would flatten a GIF to its first frame (ADR-174).
     static func copy(_ path: String) {
         let board = NSPasteboard.general
         board.clearContents()
-        var objects: [NSPasteboardWriting] = [URL(fileURLWithPath: path) as NSURL]
-        if let image = NSImage(contentsOfFile: path) { objects.insert(image, at: 0) }
-        board.writeObjects(objects)
+        let url = URL(fileURLWithPath: path)
+        if VideoFile.isVideo(path) {
+            board.writeObjects([url as NSURL])
+        } else if ImageFile.facts(path)?.kind == .animated,
+                  let type = UTType(filenameExtension: url.pathExtension),
+                  let data = try? Data(contentsOf: url) {
+            let item = NSPasteboardItem()
+            item.setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
+            item.setString(url.absoluteString, forType: .fileURL)
+            board.writeObjects([item])
+        } else {
+            var objects: [NSPasteboardWriting] = [url as NSURL]
+            if let image = NSImage(contentsOfFile: path) { objects.insert(image, at: 0) }
+            board.writeObjects(objects)
+        }
     }
 }
 
@@ -320,6 +384,7 @@ private struct ImageRowView: View {
     let item: ClinicState.Attachment
     let thumbnail: NSImage?
     let facts: ImageFacts?
+    var loading = false
     let isSelected: Bool
     let activate: () -> Void
 
@@ -382,12 +447,31 @@ private struct ImageRowView: View {
                     .scaledToFit()
                     .padding(1)
             } else {
-                Image(systemName: "exclamationmark.triangle")
+                Image(systemName: loading ? "film" : "exclamationmark.triangle")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
         }
         .frame(width: 48, height: 38)
         .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.10)) }
+        .overlay(alignment: .bottomTrailing) { badge }
+    }
+
+    /// What says a thumbnail moves: a play glyph and its length, over the frame's corner (ADR-174).
+    @ViewBuilder
+    private var badge: some View {
+        if let facts, facts.kind.plays {
+            HStack(spacing: 2) {
+                Image(systemName: facts.kind == .video ? "play.fill" : "infinity")
+                    .font(.system(size: 6, weight: .bold))
+                if let length = facts.length { Text(length).monospacedDigit() }
+            }
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 3))
+            .padding(2)
+        }
     }
 }

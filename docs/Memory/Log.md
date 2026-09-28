@@ -4579,3 +4579,18 @@ rebind reloads the config into every open surface. ⌘K in a terminal is now Jum
 
 Verified: GhosttyBridge tests pass (7), one of them asking a live surface about the six chords before and after
 the reload, one showing a later user binding wins. `make build` succeeds. Not run: the chord in the live app.
+
+## 2026-09-28 — The Images pane plays media (ADR-174)
+User: make the images tab "more media orientated", with GIFs and video files.
+
+The tab is now **Media**. Animated GIF, APNG, WebP and HEIC sequences play on the existing zoom canvas,
+driven by `ImageAnimation`, a frame-at-a-time player with play/pause, frame stepping and a counter in the
+footer. Videos play in an `AVPlayerView` subclass with AVKit's own controls. Their facts and thumbnails load
+asynchronously into `ImageGallery`. `show_image` keeps its name and now accepts movies. Space and ← / →
+control playback for anything that moves, and ⌘Y stays Quick Look.
+
+Verified: `make build` has no warnings in the changed files, and ClinicCore's 585 tests pass. The file-reading
+code, run verbatim against generated GIF/APNG/PNG/MP4 files, gave the right frame counts, lengths and a
+video thumbnail. In a smoke instance, rows showed badges and a GIF went from frame 7/20 to 16/20 between
+screenshots. The only preference that changed was AVKit's own duration key, which I restored. Not run: the
+keyboard, and a video window resizing to its video.

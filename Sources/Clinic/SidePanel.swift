@@ -51,7 +51,7 @@ final class PanelPane: Identifiable {
             case .terminal: "Terminal"
             case .diff: "Diff"
             case .files: "Files"
-            case .attachments: "Images"
+            case .attachments: "Media"
             case .grill: "Grill"
             case .pr(let ref): ref.codeHost.reference(ref.number)
             case .run(let key): key.configId
@@ -481,7 +481,7 @@ struct SidePanelEmptyState: View {
         case .files: return "Browse and edit \(folder)"
         case .attachments:
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
-            return count > 0 ? "\(count) image\(count == 1 ? "" : "s") from this session" : "Images Claude shows you land here"
+            return count > 0 ? "\(count) item\(count == 1 ? "" : "s") from this session" : "Screenshots, GIFs and videos Claude shows you land here"
         case .grill:
             let waiting = waitingQuestions
             return waiting > 0 ? "\(waiting) question\(waiting == 1 ? "" : "s") waiting for you" : "Answer Claude's question rounds as a form"

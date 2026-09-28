@@ -61,13 +61,34 @@ final class ImagePrefs {
 
 // MARK: - Reading the file
 
+/// What the pane holds (ADR-174): a picture, a picture that moves, or a movie. The first two share the
+/// zoom canvas; a movie gets a player.
+enum MediaKind: Equatable, Sendable {
+    case still, animated, video
+
+    /// Space and ← / → belong to playback for anything that plays (ADR-174 over ADR-107).
+    var plays: Bool { self != .still }
+}
+
 /// What the panel can say about an image without decoding it whole.
 struct ImageFacts: Equatable, Sendable {
     var pixels: CGSize
     var bytes: Int
+    var kind: MediaKind = .still
+    var frames = 1
+    /// One loop of an animation, or a movie's length.
+    var duration: TimeInterval?
 
     var dimensions: String { "\(Int(pixels.width)) × \(Int(pixels.height))" }
     var fileSize: String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+    var length: String? { duration.map(Self.clock) }
+
+    /// `0:12`, `1:04:09`. Never `0:00`: a half-second GIF still has a length worth reading.
+    static func clock(_ seconds: TimeInterval) -> String {
+        let total = max(1, Int(seconds.rounded()))
+        let (h, m, s) = (total / 3600, total / 60 % 60, total % 60)
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
 }
 
 /// ImageIO rather than `NSImage`: the properties of a 20-megapixel PNG are a header read, and a
@@ -81,7 +102,38 @@ enum ImageFile {
               let height = props[kCGImagePropertyPixelHeight] as? Double
         else { return nil }
         let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        return ImageFacts(pixels: CGSize(width: width, height: height), bytes: bytes)
+        var facts = ImageFacts(pixels: CGSize(width: width, height: height), bytes: bytes)
+        // A file with several images is only an *animation* when its frames carry delays: a HEIC can
+        // hold a burst or a depth map, and those are not meant to be played.
+        let count = CGImageSourceGetCount(source)
+        if count > 1, delay(source, at: 0) != nil {
+            facts.kind = .animated
+            facts.frames = count
+            facts.duration = (0..<count).reduce(0) { $0 + (delay(source, at: $1) ?? 0) }
+        }
+        return facts
+    }
+
+    /// How long frame `index` stays up, from whichever animated format the file is — nil when the
+    /// frame carries no delay at all, which is what makes the file a still.
+    ///
+    /// The unclamped delay where there is one, then the browsers' rule: anything at or under 10 ms
+    /// plays at 100 ms, because a GIF saying "0" was written expecting exactly that and running it at
+    /// the display's refresh rate turns it into a strobe.
+    static func delay(_ source: CGImageSource, at index: Int) -> TimeInterval? {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] else { return nil }
+        let formats: [(CFString, CFString, CFString)] = [
+            (kCGImagePropertyGIFDictionary, kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyGIFDelayTime),
+            (kCGImagePropertyPNGDictionary, kCGImagePropertyAPNGUnclampedDelayTime, kCGImagePropertyAPNGDelayTime),
+            (kCGImagePropertyWebPDictionary, kCGImagePropertyWebPUnclampedDelayTime, kCGImagePropertyWebPDelayTime),
+            (kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSUnclampedDelayTime, kCGImagePropertyHEICSDelayTime),
+        ]
+        for (dictionary, unclamped, clamped) in formats {
+            guard let format = props[dictionary] as? [CFString: Any] else { continue }
+            guard let delay = (format[unclamped] as? Double) ?? (format[clamped] as? Double) else { continue }
+            return delay <= 0.010 ? 0.1 : delay
+        }
+        return nil
     }
 
     static func thumbnail(_ path: String, maxPixel: CGFloat) -> NSImage? {
@@ -96,6 +148,85 @@ enum ImageFile {
     }
 
     static func full(_ path: String) -> NSImage? { NSImage(contentsOfFile: path) }
+}
+
+// MARK: - Animation
+
+/// Plays an animated image's frames (ADR-174): GIF, APNG, animated WebP and HEIC sequences, all
+/// through ImageIO, which composites each frame from the ones before it.
+///
+/// A clock of its own rather than `CGAnimateImageAtURLWithBlock`: that API can start and stop but not
+/// pause on a frame, step one, or say which frame is up — and those are what a reader inspecting a
+/// recorded interaction reaches for. Frames are decoded one at a time as they come up, so a
+/// 400-frame recording costs one frame of memory, not four hundred.
+@MainActor
+final class ImageAnimation {
+    let frameCount: Int
+    private(set) var index = 0
+    private(set) var isPlaying = false
+    /// The frame to put on screen, and the moment playback state changed.
+    var onFrame: ((CGImage?) -> Void)?
+    var onChange: (() -> Void)?
+
+    private let source: CGImageSource
+    private let delays: [TimeInterval]
+    private var clock: Task<Void, Never>?
+
+    init?(path: String) {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, options) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else { return nil }
+        self.source = source
+        frameCount = count
+        delays = (0..<count).map { ImageFile.delay(source, at: $0) ?? 0.1 }
+    }
+
+    func frame(at index: Int) -> CGImage? {
+        CGImageSourceCreateImageAtIndex(source, index, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    }
+
+    func play() {
+        guard !isPlaying else { return }
+        isPlaying = true
+        onChange?()
+        // Deadlines rather than sleeps, so a long recording does not drift behind its own delays; a
+        // clock that fell more than a frame behind (the Mac slept, the app was busy) starts over from
+        // now instead of racing to catch up.
+        clock = Task { [weak self] in
+            var deadline = ContinuousClock.now
+            while !Task.isCancelled {
+                guard let delay = self?.delays[self?.index ?? 0] else { return }
+                deadline += .seconds(delay)
+                if deadline < .now - .seconds(delay) { deadline = .now + .seconds(delay) }
+                try? await Task.sleep(until: deadline, clock: .continuous)
+                guard !Task.isCancelled, let self else { return }
+                self.show((self.index + 1) % self.frameCount)
+            }
+        }
+    }
+
+    func pause() {
+        clock?.cancel()
+        clock = nil
+        guard isPlaying else { return }
+        isPlaying = false
+        onChange?()
+    }
+
+    func toggle() { if isPlaying { pause() } else { play() } }
+
+    /// ← / →: one frame, pausing first — stepping a clip that keeps running is not stepping it.
+    func step(_ delta: Int) {
+        pause()
+        show(((index + delta) % frameCount + frameCount) % frameCount)
+    }
+
+    private func show(_ next: Int) {
+        index = next
+        onFrame?(frame(at: next))
+        onChange?()
+    }
 }
 
 // MARK: - The scroll view
@@ -121,6 +252,12 @@ private final class ImageCanvas: NSView {
         }
     }
 
+    /// One frame of an animation (ADR-174), in place of the first frame `image` put up.
+    func showFrame(_ frame: CGImage?) {
+        guard let frame else { return }
+        imageLayer.contents = frame
+    }
+
     /// Set while the pointer is dragging the image around; the cursor is pushed for the duration.
     private var dragAnchor: NSPoint?
     private let imageLayer = CALayer()
@@ -139,6 +276,9 @@ private final class ImageCanvas: NSView {
         imageLayer.contentsScale = 1
         imageLayer.contentsGravity = .resize
         imageLayer.minificationFilter = .trilinear
+        // A standalone layer cross-fades a new `contents` over a quarter second, which smeared every
+        // frame of an animation into the next (ADR-174).
+        imageLayer.actions = ["contents": NSNull()]
         layer?.addSublayer(imageLayer)
     }
 
@@ -201,7 +341,13 @@ private final class ImageCanvas: NSView {
         // Arrows walk the gallery rather than nudging the image about. Panning already has three
         // ways in — the hand cursor, two-finger scroll and the scrollers — and stepping through the
         // images had none from the keyboard, which is what the pane is mostly for.
+        //
+        // Except in an animation, where ← / → step its frames and space plays and pauses, as they do
+        // in every player on the Mac (ADR-174); ↑ / ↓ still walk the gallery and ⌘Y still previews.
+        let plays = zoomView.isAnimated
         if let key = event.specialKey {
+            if plays, key == .leftArrow { zoomView.stepFrame(-1); return }
+            if plays, key == .rightArrow { zoomView.stepFrame(1); return }
             if key == .upArrow || key == .leftArrow { zoomView.onStep?(-1); return }
             if key == .downArrow || key == .rightArrow { zoomView.onStep?(1); return }
         }
@@ -215,7 +361,7 @@ private final class ImageCanvas: NSView {
         case "0": zoomView.fitToWindow()
         case "1": zoomView.setZoom(1)
         // Finder's two: space previews, return opens.
-        case " ": zoomView.onCommand?(.quickLook)
+        case " ": if plays { zoomView.togglePlayback() } else { zoomView.onCommand?(.quickLook) }
         case "\r", "\n": zoomView.onCommand?(.openWindow)
         default: super.keyDown(with: event)
         }
@@ -257,14 +403,18 @@ final class ImageZoomView: NSScrollView {
     /// True while the viewer is showing the whole image and should re-fit when its column resizes.
     private(set) var isFitting = true
 
-    /// Reports `(zoom, isFitting)` after anything changes either.
-    var onChange: ((CGFloat, Bool) -> Void)?
+    /// Called after the zoom, the fit or the animation's frame or playback changes; the model reads
+    /// what it needs back off the view.
+    var onChange: ((ImageZoomView) -> Void)?
     /// ⌥↑ / ⌥↓, and the viewer's own scroll-past gestures: walk the gallery by ±1.
     var onStep: ((Int) -> Void)?
     /// Space, return, ⌘C, ⌘⌫ — the verbs the pane, not the viewer, carries out.
     var onCommand: ((ImageCommand) -> Void)?
 
     private let canvas = ImageCanvas()
+    private(set) var animation: ImageAnimation?
+    /// Playing when the view left its window, so it picks up again when it comes back.
+    private var suspended = false
     private var key: String?
     private var refitting = false
 
@@ -297,22 +447,47 @@ final class ImageZoomView: NSScrollView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// Gives the pane's keyboard to the image. Clicking a thumbnail row calls this: **the viewer is
-    /// the pane's one responder**, because SwiftUI's `.onKeyPress` never sees a command chord — a
-    /// focusable list handled ↑/↓/space/return and silently dropped ⌘C and ⌘⌫ (measured 2026-09-10),
-    /// and one keyboard that answers every key beats two that each answer some.
-    func focusDocument() { window?.makeFirstResponder(canvas) }
-
     /// Shows `image`, resetting the zoom only when the file actually changes: re-running SwiftUI's
     /// update for an unrelated reason must not throw away where the reader had zoomed to.
-    func show(image: NSImage?, pixels: CGSize, key: String) {
+    func show(image: NSImage?, pixels: CGSize, key: String, animated: Bool = false) {
         guard key != self.key else { return }
         self.key = key
+        animation?.pause()
+        animation = nil
+        suspended = false
         canvas.image = image
+        // An animation plays as soon as it is up: it is silent, and a GIF held on its first frame is
+        // a still the reader has to ask to be what it is (ADR-174).
+        if animated, let animation = ImageAnimation(path: key) {
+            animation.onFrame = { [weak self] frame in self?.canvas.showFrame(frame) }
+            animation.onChange = { [weak self] in self.map { $0.onChange?($0) } }
+            self.animation = animation
+            if window != nil { animation.play() } else { suspended = true }
+        }
         let size = pixels.width > 1 && pixels.height > 1 ? pixels : (image?.size ?? NSSize(width: 1, height: 1))
         canvas.frame = NSRect(origin: .zero, size: size)
         isFitting = true
         fitToWindow()
+    }
+
+    // MARK: Playback
+
+    var isAnimated: Bool { animation != nil }
+    func togglePlayback() { animation?.toggle() }
+    func stepFrame(_ delta: Int) { animation?.step(delta) }
+
+    /// A view that leaves its window — the pane hidden, the tab switched, the window closed — stops
+    /// its clock rather than decoding frames nobody can see.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let animation else { return }
+        if window == nil {
+            suspended = animation.isPlaying
+            animation.pause()
+        } else if suspended {
+            suspended = false
+            animation.play()
+        }
     }
 
     // MARK: Zoom policy
@@ -384,7 +559,7 @@ final class ImageZoomView: NSScrollView {
         // The checkerboard and the outline are drawn where the image *currently* is, so they follow
         // it (see `draw`).
         needsDisplay = true
-        onChange?(zoom, isFitting)
+        onChange?(self)
     }
 
     @objc private func boundsChanged() {
@@ -485,12 +660,40 @@ final class ImageZoomView: NSScrollView {
 final class ImageZoomModel {
     fileprivate(set) var zoom: CGFloat = 1
     fileprivate(set) var isFitting = true
+    /// An animation's frame count (1 for a still), the frame on screen, and whether it is playing.
+    fileprivate(set) var frames = 1
+    fileprivate(set) var frame = 0
+    fileprivate(set) var isPlaying = false
     @ObservationIgnored fileprivate weak var view: ImageZoomView?
+    /// Whatever takes the pane's keyboard: the image canvas, or a video's player (ADR-174).
+    @ObservationIgnored weak var keyView: NSView?
+
+    var isAnimated: Bool { frames > 1 }
+
+    /// Copies the view's state in, touching only what moved: an animation reports every frame, and
+    /// an `@Observable` setter invalidates its readers even when the value is the same.
+    fileprivate func read(_ view: ImageZoomView) {
+        if zoom != view.zoom { zoom = view.zoom }
+        if isFitting != view.isFitting { isFitting = view.isFitting }
+        let animation = view.animation
+        if frames != (animation?.frameCount ?? 1) { frames = animation?.frameCount ?? 1 }
+        if frame != (animation?.index ?? 0) { frame = animation?.index ?? 0 }
+        if isPlaying != (animation?.isPlaying ?? false) { isPlaying = animation?.isPlaying ?? false }
+    }
 
     var percent: Int { Int((zoom * 100).rounded()) }
     var canZoomIn: Bool { zoom < ImageZoomView.maxZoom - 0.001 }
     var canZoomOut: Bool { zoom > ImageZoomView.minZoom + 0.001 }
-    func focusViewer() { view?.focusDocument() }
+    /// Gives the pane's keyboard to the viewer. Clicking a thumbnail row calls this: **the viewer is
+    /// the pane's one responder**, because SwiftUI's `.onKeyPress` never sees a command chord — a
+    /// focusable list handled ↑/↓/space/return and silently dropped ⌘C and ⌘⌫ (measured 2026-09-10),
+    /// and one keyboard that answers every key beats two that each answer some.
+    func focusViewer() {
+        guard let keyView else { return }
+        keyView.window?.makeFirstResponder(keyView)
+    }
+    func togglePlayback() { view?.togglePlayback() }
+    func stepFrame(_ delta: Int) { view?.stepFrame(delta) }
     func fit() { view?.fitToWindow() }
     func actualSize() { view?.setZoom(1) }
     func zoomIn() { view?.step(1) }
@@ -503,25 +706,24 @@ struct ImageZoomCanvas: NSViewRepresentable {
     let pixels: CGSize
     /// Identity of the file on screen: the viewer resets its zoom when this changes and only then.
     let key: String
+    var animated = false
     let model: ImageZoomModel
     var onStep: (Int) -> Void = { _ in }
     var onCommand: (ImageCommand) -> Void = { _ in }
 
     func makeNSView(context: Context) -> ImageZoomView {
         let view = ImageZoomView(frame: .zero)
-        view.onChange = { [weak model] zoom, fitting in
-            model?.zoom = zoom
-            model?.isFitting = fitting
-        }
+        view.onChange = { [weak model] view in model?.read(view) }
         model.view = view
         return view
     }
 
     func updateNSView(_ view: ImageZoomView, context: Context) {
         model.view = view
+        model.keyView = view.documentView
         view.onStep = onStep
         view.onCommand = onCommand
-        view.show(image: image, pixels: pixels, key: key)
+        view.show(image: image, pixels: pixels, key: key, animated: animated)
     }
 }
 
@@ -535,39 +737,21 @@ struct ImageZoomCanvas: NSViewRepresentable {
 struct ImageZoomBar: View {
     let model: ImageZoomModel
     var facts: ImageFacts?
+    /// False under a video, whose player carries its own controls: the band keeps only the facts.
+    var zooms = true
 
     var body: some View {
         HStack(spacing: 2) {
-            button("minus.magnifyingglass", "Zoom out (−)", enabled: model.canZoomOut) { model.zoomOut() }
-            Menu {
-                Button("Fit") { model.fit() }
-                Button("Actual Size (100%)") { model.actualSize() }
-                Divider()
-                ForEach([0.25, 0.5, 1.0, 2.0, 4.0, 8.0], id: \.self) { level in
-                    Button("\(Int(level * 100))%") { model.set(level) }
-                }
-            } label: {
-                Text("\(model.percent)%")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .frame(minWidth: 40)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Zoom level")
-            button("plus.magnifyingglass", "Zoom in (+)", enabled: model.canZoomIn) { model.zoomIn() }
-            button(model.isFitting ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                   model.isFitting ? "Actual size (1)" : "Fit the image (0)", enabled: true) {
-                if model.isFitting { model.actualSize() } else { model.fit() }
-            }
+            if zooms { verbs }
             Spacer(minLength: 6)
             if let facts {
                 // The detail column is about 210 pt wide at the pane's floor with the list open, so
                 // the facts give way to the zoom verbs rather than pushing them off the band
                 // (the same fall-through ADR-104 uses for the panel's own tab strip).
                 ViewThatFits(in: .horizontal) {
-                    factsLabel("\(facts.dimensions)  ·  \(facts.fileSize)")
-                    factsLabel(facts.dimensions)
+                    factsLabel(([position] + [facts.dimensions, facts.length, facts.fileSize]).compactMap { $0 }.joined(separator: "  ·  "))
+                    factsLabel(([position] + [facts.dimensions, facts.length]).compactMap { $0 }.joined(separator: "  ·  "))
+                    factsLabel(position ?? facts.dimensions)
                     EmptyView()
                 }
             }
@@ -576,6 +760,42 @@ struct ImageZoomBar: View {
         .frame(height: 28)
         .frame(maxWidth: .infinity)
         .background(.bar)
+    }
+
+    /// Which frame of an animation is up, `12 / 40` — the number a reader stepping with ← / → needs.
+    private var position: String? {
+        // Not under a video: the model still holds the last animation's frames until a canvas reports.
+        zooms && model.isAnimated ? "\(model.frame + 1) / \(model.frames)" : nil
+    }
+
+    @ViewBuilder
+    private var verbs: some View {
+        if model.isAnimated {
+            button(model.isPlaying ? "pause.fill" : "play.fill",
+                   model.isPlaying ? "Pause (space)" : "Play (space)", enabled: true) { model.togglePlayback() }
+        }
+        button("minus.magnifyingglass", "Zoom out (−)", enabled: model.canZoomOut) { model.zoomOut() }
+        Menu {
+            Button("Fit") { model.fit() }
+            Button("Actual Size (100%)") { model.actualSize() }
+            Divider()
+            ForEach([0.25, 0.5, 1.0, 2.0, 4.0, 8.0], id: \.self) { level in
+                Button("\(Int(level * 100))%") { model.set(level) }
+            }
+        } label: {
+            Text("\(model.percent)%")
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .frame(minWidth: 40)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Zoom level")
+        button("plus.magnifyingglass", "Zoom in (+)", enabled: model.canZoomIn) { model.zoomIn() }
+        button(model.isFitting ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+               model.isFitting ? "Actual size (1)" : "Fit the image (0)", enabled: true) {
+            if model.isFitting { model.actualSize() } else { model.fit() }
+        }
     }
 
     private func factsLabel(_ text: String) -> some View {
@@ -600,9 +820,9 @@ struct ImageZoomBar: View {
     }
 }
 
-/// The viewer proper: one image, its caption, and its zoom bar.
+/// The viewer proper: one image, animation or video, its caption, and its footer.
 ///
-/// Used by the Images pane's detail column and by an image window, so the two cannot drift — and so
+/// Used by the Media pane's detail column and by a media window, so the two cannot drift — and so
 /// a window gets the zoom controls by construction rather than by being wired up twice.
 struct ImageDetailView: View {
     let path: String
@@ -614,8 +834,11 @@ struct ImageDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let image {
-                ImageZoomCanvas(image: image, pixels: facts?.pixels ?? image.size, key: path, model: model,
+            if VideoFile.isVideo(path) {
+                VideoCanvas(path: path, model: model, onCommand: onCommand)
+            } else if let image {
+                ImageZoomCanvas(image: image, pixels: facts?.pixels ?? image.size, key: path,
+                                animated: facts?.kind == .animated, model: model,
                                 onStep: { onCommand(.step($0)) }, onCommand: onCommand)
             } else {
                 ContentUnavailableView("Can't read this image",
@@ -640,7 +863,7 @@ struct ImageDetailView: View {
                     .help(caption)
             }
             Divider()
-            ImageZoomBar(model: model, facts: facts)
+            ImageZoomBar(model: model, facts: facts, zooms: !VideoFile.isVideo(path))
         }
     }
 }

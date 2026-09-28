@@ -753,10 +753,10 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
             Button(tabs.selectedTab?.panel.isZoomed == true ? "Unzoom Panel" : "Zoom Panel") { tabs.togglePanelZoom() }
                 .keyboardShortcut(key(.zoomPanel)).disabled(tabs.selectedTab == nil)
-            Toggle(tabs.isImagesPaneFront ? "Show Image List" : "Show File Tree",
+            Toggle(tabs.isImagesPaneFront ? "Show Media List" : "Show File Tree",
                    isOn: Binding(get: { tabs.browserListShown }, set: { _ in tabs.toggleBrowserList() }))
                 .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.canToggleBrowserList)
-            Button("Quick Look Image") { tabs.quickLookFrontImage() }
+            Button("Quick Look") { tabs.quickLookFrontImage() }
                 .keyboardShortcut(key(.quickLookImage)).disabled(!tabs.isImagesPaneFront)
             Button("Copy Grill Round as Markdown") { tabs.copyFrontGrillRound() }
                 .keyboardShortcut(key(.copyGrillRound)).disabled(!tabs.isGrillPaneFront)
@@ -767,7 +767,7 @@ struct ClinicCommands: Commands {
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)
             Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
-            Button("Images") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
+            Button("Media") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Grill") { tabs.toggleGrill() }.keyboardShortcut(key(.toggleGrill)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Pull Request") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
             Divider()

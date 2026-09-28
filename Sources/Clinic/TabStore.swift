@@ -930,7 +930,7 @@ final class TabStore {
         case .diff: return tab.gitBranch ?? "Diff"
         case .attachments:
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
-            return count > 0 ? "Images (\(count))" : "Images"
+            return count > 0 ? "Media (\(count))" : "Media"
         case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
         case .grill:
             // The count on the chip is what still needs the reader, which is the only number that
