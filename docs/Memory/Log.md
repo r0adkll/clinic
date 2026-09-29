@@ -4594,3 +4594,12 @@ code, run verbatim against generated GIF/APNG/PNG/MP4 files, gave the right fram
 video thumbnail. In a smoke instance, rows showed badges and a GIF went from frame 7/20 to 16/20 between
 screenshots. The only preference that changed was AVKit's own duration key, which I restored. Not run: the
 keyboard, and a video window resizing to its video.
+
+## 2026-09-29 — Duplicate a run configuration (ADR-175)
+User: the run configuration editor should be able to duplicate the selected configuration.
+
+The editor's list gains a Duplicate button after `−` (⌘D) and a row context menu with Duplicate and Delete.
+The copy lands after the original as *‹name› Copy*, selected, with every field kept, and saves under an id
+of its own because it is marked new.
+
+Verified: `make build` succeeds. Not run: the sheet in a smoke instance.

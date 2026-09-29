@@ -56,7 +56,7 @@ private struct RunSheetHeader: View {
 private struct EditableConfig: Identifiable, Equatable {
     struct EnvRow: Identifiable, Equatable { let id = UUID(); var key: String; var value: String }
 
-    let uid = UUID()
+    private(set) var uid = UUID()
     var id: String
     var isNew: Bool
     var name: String
@@ -75,6 +75,16 @@ private struct EditableConfig: Identifiable, Equatable {
         id = c.id; self.isNew = isNew; name = c.name; icon = c.symbol; command = c.command ?? ""
         directory = c.directory ?? ""; env = (c.env ?? [:]).sorted { $0.key < $1.key }.map { EnvRow(key: $0.key, value: $0.value) }
         rerun = c.reruns; device = c.device; members = nil; extra = c.extra
+    }
+
+    /// A copy under a new identity, named "‹name› Copy", that saves with an id of its own. A duplicated
+    /// compound keeps its members.
+    func duplicate() -> EditableConfig {
+        var copy = self
+        copy.uid = UUID(); copy.id = ""; copy.isNew = true
+        copy.name = (name.isEmpty ? "Untitled" : name) + " Copy"
+        copy.env = env.map { EnvRow(key: $0.key, value: $0.value) }
+        return copy
     }
 }
 
@@ -149,6 +159,10 @@ struct RunEditorSheet: View {
                     }
                     .padding(.vertical, 2)
                     .tag(c.uid)
+                    .contextMenu {
+                        Button("Duplicate") { duplicate(c.uid) }
+                        Button("Delete") { selection = c.uid; remove() }
+                    }
                 }
                 .onMove { configs.move(fromOffsets: $0, toOffset: $1) }
             }
@@ -171,6 +185,9 @@ struct RunEditorSheet: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().padding(.horizontal, 6)
                 Button { remove() } label: { Image(systemName: "minus") }
                     .buttonStyle(.borderless).disabled(selection == nil).padding(.horizontal, 6)
+                Button { if let uid = selection { duplicate(uid) } } label: { Image(systemName: "plus.square.on.square") }
+                    .buttonStyle(.borderless).disabled(selection == nil).padding(.horizontal, 6)
+                    .keyboardShortcut("d", modifiers: .command).help("Duplicate (⌘D)")
                 Spacer()
                 if (tabs.runs.importCounts[context.projectPath] ?? 0) > 0 {
                     Button("Import…", action: onImport).buttonStyle(.borderless).font(.callout).padding(.trailing, 8)
@@ -399,6 +416,14 @@ struct RunEditorSheet: View {
         e.members = []
         configs.append(e)
         selection = e.uid
+    }
+
+    /// Inserts a copy right after the original and selects it.
+    private func duplicate(_ uid: UUID) {
+        guard let i = configs.firstIndex(where: { $0.uid == uid }) else { return }
+        let copy = configs[i].duplicate()
+        configs.insert(copy, at: i + 1)
+        selection = copy.uid
     }
 
     private func remove() {
