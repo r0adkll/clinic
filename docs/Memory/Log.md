@@ -4623,3 +4623,17 @@ writing to `~/.claude` (ADR-018 holds). Candidates reported to the user, none de
 Constraints: needs CLI 2.1.287+, the API is early access, `disableAllHooks` and organisation policy stop a
 mod, so the settings hooks stay as the fallback. `$.http.fetch` takes a Unix `socketPath` but speaks HTTP,
 which `HookServer` does not. Each adoption needs an ADR superseding the one it changes. Nothing was built or run.
+
+## 2026-10-02 — Clinic Dev is a separate app (ADR-176)
+User: do the mods work on a branch, and first make it safe to run a separate Clinic from Clinic without
+touching the "production" configuration.
+
+Branch `mods-integration`. The app's name, bundle id and data directory are now three build settings with
+the released values as defaults. `make dev` (`scripts/dev`) overrides them to build *Clinic Dev* into
+`build/dev`, quits a running one and launches it with a bare environment. `ClinicPaths.directoryName` reads
+the data directory from Info.plist and replaces every hardcoded `"Clinic"` path. Clinic Dev refuses the wake
+agent, `clinic-wake` reads its own bundle's identity, and the Dock icon wears a DEV band.
+
+Verified: Clinic Dev ran beside the live app with its own sockets, hook settings and preferences, and a haiku
+session in it delivered its hooks. The live app's files were unchanged. `make build` still yields the stock
+identity, and 586 ClinicCore tests pass. Not seen: the Dock band. Next: the transport and status line mod.

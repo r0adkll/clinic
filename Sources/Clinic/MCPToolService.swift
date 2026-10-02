@@ -16,7 +16,7 @@ final class MCPToolService {
 
     init(appSupport: URL = ClinicPaths.appSupport) {
         server = MCPServer(socketPath: MCPServer.defaultSocketPath(appSupport: appSupport, suffix: HookService.instanceSuffix))
-        configDirectory = appSupport.appendingPathComponent("Clinic/mcp", isDirectory: true)
+        configDirectory = appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true).appendingPathComponent("mcp", isDirectory: true)
     }
 
     func start(tabs: TabStore, sessions: SessionStore, history: NotificationStore, notifications: NotificationService, prs: PRStore) {

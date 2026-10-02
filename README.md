@@ -49,6 +49,7 @@ make setup        # installs xcodegen + zig@0.15, checks out the ghostty submodu
 make ghostty      # builds GhosttyKit.xcframework from vendor/ghostty (one-time, several minutes)
 make project      # generates Clinic.xcodeproj
 make build        # builds the app
+make dev          # builds and launches Clinic Dev: its own bundle id, preferences and data, beside the real app
 make test         # runs the test suites
 make screenshots  # re-shoots the README and social preview images from staged sessions
 ```

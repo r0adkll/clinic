@@ -71,4 +71,13 @@ import Testing
         #expect(s.archived[id] == Date(timeIntervalSince1970: 1_000_000))
         #expect(s.spawnedBy[child] == id)
     }
+
+    /// ADR-176: a process whose Info.plist names no data directory (this test runner, the released app's
+    /// default) keeps its files in `Clinic`, and is not the development flavor.
+    @Test func dataDirectoryDefaultsToClinic() {
+        #expect(ClinicPaths.directoryName == "Clinic")
+        #expect(!ClinicPaths.isDevelopmentBuild)
+        #expect(ClinicPaths.directory.lastPathComponent == "Clinic")
+        #expect(StateStore.defaultURL(appSupport: URL(fileURLWithPath: "/tmp/x")).path == "/tmp/x/Clinic/state.json")
+    }
 }

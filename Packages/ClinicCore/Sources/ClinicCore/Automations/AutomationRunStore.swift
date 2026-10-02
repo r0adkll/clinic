@@ -28,7 +28,7 @@ public actor AutomationRunStore {
     }
 
     public static func defaultURL(appSupport: URL = ClinicPaths.appSupport) -> URL {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true)
+        appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true)
             .appendingPathComponent("automation-runs.json")
     }
 

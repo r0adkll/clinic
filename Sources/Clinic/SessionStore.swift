@@ -69,7 +69,7 @@ final class SessionStore {
     }
 
     /// Shared scratch directory for chats (ADR-068).
-    static let chatsDirectory: String = ClinicPaths.appSupport.appendingPathComponent("Clinic/Chats", isDirectory: true).path
+    static let chatsDirectory: String = ClinicPaths.directory.appendingPathComponent("Chats", isDirectory: true).path
     static func isChats(_ path: String) -> Bool { path == chatsDirectory }
 
     /// Membership and order come from `ProjectRoster` (ADR-077): registered projects outlive their

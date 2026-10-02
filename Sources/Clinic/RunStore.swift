@@ -407,7 +407,7 @@ final class RunStore {
     }
 
     /// Exit codes, one small file per start, removed once read.
-    private static let statusDirectory = ClinicPaths.appSupport.appendingPathComponent("Clinic/runs", isDirectory: true)
+    private static let statusDirectory = ClinicPaths.directory.appendingPathComponent("runs", isDirectory: true)
 
     /// `reported` is libghostty's code, which on macOS is `login`'s and always 0; the wrapper's file is
     /// the real one. No file means the wrapper died before writing it: the code is unknown.

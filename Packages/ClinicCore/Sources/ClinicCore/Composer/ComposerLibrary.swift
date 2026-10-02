@@ -176,7 +176,7 @@ public actor ComposerLibraryStore {
     }
 
     public static func defaultURL(appSupport: URL = ClinicPaths.appSupport) -> URL {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("composer.json")
+        appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true).appendingPathComponent("composer.json")
     }
 
     public var library: ComposerLibrary { current }

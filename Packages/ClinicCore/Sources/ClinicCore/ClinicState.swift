@@ -201,7 +201,7 @@ public actor StateStore {
     }
 
     public static func defaultURL(appSupport: URL = ClinicPaths.appSupport) -> URL {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("state.json")
+        appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true).appendingPathComponent("state.json")
     }
 
     public var state: ClinicState { current }

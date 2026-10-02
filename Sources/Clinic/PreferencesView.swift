@@ -480,7 +480,7 @@ private struct AdvancedPane: View {
                 Toggle("Record hook payloads to a trace file", isOn: $hookTrace)
                 LabeledContent("Trace and state files") {
                     Button("Reveal in Finder") {
-                        let dir = ClinicPaths.appSupport.appendingPathComponent("Clinic")
+                        let dir = ClinicPaths.directory
                         NSWorkspace.shared.activateFileViewerSelecting([dir])
                     }
                 }

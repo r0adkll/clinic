@@ -1,4 +1,4 @@
-.PHONY: setup ghostty project build test release publish screenshots clean
+.PHONY: setup ghostty project build dev dev-build dev-stop dev-reset test release publish screenshots clean
 
 setup:
 	brew install xcodegen zig@0.15 gettext
@@ -14,6 +14,21 @@ project:
 
 build: project
 	xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation build | tail -20
+
+# Clinic Dev (ADR-176): its own bundle id, preferences, data directory and derived data, so it runs beside
+# the Clinic you work in and shares nothing with it. `make dev` builds, quits the running one and relaunches.
+dev:
+	scripts/dev
+
+dev-build:
+	scripts/dev build
+
+dev-stop:
+	scripts/dev stop
+
+# Deletes ~/Library/Application Support/Clinic Dev and the com.r0adkll.clinic.dev preferences.
+dev-reset:
+	scripts/dev reset
 
 test:
 	swift test --package-path Packages/ClinicCore

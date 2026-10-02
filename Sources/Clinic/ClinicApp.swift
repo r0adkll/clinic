@@ -79,10 +79,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(true, forKey: "ApplePersistenceIgnoreState")
     }
 
+    /// The development flavor wears a DEV band across its Dock icon while it runs (ADR-176), so the
+    /// two apps are told apart at a glance in the Dock and the app switcher. The released app draws nothing.
+    private func markDevelopmentBuild() {
+        guard ClinicPaths.isDevelopmentBuild, let base = NSApp.applicationIconImage else { return }
+        let size = NSSize(width: 512, height: 512)
+        NSApp.applicationIconImage = NSImage(size: size, flipped: false) { rect in
+            base.draw(in: rect)
+            let band = NSRect(x: 56, y: 70, width: rect.width - 112, height: 112)
+            NSColor.systemOrange.setFill()
+            NSBezierPath(roundedRect: band, xRadius: 30, yRadius: 30).fill()
+            let text = NSAttributedString(string: "DEV", attributes: [
+                .font: NSFont.systemFont(ofSize: 84, weight: .heavy),
+                .foregroundColor: NSColor.white,
+                .kern: 6,
+            ])
+            let textSize = text.size()
+            text.draw(at: NSPoint(x: band.midX - textSize.width / 2, y: band.midY - textSize.height / 2))
+            return true
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
         scrubInheritedDebuggerEnvironment()
+        markDevelopmentBuild()
         // The saved theme goes on before any window exists, so nothing is drawn in the wrong one
         // (ADR-152). libghostty hears every change of appearance, so a config with a light and a dark
         // theme follows Clinic's rather than the Mac's.

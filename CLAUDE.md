@@ -14,6 +14,7 @@ Native macOS Claude Code session manager (a clean-room Collins reimplementation 
 - `Packages/GhosttyBridge` — the only place `ghostty.h`/`GhosttyKit` is imported.
 - `Sources/Clinic` — app target (SwiftUI + AppKit bridging).
 - `Sources/clinic-hook` — helper executable bundled in the app; forwards hook payloads to Clinic's socket.
+- `scripts/dev` — `make dev` builds and relaunches *Clinic Dev* (ADR-176): bundle id `com.r0adkll.clinic.dev`, data in `~/Library/Application Support/Clinic Dev`, derived data in `build/dev`. Test changes there, never by launching a second `Clinic`. `make dev-reset` wipes its data and preferences.
 - `vendor/ghostty` — submodule pinned to v1.3.1. `scripts/build-ghostty.sh` emits `Packages/GhosttyBridge/GhosttyKit.xcframework`.
 
 ## Git

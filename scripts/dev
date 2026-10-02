@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Clinic Dev (ADR-176): a second flavor of the app, built to run beside the Clinic you work in.
+#
+#   scripts/dev            build, quit a running Clinic Dev, launch the new one   (make dev)
+#   scripts/dev build      build only                                             (make dev-build)
+#   scripts/dev run        launch what is built, without building
+#   scripts/dev stop       quit a running Clinic Dev                              (make dev-stop)
+#   scripts/dev reset      stop, then delete its data directory and preferences   (make dev-reset)
+#   scripts/dev path       print the app's path
+#
+# What keeps it apart from the real app:
+#   - bundle id com.r0adkll.clinic.dev, so preferences, notifications and window frames are its own;
+#   - ~/Library/Application Support/Clinic Dev, so state, sockets, hook settings and chats are its own;
+#   - its own derived data in build/dev, so building it never touches the app that is running;
+#   - a clean launch environment, so it inherits nothing from the Claude Code session that started it.
+# It shares ~/.claude with the real app unless CLINIC_DEV_CLAUDE_CONFIG_DIR names another directory.
+#
+# Environment:
+#   CLINIC_DEV_BACKGROUND=1             launch without taking focus
+#   CLINIC_DEV_CLAUDE_CONFIG_DIR=<dir>  give its `claude` sessions a config directory of their own
+#   CLINIC_DEV_ARGS="-ClinicHookTrace YES"   launch arguments (the argument domain of its defaults)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAME="Clinic Dev"
+BUNDLE_ID="com.r0adkll.clinic.dev"
+DERIVED="$ROOT/build/dev"
+APP="$DERIVED/Build/Products/Debug/$NAME.app"
+SUPPORT="$HOME/Library/Application Support/$NAME"
+
+pids() { pgrep -x "$NAME" || true; }
+
+build() {
+  make -C "$ROOT" project >/dev/null
+  mkdir -p "$DERIVED"
+  echo "building $NAME"
+  # `make build` pipes through tail, which hides a failure; this keeps the status and shows the errors.
+  if ! xcodebuild -project "$ROOT/Clinic.xcodeproj" -scheme Clinic -configuration Debug -derivedDataPath "$DERIVED" \
+      -skipPackagePluginValidation -skipMacroValidation \
+      CLINIC_APP_NAME="$NAME" CLINIC_BUNDLE_ID="$BUNDLE_ID" CLINIC_DATA_DIRECTORY="$NAME" \
+      build >"$DERIVED/build.log" 2>&1; then
+    grep -E 'error:' "$DERIVED/build.log" | sort -u >&2 || true
+    echo "error: build failed (build/dev/build.log)" >&2
+    exit 1
+  fi
+  echo "built $APP"
+}
+
+stop() {
+  local running; running="$(pids)"
+  [ -z "$running" ] && return 0
+  echo "quitting $NAME"
+  kill $running 2>/dev/null || true
+  for _ in $(seq 1 50); do [ -z "$(pids)" ] && return 0; sleep 0.1; done
+  kill -9 $(pids) 2>/dev/null || true
+}
+
+run() {
+  [ -d "$APP" ] || { echo "error: $APP is not built. Run: make dev" >&2; exit 1; }
+  local flags=(-n)
+  [ -n "${CLINIC_DEV_BACKGROUND:-}" ] && flags+=(-g)
+  local envs=()
+  [ -n "${CLINIC_DEV_CLAUDE_CONFIG_DIR:-}" ] && envs+=(--env "CLAUDE_CONFIG_DIR=$CLINIC_DEV_CLAUDE_CONFIG_DIR")
+  # shellcheck disable=SC2206
+  local args=(${CLINIC_DEV_ARGS:-})
+  echo "launching $NAME"
+  # `open` hands its own environment to the app. Started from a Claude Code session inside Clinic that
+  # would be that session's, so the app gets the bare one a Finder launch has and finds its tools
+  # through the login shell as usual (ADR-086).
+  env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${SHELL:-/bin/zsh}" \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="${TMPDIR:-/tmp}" \
+    /usr/bin/open "${flags[@]}" -a "$APP" ${envs[@]+"${envs[@]}"} ${args[@]+--args "${args[@]}"}
+}
+
+reset() {
+  stop
+  sleep 3   # a dying app flushes its cached preferences; deleting sooner loses to that flush
+  rm -rf "$SUPPORT"
+  defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true
+  echo "removed $SUPPORT and the $BUNDLE_ID preferences"
+}
+
+case "${1:-}" in
+  "")    build; stop; run ;;
+  build) build ;;
+  run)   run ;;
+  stop)  stop ;;
+  reset) reset ;;
+  path)  echo "$APP" ;;
+  *)     sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac

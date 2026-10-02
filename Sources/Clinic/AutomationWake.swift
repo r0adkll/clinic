@@ -33,6 +33,9 @@ enum AutomationWake {
         // installed app, that outlives the test — and the preference behind it is shared with the
         // live app because `CLINIC_APP_SUPPORT` does not isolate `UserDefaults`.
         guard !ClinicPaths.isSmokeInstance else { return "Not available in a smoke instance." }
+        // The bundled plist has one launchd label and names the installed app, so the development flavor
+        // registering it would take the real Clinic's agent (ADR-176).
+        guard !ClinicPaths.isDevelopmentBuild else { return "Not available in Clinic Dev." }
         let service = SMAppService.agent(plistName: plistName)
         do {
             if enabled {

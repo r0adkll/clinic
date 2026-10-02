@@ -25,7 +25,7 @@ final class HookService {
     }()
 
     init(appSupport: URL = ClinicPaths.appSupport) {
-        let dir = appSupport.appendingPathComponent("Clinic", isDirectory: true)
+        let dir = appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true)
         let suffix = Self.instanceSuffix
         settingsFileURL = dir.appendingPathComponent("hooks\(suffix).json")
         traceDirectory = dir.appendingPathComponent("trace", isDirectory: true)

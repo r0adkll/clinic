@@ -46,8 +46,24 @@ public enum ClinicPaths {
         if let o = ProcessInfo.processInfo.environment["CLINIC_APP_SUPPORT"], !o.isEmpty { return URL(fileURLWithPath: o, isDirectory: true) }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
-    /// `…/Application Support/Clinic`
-    public static var directory: URL { appSupport.appendingPathComponent("Clinic", isDirectory: true) }
+    /// The folder under Application Support that holds this build's files: `Clinic`, or `Clinic Dev` for
+    /// the development flavor (ADR-176). It comes from the app's Info.plist, which the build writes, so
+    /// the helpers in `Contents/MacOS` read the same answer and a process with no such key (a test
+    /// runner) gets `Clinic`.
+    public static let directoryName: String = {
+        let name = (Bundle.main.object(forInfoDictionaryKey: "ClinicDataDirectory") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty || name.contains("/") ? "Clinic" : name
+    }()
+
+    /// `…/Application Support/Clinic`, or the development flavor's `…/Application Support/Clinic Dev`.
+    public static var directory: URL { appSupport.appendingPathComponent(directoryName, isDirectory: true) }
+
+    /// True for the development flavor (`make dev`, ADR-176): a build with its own bundle id, preferences
+    /// and data directory, made to run beside the Clinic the user works in. Unlike a smoke instance it
+    /// shares nothing with that app, so it needs none of the smoke guards except the ones that reach a
+    /// system-wide name, such as the wake agent's launchd label.
+    public static var isDevelopmentBuild: Bool { directoryName != "Clinic" }
 
     /// True when this process is a **smoke instance** — one launched with `CLINIC_APP_SUPPORT` so it
     /// keeps its own state, sockets and chats away from the app the user is really using (ADR-038).

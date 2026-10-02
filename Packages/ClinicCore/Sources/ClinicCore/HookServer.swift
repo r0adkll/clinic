@@ -32,7 +32,7 @@ public final class HookServer: @unchecked Sendable {
 
     /// - Parameter suffix: `SocketClaim.instanceSuffix`, empty for the first instance on the directory.
     public static func defaultSocketPath(appSupport: URL = ClinicPaths.appSupport, suffix: String = "") -> String {
-        appSupport.appendingPathComponent("Clinic", isDirectory: true).appendingPathComponent("hook\(suffix).sock").path
+        appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true).appendingPathComponent("hook\(suffix).sock").path
     }
 
     public func start() throws {

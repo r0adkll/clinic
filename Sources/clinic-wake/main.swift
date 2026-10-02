@@ -8,7 +8,10 @@
 // worse than one that quietly does nothing.
 import Foundation
 
-let bundleId = "com.r0adkll.clinic"
+// This tool ships in the app's `Contents/MacOS`, so `Bundle.main` is the app: the flavor that installed
+// the agent is the one it wakes, and the one whose data directory it reads (ADR-176).
+let bundleId = Bundle.main.bundleIdentifier ?? "com.r0adkll.clinic"
+let dataDirectory = (Bundle.main.object(forInfoDictionaryKey: "ClinicDataDirectory") as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Clinic"
 
 /// Written by Clinic when the user quits it on purpose. An app that resurrects itself four minutes
 /// after you quit it is hostile, so an explicit quit suppresses the wake until the next login —
@@ -16,7 +19,7 @@ let bundleId = "com.r0adkll.clinic"
 func isSuppressed() -> Bool {
     let support = ProcessInfo.processInfo.environment["CLINIC_APP_SUPPORT"].map { URL(fileURLWithPath: $0) }
         ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let marker = support.appendingPathComponent("Clinic/wake-suppressed", isDirectory: false)
+    let marker = support.appendingPathComponent(dataDirectory, isDirectory: true).appendingPathComponent("wake-suppressed", isDirectory: false)
     guard let data = try? Data(contentsOf: marker),
           let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
           let bootTime = text.isEmpty ? nil : Double(text)
