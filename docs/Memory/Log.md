@@ -4603,3 +4603,23 @@ The copy lands after the original as *‹name› Copy*, selected, with every fie
 of its own because it is marked new.
 
 Verified: `make build` succeeds. Not run: the sheet in a smoke instance.
+
+## 2026-10-02 — Claude Mods surveyed for Clinic (no code change)
+User: Anthropic released Claude Mods; what could Clinic do with them?
+
+Read the mods overview and the API declarations bundled with CLI 2.1.287. A mod is a plugin of in-process
+function hooks, loadable for one session with `--plugin-dir`, so Clinic could ship one in its bundle without
+writing to `~/.claude` (ADR-018 holds). Candidates reported to the user, none decided:
+
+- Replace the eleven async command hooks and the `statusLine` forwarder (ADR-015, ADR-027, ADR-157) with one
+  mod: `turn.complete` carries `reason` (answer / aborted / refusal / error), `session.end` says `clear`,
+  `tool.check` names the permission verdict, and `$.session.usage()` gives the status line's figures without
+  taking the user's status line.
+- Mirror every `AskUserQuestion` into the Grill pane and answer it as the tool's result, not a pasted message.
+- Answer permission asks from Clinic (`tool.check`), and let Clinic queue prompts with `$.prompt.submit`.
+- `/clinic` commands that act with no turn; a Mods kind in the marketplace with `claude plugin validate`'s
+  hooks and calls shown before install; an installable plugin for sessions started outside Clinic (ADR-047).
+
+Constraints: needs CLI 2.1.287+, the API is early access, `disableAllHooks` and organisation policy stop a
+mod, so the settings hooks stay as the fallback. `$.http.fetch` takes a Unix `socketPath` but speaks HTTP,
+which `HookServer` does not. Each adoption needs an ADR superseding the one it changes. Nothing was built or run.
