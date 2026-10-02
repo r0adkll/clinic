@@ -30,6 +30,12 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var statusLine: StatusLineReport?
     /// `mod` when the session mod sent it (ADR-177); nil from `clinic-hook`.
     public var via: String?
+    /// `AskQuestion` and `AskResolved` (ADR-179): the `AskUserQuestion` call they are about.
+    public var toolUseId: String?
+    /// `AskQuestion`: the tool's questions.
+    public var questions: [AskedQuestion]?
+    /// `AskResolved`: what the terminal dialog was answered with; nil when it was dismissed.
+    public var answers: [String: String]?
     public var receivedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -39,7 +45,13 @@ public struct HookEvent: Codable, Sendable, Hashable {
         case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
         case statusLine = "_clinic_status_line"
         case via = "_clinic_via"
+        case toolUseId = "tool_use_id", questions, answers
     }
+
+    /// Sent by the session mod when Claude opens its question dialog (ADR-179).
+    public static let askQuestion = "AskQuestion"
+    /// Sent by the session mod when that dialog ended in the terminal, answered or dismissed (ADR-179).
+    public static let askResolved = "AskResolved"
 
     /// Sent by the session mod once per process, when it has loaded (ADR-177).
     public static let modAttached = "ModAttached"
@@ -75,6 +87,13 @@ public struct HookEvent: Codable, Sendable, Hashable {
         model = try c.decodeIfPresent(String.self, forKey: .model)
         stopHookActive = try c.decodeIfPresent(Bool.self, forKey: .stopHookActive)
         via = try c.decodeIfPresent(String.self, forKey: .via)
+        // Read only on the mod's own events: `PostToolUse` and others carry a `tool_use_id` and keys
+        // of the same names in other shapes, which must not fail the decode.
+        if hookEventName == Self.askQuestion || hookEventName == Self.askResolved {
+            toolUseId = try? c.decodeIfPresent(String.self, forKey: .toolUseId)
+            questions = try? c.decodeIfPresent([AskedQuestion].self, forKey: .questions)
+            answers = try? c.decodeIfPresent([String: String].self, forKey: .answers)
+        }
         receivedAt = try c.decodeIfPresent(Date.self, forKey: .receivedAt) ?? Date()
         // The status line input is a document of its own shape, not a hook payload, so it is read from
         // the top level rather than from a key.

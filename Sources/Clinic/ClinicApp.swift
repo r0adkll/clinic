@@ -315,6 +315,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .seconds(1.5))
                 tabs.launchNewSession(projectPath: dir, model: UserDefaults.standard.string(forKey: "ClinicSessionModel"), worktree: false, worktreeName: nil,
                                       worktreeBaseRef: nil, effort: nil, prompt: UserDefaults.standard.string(forKey: "ClinicSessionPrompt"), workItem: nil)
+                // `-ClinicEnterAfter <seconds>` presses Return in it: the way to answer a dialog in the
+                // terminal, such as Claude's question dialog, with nobody at the keyboard (ADR-179).
+                let enter = UserDefaults.standard.double(forKey: "ClinicEnterAfter")
+                if enter > 0 {
+                    Task {
+                        try? await Task.sleep(for: .seconds(enter))
+                        tabs.selectedTab?.surface.sendLine("")
+                    }
+                }
                 let interrupt = UserDefaults.standard.double(forKey: "ClinicInterruptAfter")
                 guard interrupt > 0 else { return }
                 try? await Task.sleep(for: .seconds(interrupt))

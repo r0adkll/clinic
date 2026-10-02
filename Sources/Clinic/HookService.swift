@@ -14,6 +14,8 @@ final class HookService {
     /// A session started, and the mod it was launched with never said it had loaded (ADR-177).
     var onModUnavailable: ((SessionID) -> Void)?
     private var pumpTask: Task<Void, Never>?
+    /// Pairs the Grill pane's answers with the session mod waiting for them (ADR-179).
+    let asks = AskBroker()
 
     /// How the sessions launched from now on report (ADR-177). `.command` until `claude --version` has
     /// answered, which it has long before anyone can start a session.
@@ -88,6 +90,15 @@ final class HookService {
             resolveTransport(modInstalled: modInstalled)
             server.onUndecodable = { data, error in
                 Self.log.error("undecodable hook payload (\(data.count) bytes): \(error, privacy: .public)")
+            }
+            // The mod waits here for a dialog's answers: `GET /answer?id=<tool_use_id>` (ADR-179).
+            server.onPoll = { [asks] target, poll in
+                let request = HookWire.Request(method: "GET", target: target)
+                guard request.path == "/answer", let id = request.query["id"], !id.isEmpty else {
+                    poll.respond(status: 404)
+                    return
+                }
+                asks.poll(id: id, poll)
             }
             server.onRebind = { why in
                 Self.log.error("hook socket was \(why, privacy: .public); bound again. Hooks sent in between were lost.")

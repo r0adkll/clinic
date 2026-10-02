@@ -1127,6 +1127,9 @@ final class TabStore {
             Self.log.notice("hook for unknown session \(event.sessionId.rawValue, privacy: .public): \(event.hookEventName, privacy: .public)")
             return
         }
+        // ADR-179: Claude's own question dialog, as a round in the Grill pane. Not part of tab state.
+        if event.hookEventName == HookEvent.askQuestion { postDialogRound(event, in: tab); return }
+        if event.hookEventName == HookEvent.askResolved { closeDialogRound(event, in: tab); return }
         // ADR-080: turn boundaries become snapshots. Before any early return below, and before the
         // SessionEnd close path so a closing session still gets its last turn sealed.
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
@@ -1158,6 +1161,57 @@ final class TabStore {
                    failed: event.hookEventName == "StopFailure", message: event.message)
     }
 
+    // MARK: Claude's question dialog in the Grill pane (ADR-179)
+
+    /// The session mod saw `AskUserQuestion` open. The same questions go into the Grill pane, by the
+    /// path `ask_round` takes: posted, the pane opened with the keyboard (ADR-139), and attention asked.
+    /// The dialog stays open in the terminal, and whichever is answered first closes the other.
+    private func postDialogRound(_ event: HookEvent, in tab: Tab) {
+        guard let sessionId = tab.sessionId, let toolUseId = event.toolUseId, let asked = event.questions,
+              let round = GrillRound.from(asked: asked, toolUseId: toolUseId, now: event.receivedAt) else { return }
+        // A resent event must not post the round twice.
+        guard !sessions.grillRounds(for: sessionId).contains(where: { $0.toolUseId == toolUseId }) else { return }
+        sessions.postGrillRound(round, to: sessionId)
+        toggleGrill(tab)
+        // No notification from here: the CLI reports the dialog as a permission request a moment
+        // later, and `transition` words that one as the question it is.
+    }
+
+    /// What an open dialog round says in place of "Needs permission", or nil when there is none.
+    private func dialogQuestionNotice(for sessionId: SessionID) -> String? {
+        guard let round = sessions.openGrillRounds(for: sessionId).last(where: { $0.toolUseId != nil }) else { return nil }
+        let count = round.questions.count
+        return "\(count) \(count == 1 ? "question" : "questions") waiting in the Grill pane"
+    }
+
+    /// The dialog ended in the terminal. The pane's copy becomes a record of what was answered there.
+    private func closeDialogRound(_ event: HookEvent, in tab: Tab) {
+        guard let toolUseId = event.toolUseId else { return }
+        hooks.asks.close(id: toolUseId)
+        let given = event.answers ?? [:]
+        let at = event.receivedAt
+        for id in [tab.sessionId].compactMap({ $0 }) + Array(tab.formerSessionIds) {
+            guard let round = sessions.grillRounds(for: id).first(where: { $0.toolUseId == toolUseId && $0.isOpen }) else { continue }
+            sessions.updateGrillRound(round.id, in: id) { r in
+                r.record(dialogAnswers: given)
+                r.outcome = .answeredElsewhere(at)
+            }
+        }
+    }
+
+    /// The reader sent a dialog round from the pane: the answers go to the mod, which returns them as
+    /// the tool's result and closes the terminal dialog.
+    func answerDialogRound(_ round: GrillRound) {
+        guard let toolUseId = round.toolUseId else { return }
+        hooks.asks.answer(id: toolUseId, with: round.dialogAnswers)
+    }
+
+    /// The reader discarded a dialog round. The mod stops waiting; the terminal dialog is still there.
+    func discardDialogRound(_ round: GrillRound) {
+        guard let toolUseId = round.toolUseId else { return }
+        hooks.asks.close(id: toolUseId)
+    }
+
     /// Moves a tab to a state and tells the user what the move means (ADR-033). Hooks come through here,
     /// and so do the terminal and the transcript when they correct what the hooks left behind (ADR-166).
     private func transition(_ tab: Tab, to new: SessionState, waitingOn: String? = nil, failed: Bool = false, message: String? = nil) {
@@ -1173,7 +1227,12 @@ final class TabStore {
         } else if new.isWaiting && !old.isWaiting {
             if !isFrontAndSelected {
                 let permission = new == .waitingForPermission
-                notify(tab, sessionId: sessionId, body: permission ? "Needs permission" : (message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
+                // Claude's question dialog arrives as a permission request; say what it really is (ADR-179).
+                if permission, let question = dialogQuestionNotice(for: sessionId) {
+                    notify(tab, sessionId: sessionId, body: question, kind: .needsInput)
+                } else {
+                    notify(tab, sessionId: sessionId, body: permission ? "Needs permission" : (message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
+                }
             }
         }
         updateBadge()

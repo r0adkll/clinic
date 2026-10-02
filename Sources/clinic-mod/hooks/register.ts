@@ -84,6 +84,35 @@ async function reportStatus($: EngineInterface, model?: string): Promise<void> {
   }
 }
 
+type Answers = Record<string, string>
+
+/**
+ * Waits for the Grill pane's answers to a question dialog (ADR-179). Clinic holds each request open
+ * for a while and answers 204 when it has nothing yet, so this asks again until the dialog is over.
+ * Resolves the answers, or undefined when Clinic will not answer: the round was discarded there, the
+ * dialog ended first, or Clinic cannot be reached.
+ */
+async function paneAnswers($: EngineInterface, toolUseId: string, isOver: () => boolean): Promise<Answers | undefined> {
+  let failures = 0
+  while (!isOver()) {
+    try {
+      const response = await $.http.fetch(`http://clinic/answer?id=${encodeURIComponent(toolUseId)}`, { socketPath: socket })
+      if (response.status === 200) {
+        const parsed: unknown = JSON.parse(response.text)
+        const answers = (parsed as { answers?: unknown }).answers
+        return typeof answers === 'object' && answers !== null ? (answers as Answers) : undefined
+      }
+      if (response.status !== 204) return undefined
+      failures = 0
+    } catch {
+      failures += 1
+      if (failures >= 3) return undefined
+      await $.clock.sleep(300)
+    }
+  }
+  return undefined
+}
+
 export const register: Register = (on, options) => {
   socket = typeof options.socket === 'string' ? options.socket : ''
 
@@ -137,6 +166,40 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     void send($, { hook_event_name: 'PreToolUse', session_id: await $.session.id(), tool_name: e.tool, agent_id: e.agentId }, false)
     return next(e)
+  })
+
+  // Claude's question dialog, mirrored into Clinic's Grill pane (ADR-179). The dialog opens in the
+  // terminal as always; the same questions go to Clinic, and whichever is answered first wins. An
+  // answer from the pane becomes the tool's result, which closes the terminal dialog.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const toolUseId = e.tool_use_id
+    if (!socket || toolUseId === undefined) return next(e)
+    const sessionId = await $.session.id()
+    await send($, { hook_event_name: 'AskQuestion', session_id: sessionId, tool_use_id: toolUseId, agent_id: e.agentId, questions: e.questions })
+
+    let isOver = false
+    type Outcome =
+      | { from: 'dialog'; result: Awaited<ReturnType<typeof next>> }
+      | { from: 'failure'; error: unknown }
+      | { from: 'pane'; answers: Answers }
+    const dialog: Promise<Outcome> = next(e).then(
+      result => ({ from: 'dialog', result }),
+      error => ({ from: 'failure', error }),
+    )
+    const pane: Promise<Outcome> = paneAnswers($, toolUseId, () => isOver).then(answers =>
+      answers === undefined ? dialog : { from: 'pane', answers },
+    )
+    const outcome = await Promise.race([dialog, pane])
+    isOver = true
+
+    if (outcome.from === 'pane') {
+      return { result: { questions: e.questions, answers: outcome.answers, annotations: {} } }
+    }
+    // Answered or dismissed in the terminal: Clinic's copy becomes a record.
+    const given = outcome.from === 'dialog' ? (outcome.result as { result?: { answers?: unknown } }).result?.answers : undefined
+    void send($, { hook_event_name: 'AskResolved', session_id: sessionId, tool_use_id: toolUseId, answers: given })
+    if (outcome.from === 'failure') throw outcome.error
+    return outcome.result
   })
 
   // Each model request of the main loop changes the context figure, and names the model and effort.

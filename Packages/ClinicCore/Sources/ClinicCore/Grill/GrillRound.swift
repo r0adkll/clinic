@@ -21,6 +21,9 @@ public struct GrillRound: Codable, Sendable, Equatable, Identifiable {
     public var postedAt: Date
     public var source: Source
     public var outcome: Outcome
+    /// Set on a round that mirrors Claude Code's own question dialog (ADR-179): the tool call it
+    /// answers. Such a round's answers go back as that call's result, not as a pasted message.
+    public var toolUseId: String?
 
     /// Where the round came from. A parsed round carries no structured choices, so the pane can say
     /// why a question that read like multiple choice does not offer any.
@@ -29,6 +32,8 @@ public struct GrillRound: Codable, Sendable, Equatable, Identifiable {
         case tool
         /// Clinic recognised the `grilling` skill's format in the transcript (ADR-131's safety net).
         case transcript
+        /// Claude Code's own `AskUserQuestion` dialog, forwarded by the session mod (ADR-179).
+        case dialog
     }
 
     public enum Outcome: Codable, Sendable, Equatable {
@@ -106,6 +111,7 @@ public struct GrillRound: Codable, Sendable, Equatable, Identifiable {
         postedAt = (try? c.decodeIfPresent(Date.self, forKey: .postedAt)) ?? Date()
         source = (try? c.decodeIfPresent(Source.self, forKey: .source)) ?? .tool
         outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? .open
+        toolUseId = try? c.decodeIfPresent(String.self, forKey: .toolUseId)
     }
 }
 

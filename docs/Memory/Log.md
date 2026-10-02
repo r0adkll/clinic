@@ -4715,3 +4715,21 @@ in [[Native Session UI]].
 User: finished a working session in Clinic Dev; `/clear` works. The log shows the tab re-keyed to the new
 session id, no hook for an unknown session and no terminal correction. Still open from ADR-177: the fallback
 notice, a model switch, the card by eye. Next: `AskUserQuestion` in the Grill pane.
+
+## 2026-10-02 — Claude's questions are answered in the Grill pane (ADR-179)
+User: start step two of the mods work.
+
+The mod mirrors `AskUserQuestion`: it posts the questions, lets the terminal dialog open, and holds a `GET`
+on the hook socket for the pane's answers. `HookServer` can now hold a request (`HookPoll`), and `AskBroker`
+pairs it with what the pane sends. The dialog becomes a `GrillRound` with `source: dialog` and a
+`toolUseId`; sending it returns the answers as the tool's result and types nothing. A dialog answered in
+the terminal closes the round as a record. The "Needs permission" notice is reworded while such a round is
+open. New smoke key `-ClinicEnterAfter`.
+
+Learned with tmux, which drives an interactive `claude` from a session: `tmux new-session -d`, `send-keys`,
+`capture-pane -p`. A hook returning a result while `next` is pending closes the terminal dialog.
+
+Verified in Clinic Dev both ways: answered from the pane (the tool result named Banana and Claude carried
+on), and answered in the terminal (the round stored as `answeredElsewhere`). 614 ClinicCore tests and 6 mod
+tests pass. Not verified: multi-question and multi-select through the pane, a subagent's dialog, the
+reworded notification, discard. Next: permission approvals from Clinic.

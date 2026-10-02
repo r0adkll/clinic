@@ -227,7 +227,7 @@ struct GrillPane: View {
                 ContentUnavailableView {
                     Label("No questions yet", systemImage: "flame")
                 } description: {
-                    Text("Rounds the agent posts with ask_round appear here, ready to answer.")
+                    Text("Questions Claude asks, and rounds the agent posts with ask_round, appear here, ready to answer.")
                 } actions: {
                     Button("Post a Sample Round") { tabs.postSampleGrillRound(tab) }
                         .disabled(tab.sessionId == nil)
@@ -686,6 +686,7 @@ struct GrillPane: View {
 
     private func discard(_ round: GrillRound) {
         guard let session = tab.sessionId else { return }
+        tabs.discardDialogRound(round)
         sessions.discardGrillRound(round.id, in: session)
         model.viewingRoundId = nil
         model.reset()
@@ -697,7 +698,13 @@ struct GrillPane: View {
         model.sending = true
         // Bracketed paste plus Return: from the CLI's side this is the reader typing (ADR-055 kept this
         // path for exactly the tools that speak for the reader).
-        tab.surface.sendPastedLine(GrillAnswerComposer.compose(effective))
+        if effective.toolUseId != nil {
+            // Claude's own dialog (ADR-179): the answers are the tool's result, handed to the session
+            // mod, so the turn goes on. Nothing is typed into the terminal.
+            tabs.answerDialogRound(effective)
+        } else {
+            tab.surface.sendPastedLine(GrillAnswerComposer.compose(effective))
+        }
         sessions.updateGrillRound(round.id, in: session) { r in
             r.answers = effective.answers
             r.outcome = .sent(Date())

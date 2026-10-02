@@ -27,6 +27,9 @@ On a CLI that loads mods (2.1.287+) the launch adds `--plugin-dir '…/Clinic/mo
 
 The mod (`Sources/clinic-mod/hooks/register.ts`) posts each event to the same socket as `POST /hook` with the JSON document as the body; `HookWire` tells that from the helper's bare document and the server answers `204`. Every payload carries `_clinic_via: "mod"`. Beyond the ADR-027 events it sends `ModAttached` (once per process), `StatusLine` (the status line's shape, after each main-loop request) and `TurnEnd` (`reason`: `answer` | `aborted` | `refusal` | `error`). `HookService` consumes `ModAttached` and `CommandProbe`; a probe with nothing from the mod ten seconds later switches later launches back to settings hooks.
 
+## Question dialog (ADR-179)
+On `AskUserQuestion` the mod posts `AskQuestion` (`tool_use_id`, `questions`), then holds `GET /answer?id=<tool_use_id>` on the same socket while the terminal dialog is open. `HookServer` gives the held connection to `AskBroker` as a `HookPoll`: `200 {"answers":{…}}` when the Grill pane sends, `204` after 20 s with nothing (the mod asks again), `410` when the dialog is over. Answered in the terminal first, the mod posts `AskResolved` (`tool_use_id`, `answers`) and the round becomes a record.
+
 ## Payload fields used
 `reason`, `agent_id`, `hook_event_name`, `session_id`, `transcript_path`, `cwd`, `source`, `notification_type`, `message`, `tool_name`, `permission_mode`, `stop_hook_active`.
 

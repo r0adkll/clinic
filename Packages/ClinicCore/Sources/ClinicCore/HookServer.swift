@@ -20,6 +20,12 @@ public final class HookServer: @unchecked Sendable {
     private let lock = NSLock()
     /// The socket path was taken or removed by another process and has been bound again (ADR-167).
     public var onRebind: (@Sendable (String) -> Void)?
+    /// The session mod asking for something it has to wait for (ADR-179): a `GET`, with its target and
+    /// a handle that answers it later. Called on the server's queue; unanswered, it is told `204` when
+    /// `pollHold` runs out, and the mod asks again.
+    public var onPoll: (@Sendable (String, HookPoll) -> Void)?
+    /// How long a poll is held before it is answered `204 No Content`.
+    public var pollHold: TimeInterval = 20
     /// Raw payloads that failed to decode, for diagnostics.
     public var onUndecodable: (@Sendable (Data, Error) -> Void)?
 
@@ -118,7 +124,9 @@ public final class HookServer: @unchecked Sendable {
     }
 
     private func readAll(from fd: Int32) {
-        defer { close(fd) }
+        // A held poll outlives this call and closes the descriptor itself.
+        var held = false
+        defer { if !held { close(fd) } }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
         // Reads stay on the accept queue so events keep the order they connected in: `/clear` sends a
         // `SessionEnd` and a `SessionStart` ten milliseconds apart. The helper writes the moment it
@@ -140,8 +148,15 @@ public final class HookServer: @unchecked Sendable {
         guard !data.isEmpty else { return }
         let payload: Data
         switch message {
-        case .http(let body):
-            payload = body
+        case .http(let request) where request.method == "GET":
+            guard let onPoll else { respond(HookWire.response(status: 404), to: fd); return }
+            held = true
+            let poll = HookPoll(descriptor: fd)
+            queue.asyncAfter(deadline: .now() + pollHold) { poll.respond(status: 204) }
+            onPoll(request.target, poll)
+            return
+        case .http(let request):
+            payload = request.body
             respond(HookWire.accepted, to: fd)
         case .incomplete:
             respond(HookWire.rejected, to: fd)
@@ -165,36 +180,107 @@ public final class HookServer: @unchecked Sendable {
     }
 }
 
+/// A request the server is holding open (ADR-179). Answered once, by whoever gets there first: the
+/// broker with an answer, or the server's own timer with `204`.
+public final class HookPoll: @unchecked Sendable {
+    private let lock = NSLock()
+    private var descriptor: Int32
+
+    init(descriptor: Int32) { self.descriptor = descriptor }
+
+    /// Writes the response and closes the connection. False when it was already answered, or when the
+    /// client had gone: the caller still holds whatever it meant to deliver.
+    @discardableResult
+    public func respond(status: Int, body: Data = Data()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard descriptor >= 0 else { return false }
+        let fd = descriptor
+        descriptor = -1
+        defer { close(fd) }
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        let response = HookWire.response(status: status, body: body)
+        let written = response.withUnsafeBytes { raw in write(fd, raw.baseAddress, raw.count) }
+        return written == response.count
+    }
+
+    public var isAnswered: Bool { lock.lock(); defer { lock.unlock() }; return descriptor < 0 }
+}
+
 /// How one hook payload is framed on the socket (ADR-177).
 ///
 /// `clinic-hook` writes a bare JSON document and closes. The session mod reaches the socket through the
 /// CLI's `$.http.fetch`, which speaks HTTP: a `POST` with a `Content-Length` and the same document as
-/// its body. A JSON document starts with `{`, so the request line is unambiguous.
+/// its body, or a `GET` it waits on (ADR-179). A JSON document starts with `{`, so the request line is
+/// unambiguous.
 public enum HookWire {
+    public struct Request: Equatable, Sendable {
+        public var method: String
+        /// The request target as sent: path and query.
+        public var target: String
+        public var body: Data
+
+        public init(method: String, target: String, body: Data = Data()) {
+            self.method = method; self.target = target; self.body = body
+        }
+
+        /// The query's parameters, percent-decoded. A repeated name keeps its last value.
+        public var query: [String: String] {
+            guard let mark = target.firstIndex(of: "?") else { return [:] }
+            var out: [String: String] = [:]
+            for pair in target[target.index(after: mark)...].split(separator: "&") {
+                let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard let name = parts.first.map(String.init)?.removingPercentEncoding, !name.isEmpty else { continue }
+                out[name] = parts.count > 1 ? (String(parts[1]).removingPercentEncoding ?? String(parts[1])) : ""
+            }
+            return out
+        }
+
+        public var path: String { String(target.prefix(while: { $0 != "?" })) }
+    }
+
     public enum Message: Equatable, Sendable {
         /// A bare document, complete when the client closes.
         case raw(Data)
-        /// A whole HTTP request; the associated value is its body.
-        case http(body: Data)
+        /// A whole HTTP request.
+        case http(Request)
         /// An HTTP request whose headers or body have not all arrived.
         case incomplete
     }
 
-    public static let accepted = Data("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
-    public static let rejected = Data("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+    public static let accepted = response(status: 204)
+    public static let rejected = response(status: 400)
 
-    private static let requestLine = Data("POST ".utf8)
+    public static func response(status: Int, body: Data = Data()) -> Data {
+        let reason: String
+        switch status {
+        case 200: reason = "OK"
+        case 204: reason = "No Content"
+        case 400: reason = "Bad Request"
+        case 404: reason = "Not Found"
+        case 410: reason = "Gone"
+        default: reason = "Status"
+        }
+        var head = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
+        if !body.isEmpty { head += "Content-Type: application/json\r\n" }
+        return Data((head + "\r\n").utf8) + body
+    }
+
+    private static let methods = ["POST ", "GET "].map { Data($0.utf8) }
     private static let headerEnd = Data("\r\n\r\n".utf8)
 
     public static func read(_ data: Data) -> Message {
-        guard data.starts(with: requestLine) else {
-            // Fewer bytes than the method name could still become one.
-            return data.count < requestLine.count && requestLine.starts(with: data) ? .incomplete : .raw(data)
+        guard methods.contains(where: { data.starts(with: $0) }) else {
+            // Fewer bytes than a method name could still become one.
+            return methods.contains(where: { data.count < $0.count && $0.starts(with: data) }) ? .incomplete : .raw(data)
         }
         guard let end = data.range(of: headerEnd) else { return .incomplete }
         let head = String(decoding: data[data.startIndex..<end.lowerBound], as: UTF8.self)
+        let lines = head.components(separatedBy: "\r\n")
+        let requestLine = (lines.first ?? "").split(separator: " ")
+        guard requestLine.count >= 2 else { return .raw(data) }
         var length = 0
-        for line in head.components(separatedBy: "\r\n").dropFirst() {
+        for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
             if line[..<colon].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
                 length = Int(line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)) ?? 0
@@ -202,7 +288,7 @@ public enum HookWire {
         }
         let body = data[end.upperBound...]
         guard body.count >= length else { return .incomplete }
-        return .http(body: Data(body.prefix(length)))
+        return .http(Request(method: String(requestLine[0]), target: String(requestLine[1]), body: Data(body.prefix(length))))
     }
 }
 

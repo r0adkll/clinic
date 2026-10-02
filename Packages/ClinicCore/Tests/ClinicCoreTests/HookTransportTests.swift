@@ -19,7 +19,7 @@ import Testing
     }
 
     @Test func wholeRequestYieldsItsBody() {
-        #expect(HookWire.read(Self.request(body: Self.document)) == .http(body: Data(Self.document.utf8)))
+        #expect(HookWire.read(Self.request(body: Self.document)) == .http(.init(method: "POST", target: "/hook", body: Data(Self.document.utf8))))
     }
 
     @Test func requestIsIncompleteUntilTheBodyArrives() {
@@ -31,7 +31,7 @@ import Testing
     }
 
     @Test func bodyStopsAtItsAnnouncedLength() {
-        #expect(HookWire.read(Self.request(body: "{}trailing", contentLength: 2)) == .http(body: Data("{}".utf8)))
+        #expect(HookWire.read(Self.request(body: "{}trailing", contentLength: 2)) == .http(.init(method: "POST", target: "/hook", body: Data("{}".utf8))))
     }
 
     @Test func serverAnswersAPostAndDeliversItsBody() async throws {
