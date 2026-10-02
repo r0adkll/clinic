@@ -90,5 +90,8 @@ user's own ([[ADR-157 The Status Line Reports Context]]).
   turn interrupted nine seconds in produced `TurnEnd` `aborted` at once and no terminal correction. Run
   headless against a test socket, the mod sent `StatusLine` with context, model and both plan windows.
   ClinicCore's 601 tests and the mod's 3 pass, and `claude plugin validate` passes.
-- Not verified: the fallback notice, since nothing here stops a mod from loading; `/clear` and
-  `PostModelSwitch` through the mod; the sidebar card's figures by eye.
+- `/clear`, 2026-10-02: the user ran a working session in Clinic Dev and reported it works. The log has
+  `session f1d287ed… cleared; tab follows 11a1589a…`, with no hook for an unknown session and no terminal
+  correction in the three hours around it.
+- Not verified: the fallback notice, since nothing here stops a mod from loading; `PostModelSwitch` through
+  the mod; the sidebar card's figures by eye.

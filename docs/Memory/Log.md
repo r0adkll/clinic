@@ -4678,3 +4678,40 @@ Verified in Clinic Dev with a shell tab and with a live session: two rounds of h
 by small `swiftc` accessibility tools that press a button by name. One mistake on the way: a loose match on
 "Sidebar" pressed a recent-session row and resumed session 83204988 in Clinic Dev; no prompt was sent, and
 the process ended with the app.
+
+## 2026-10-02 — Exploring a native session UI
+User: explore moving the transcript and prompting into a native Clinic UI instead of wrapping the CLI in a
+terminal. Exploration only, no decision.
+
+Drove `claude -p` in stream-json mode from a Python script against CLI 2.1.287. The following all worked over
+the control protocol:
+- a Bash permission request answered by the host (it needs `--permission-prompt-tool stdio`; without it the
+  tool is denied at once);
+- `AskUserQuestion` answered with `answers`;
+- `interrupt`, `set_model` and `/context`;
+- a prompt queued mid-turn.
+
+The session's JSONL is the normal transcript, so terminal and native modes can resume each other. A code
+survey found `Tab.surface` non-optional, with about 21 users. Findings and three shapes are in
+[[Native Session UI]]. The lean is per-session modes over one transcript, with native first for chats.
+Next, if pursued: check whether mods reach the stream-json output, then an ADR.
+Then surveyed how other ADEs draw an agent: Orca, Collins, cmux, Superset, Vibe Kanban, Sculptor, Crystal,
+opcode, Zed with ACP, the VS Code extension, and the Codex, opencode, Gemini, Cursor, Copilot and Amp
+protocols. Findings are in [[ADE Session UIs]]:
+- Every vendor's own GUI is headless and native.
+- Terminal-first ADEs keep the terminal as the default and add chat beside it.
+- Every headless client pins its CLI version.
+- Orca's two adapter tiers fit Clinic.
+- ACP's update vocabulary is a good journal model.
+Open question: the SDK's third-party login policy.
+Then explored the user's alternative: keep the terminal as the main view, and draw an interaction log with
+inline permission and question cards in a panel. A probe mod under a PTY on 2.1.287 showed that a
+`PermissionRequest` hook which holds the request keeps the terminal's dialog from drawing. Returning a decision
+answers the request. Returning `next(e)` brings the terminal's dialog back. So Clinic can own the answer, with
+the terminal as the fallback. A mod cannot answer the dialog once it is drawn. Written up as the fourth shape
+in [[Native Session UI]].
+
+## 2026-10-02 — `/clear` confirmed through the mod (ADR-177)
+User: finished a working session in Clinic Dev; `/clear` works. The log shows the tab re-keyed to the new
+session id, no hook for an unknown session and no terminal correction. Still open from ADR-177: the fallback
+notice, a model switch, the card by eye. Next: `AskUserQuestion` in the Grill pane.
