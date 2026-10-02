@@ -4647,3 +4647,17 @@ the calling shell. `.clinic/run.json` now defaults to *Clinic Dev* with that com
 and *Reset Clinic Dev*, renames the stock build *Build Clinic*, and drops the smoke-instance *Clinic* entry.
 
 Verified: attached mode started the app clean and ending the process ended the app. Not run: the Run pill.
+
+## 2026-10-02 — Showing the sidebar crashed a fresh install (ADR-178)
+User: the dev app crashed and behaved oddly.
+
+No crash report was written; `/usr/bin/log show` had it. Hide Sidebar then Show Sidebar, with any tab open
+and the usage panel unconnected, sent the window into a constraint loop that ended in `NSGenericException`.
+The unconnected panel's paragraph was fixed vertically with no line limit, so at the animation's zero width
+it asked for an unbounded height. It now has `.lineLimit(6)`. Fresh preferences are what exposed it: the
+real app's panel is connected. Neither the mod nor the flavor was involved.
+
+Verified in Clinic Dev with a shell tab and with a live session: two rounds of hide and show survive. Driven
+by small `swiftc` accessibility tools that press a button by name. One mistake on the way: a loose match on
+"Sidebar" pressed a recent-session row and resumed session 83204988 in Clinic Dev; no prompt was sent, and
+the process ended with the app.

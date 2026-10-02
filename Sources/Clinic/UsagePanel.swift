@@ -191,7 +191,11 @@ struct UsagePanel: View {
                 Text(bars.isEmpty
                      ? "Your 5-hour and weekly limits appear here once a session has talked to Claude. Connect to add per-model limits and extra usage from Claude Code's sign-in."
                      : "Connect to add per-model limits and extra usage from Claude Code's sign-in.")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.caption2).foregroundStyle(.secondary)
+                    // Bounded before it is fixed: while the sidebar animates open from nothing, an
+                    // unbounded text asked to be one character wide and thousands of points tall, and
+                    // the window could not settle its constraints around that (ADR-178).
+                    .lineLimit(6).fixedSize(horizontal: false, vertical: true)
                 Button("Connect Claude account") { Task { await usage.connect() } }.controlSize(.small)
                 if let error = usage.error { Text(error).font(.caption2).foregroundStyle(.red).lineLimit(3) }
             }
