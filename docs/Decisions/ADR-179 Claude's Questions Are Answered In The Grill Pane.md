@@ -72,5 +72,16 @@ Measured against CLI 2.1.287 in an interactive session driven through tmux:
   *You chose Banana*. In a second session Return was pressed in the terminal: the trace showed
   `AskResolved` with *Apple (Recommended)* and the round was stored as `answeredElsewhere` with that
   choice. ClinicCore's 614 tests and the mod's 6 pass.
-- Not verified: a multi-question or multi-select dialog through the pane, a dialog asked by a subagent,
-  the reworded notification, and discarding a dialog round.
+- Verified later the same day, in Clinic Dev through the accessibility API:
+  - *Two questions, one multi-select.* Q1 accepted, Q2 with *Nuts* and *Mint* picked, sent from the pane.
+    The tool result read `"Which fruit do you prefer?"="Apple (Recommended)", "Which toppings do you
+    want?"="Nuts, Mint"` and Claude repeated both.
+  - *The notification.* One notice for the dialog, *1 question waiting in the Grill pane*, and no *Needs
+    permission*. Read from a new log line, `attention for <session>: <body>`, written for every notice
+    because the history is in memory only.
+  - *Discard.* The round left the state file and the pane, the terminal dialog stayed, and Return there
+    answered it: `AskResolved` arrived, the turn finished and nothing was recreated.
+  - *A subagent's dialog cannot happen on 2.1.287.* A general-purpose subagent told to ask reported that
+    it has no `AskUserQuestion` tool. The mod would forward one with its `agent_id` if a later CLI allows it.
+- The sidebar card said *Allow AskUserQuestion ?* while a dialog was open. It now says *Has a question for
+  you*. Not seen by eye.

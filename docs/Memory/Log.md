@@ -4733,3 +4733,11 @@ Verified in Clinic Dev both ways: answered from the pane (the tool result named 
 on), and answered in the terminal (the round stored as `answeredElsewhere`). 614 ClinicCore tests and 6 mod
 tests pass. Not verified: multi-question and multi-select through the pane, a subagent's dialog, the
 reworded notification, discard. Next: permission approvals from Clinic.
+
+## 2026-10-02 — The question dialog's open points checked (ADR-179)
+User: verify what ADR-179 left unverified.
+
+In Clinic Dev: two questions with a multi-select came back exactly from the pane; the dialog raises one
+notice, worded as a question; discarding a round leaves the terminal dialog answerable. A subagent has no
+`AskUserQuestion` tool on 2.1.287, so that case cannot occur. Added an `attention for …` log line per notice
+and changed the card's line for an open dialog to *Has a question for you* (not seen by eye).

@@ -253,6 +253,8 @@ final class TabStore {
                 url: URL? = nil, pullRequest: PullRequestRef? = nil) {
         let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url,
                                    pullRequest: pullRequest)
+        // What Clinic said and about which session: the history is in memory only, so this is the record.
+        Self.log.info("attention for \(sessionId?.rawValue ?? "-", privacy: .public): \(body, privacy: .public)")
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {

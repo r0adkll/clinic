@@ -360,6 +360,8 @@ struct SessionCard: View {
             return (Text(tool.name).fontWeight(.semibold) + Text(" " + Self.target(tool)), false)
         case .waitingForPermission:
             guard let tool else { return (Text("Needs your permission"), true) }
+            // Claude's question dialog arrives as a permission request for this tool (ADR-179).
+            if tool.name == "AskUserQuestion" { return (Text("Has a question for you"), true) }
             return (Text("Allow ") + Text(tool.name).fontWeight(.semibold) + Text(" " + Self.target(tool) + "?"), true)
         case .waitingForInput:
             return (Text("Waiting for your input"), true)
