@@ -38,6 +38,13 @@
       "rerunAfterTurn": false
     },
     {
+      "id": "mod-tests",
+      "name": "Mod Tests",
+      "icon": "puzzlepiece.extension",
+      "command": "make test-mod",
+      "rerunAfterTurn": false
+    },
+    {
       "id": "ghostty",
       "name": "Build GhosttyKit",
       "icon": "terminal",

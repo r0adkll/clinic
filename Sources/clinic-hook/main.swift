@@ -1,5 +1,6 @@
 // clinic-hook: three modes, no dependencies, always exits 0.
 //   clinic-hook <socket-path>                     forward a Claude Code hook payload (stdin JSON) to Clinic (ADR-015)
+//   clinic-hook probe <socket-path>               forward SessionStart as CommandProbe: the mod transport's proof of life (ADR-177)
 //   clinic-hook statusline <socket-path>          forward the status line input to Clinic, print nothing (ADR-157)
 //   clinic-hook mcp <socket-path> <session-id>    MCP stdio server relaying tools/list and tools/call to Clinic (ADR-056)
 import Foundation
@@ -71,9 +72,16 @@ func connectWithRetry(_ path: String, delaysMs: [UInt32]) -> Int32? {
     return nil
 }
 
-func runHookMode(socketPath: String) {
+/// - Parameter renamedTo: probe mode (ADR-177). With the session mod carrying the events, the one
+///   settings hook left is `SessionStart`, sent under another name so Clinic reads it as "the CLI is up
+///   and runs hooks" and not as a second `SessionStart`.
+func runHookMode(socketPath: String, renamedTo name: String? = nil) {
     var payload = FileHandle.standardInput.readDataToEndOfFile()
     guard !payload.isEmpty else { return }
+    if let name, var obj = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] {
+        obj["hook_event_name"] = name
+        payload = (try? JSONSerialization.data(withJSONObject: obj)) ?? payload
+    }
     payload.append(0x0A)
     let event = (try? JSONSerialization.jsonObject(with: payload) as? [String: Any])?["hook_event_name"] as? String
     // SessionEnd hooks share a 1.5 s budget with the CLI's exit, and Clinic also learns of an exit from the surface.
@@ -216,6 +224,8 @@ if args.count >= 4, args[1] == "mcp" {
 } else if args.count >= 3, args[1] == "statusline" {
     signal(SIGPIPE, SIG_IGN)
     runStatusLineMode(socketPath: args[2])
+} else if args.count >= 3, args[1] == "probe" {
+    runHookMode(socketPath: args[2], renamedTo: "CommandProbe")
 } else if args.count >= 2 {
     runHookMode(socketPath: args[1])
 }

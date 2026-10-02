@@ -4648,6 +4648,23 @@ and *Reset Clinic Dev*, renames the stock build *Build Clinic*, and drops the sm
 
 Verified: attached mode started the app clean and ending the process ended the app. Not run: the Run pill.
 
+## 2026-10-02 — Hooks arrive through a mod (ADR-177)
+User: start the mods integration. First step, on branch `mods-integration`: transport and status line.
+
+`Sources/clinic-mod` is Clinic's session mod. It forwards the settings-hook events from inside the CLI as
+HTTP posts to the hook socket, and adds `StatusLine`, `TurnEnd` and `ModAttached`. `HookWire` lets the
+server read a POST beside the helper's bare document. `HookService` writes both transports' settings files,
+copies the mod into the data directory, picks the transport from `claude --version`, and falls back to
+settings hooks when a probe is not followed by the mod. `ClaudeLaunch` gained `--plugin-dir`. An interrupt
+now ends the turn through `TurnEnd` rather than the three-second terminal verdict.
+
+Verified in Clinic Dev on CLI 2.1.287: live sessions reported through the mod, permission and notification
+events included, and an interrupted turn produced `TurnEnd aborted`. 601 ClinicCore tests and 3 mod tests
+pass. Not verified: the fallback notice, `/clear` and a model switch through the mod, the card by eye.
+Found on the way: `-ClinicInterruptAfter` does not dismiss a permission dialog, and `ghostty_surface_new`
+failed once after a relaunch two seconds after quitting.
+Next: mirror `AskUserQuestion` into the Grill pane, then permission approvals from Clinic.
+
 ## 2026-10-02 — Showing the sidebar crashed a fresh install (ADR-178)
 User: the dev app crashed and behaved oddly.
 

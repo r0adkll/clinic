@@ -3,7 +3,7 @@ tags: [architecture, hooks]
 ---
 # Hook protocol
 
-Decisions: [[ADR-015 Hook Transport]], [[ADR-166 Session State Has More Than One Witness]], [[ADR-167 The Hook Socket Is Not Taken From A Live Instance]], [[ADR-017 Session Identity]], [[ADR-026 Session State Machine]], [[ADR-027 Installed Hook Set]]. Facts: [[Claude Code Hooks and Transcripts]].
+Decisions: [[ADR-015 Hook Transport]], [[ADR-177 Hooks Arrive Through A Mod]], [[ADR-166 Session State Has More Than One Witness]], [[ADR-167 The Hook Socket Is Not Taken From A Live Instance]], [[ADR-017 Session Identity]], [[ADR-026 Session State Machine]], [[ADR-027 Installed Hook Set]]. Facts: [[Claude Code Hooks and Transcripts]].
 
 ## Launch
 Every Clinic-launched session is typed into the user's login shell via libghostty `initial_input` ([[ADR-016 Launch Shape]]):
@@ -21,6 +21,11 @@ claude --resume <uuid> [--fork-session] --settings '…/hooks.json'
 `clinic-hook` reads stdin to EOF, appends `\n`, connects to the Unix socket (retrying for up to six seconds, ADR-167), writes the payload, `shutdown(SHUT_WR)`, exits 0. It never fails the CLI. If the socket is unreachable and `CLINIC_HOOK_TRACE_DIR` is set it appends to `<dir>/<session_id>.jsonl` instead.
 
 `HookServer` (ClinicCore): `socket/bind/listen` at mode 0600, non-blocking accept via `DispatchSourceRead`, one payload per connection (read to EOF, 4 MiB cap, 1 s receive timeout, backlog 256). It never unlinks a socket a live instance answers on: a second Clinic uses `hook-<pid>.sock` and its own settings files, and the server re-binds its path if it disappears (ADR-167), decoded with `HookEvent.decode` (unknown fields ignored) and yielded on an `AsyncStream<HookEvent>`. `HookService` (app) pumps the stream to `TabStore.handle(hookEvent:)` on the main actor.
+
+## Mod transport (ADR-177)
+On a CLI that loads mods (2.1.287+) the launch adds `--plugin-dir '…/Clinic/mod.plugin'` and `--settings '…/hooks-mod.json'`. That file registers one hook, `SessionStart` through `clinic-hook probe` (delivered as `CommandProbe`), no `statusLine`, and `pluginConfigs["clinic-session"].options.socket`.
+
+The mod (`Sources/clinic-mod/hooks/register.ts`) posts each event to the same socket as `POST /hook` with the JSON document as the body; `HookWire` tells that from the helper's bare document and the server answers `204`. Every payload carries `_clinic_via: "mod"`. Beyond the ADR-027 events it sends `ModAttached` (once per process), `StatusLine` (the status line's shape, after each main-loop request) and `TurnEnd` (`reason`: `answer` | `aborted` | `refusal` | `error`). `HookService` consumes `ModAttached` and `CommandProbe`; a probe with nothing from the mod ten seconds later switches later launches back to settings hooks.
 
 ## Payload fields used
 `reason`, `agent_id`, `hook_event_name`, `session_id`, `transcript_path`, `cwd`, `source`, `notification_type`, `message`, `tool_name`, `permission_mode`, `stop_hook_active`.

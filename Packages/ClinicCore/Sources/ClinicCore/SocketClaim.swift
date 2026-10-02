@@ -30,9 +30,9 @@ public enum SocketClaim {
     }
 
     /// The pid a suffixed file was named for: `hook-123.sock`, `mcp-123.sock`, `hooks-123.json`,
-    /// `hooks-123-worktree-head.json`. Nil for the plain names, which belong to the first instance.
+    /// `hooks-123-worktree-head.json`, `mod-123.plugin`. Nil for the plain names, which belong to the first instance.
     public static func pid(inFileName name: String) -> Int32? {
-        for stem in ["hook-", "mcp-", "hooks-"] where name.hasPrefix(stem) {
+        for stem in ["hook-", "mcp-", "hooks-", "mod-"] where name.hasPrefix(stem) {
             let digits = name.dropFirst(stem.count).prefix(while: \.isNumber)
             let rest = name.dropFirst(stem.count + digits.count)
             if !digits.isEmpty, rest.hasPrefix(".") || rest.hasPrefix("-"), let pid = Int32(digits) { return pid }

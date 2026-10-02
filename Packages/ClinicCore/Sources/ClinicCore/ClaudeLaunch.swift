@@ -34,6 +34,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
     /// Optional `-w <name>`: the CLI names the worktree and its branch after it (ADR-071).
     public var worktreeName: String?
     public var settingsFilePath: String
+    /// `--plugin-dir`: the folder holding Clinic's session mod when hooks arrive through it (ADR-177).
+    public var pluginDirectory: String?
     public var executable: String = "claude"
     /// First turn, passed as the CLI's positional prompt.
     public var prompt: String?
@@ -43,8 +45,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
     /// leaves this nil and uses the user's default.
     public var permissionMode: String?
 
-    public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude", prompt: String? = nil) {
-        self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable; self.prompt = prompt
+    public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, pluginDirectory: String? = nil, executable: String = "claude", prompt: String? = nil) {
+        self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.pluginDirectory = pluginDirectory; self.executable = executable; self.prompt = prompt
     }
 
     public var arguments: [String] {
@@ -72,6 +74,7 @@ public struct ClaudeLaunch: Sendable, Hashable {
             if let n = worktreeName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { args.append(n) }
         }
         args += ["--settings", settingsFilePath]
+        if let pluginDirectory, !pluginDirectory.isEmpty { args += ["--plugin-dir", pluginDirectory] }
         if let mcpConfigPath, !mcpConfigPath.isEmpty { args += ["--mcp-config", mcpConfigPath] }
         // The prompt goes FIRST: `--mcp-config` (and other variadic options) would otherwise swallow it as another path.
         if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { args.insert(prompt, at: 0) }
@@ -109,26 +112,50 @@ public enum HookSettings {
     /// Also registers `statusLine` (ADR-157): the helper forwards the CLI's status line input — context
     /// percentage, window size, live model and effort — and prints nothing, so it replaces whatever status
     /// line the user configured for sessions Clinic launches. Deliberate: Clinic shows those numbers itself.
-    public static func json(helperPath: String, socketPath: String, worktreeBaseRef: String? = nil) throws -> Data {
-        let hook: [String: Any] = [
-            "type": "command",
-            "command": [helperPath, socketPath].map(ClaudeLaunch.shellQuote).joined(separator: " "),
-            "async": true,
-            // Room for the helper's retries (ADR-167); the hook is async, so the CLI never waits on it.
-            "timeout": 15,
-        ]
-        var hooks: [String: Any] = [:]
-        for event in events { hooks[event] = [["hooks": [hook]]] }
-        var root: [String: Any] = [
-            "hooks": hooks,
-            "statusLine": statusLine(helperPath: helperPath, socketPath: socketPath),
+    ///   - transport: how the events reach Clinic (ADR-177). `.mod` registers no hook but one
+    ///     `SessionStart` probe and no `statusLine`, and hands the session mod its socket instead.
+    public static func json(helperPath: String, socketPath: String, worktreeBaseRef: String? = nil,
+                            transport: HookTransport = .command) throws -> Data {
+        func hook(_ arguments: [String]) -> [String: Any] {
+            [
+                "type": "command",
+                "command": arguments.map(ClaudeLaunch.shellQuote).joined(separator: " "),
+                "async": true,
+                // Room for the helper's retries (ADR-167); the hook is async, so the CLI never waits on it.
+                "timeout": 15,
+            ]
+        }
+        var root: [String: Any]
+        switch transport {
+        case .command:
+            var hooks: [String: Any] = [:]
+            for event in events { hooks[event] = [["hooks": [hook([helperPath, socketPath])]]] }
+            root = [
+                "hooks": hooks,
+                "statusLine": statusLine(helperPath: helperPath, socketPath: socketPath),
+            ]
+        case .mod:
+            root = [
+                // The one settings hook left: it tells Clinic the CLI is up, so a mod that never
+                // announces itself is noticed rather than waited for. No `statusLine`: the mod reads
+                // those figures itself, and the user's own status line shows again.
+                "hooks": ["SessionStart": [["hooks": [hook([helperPath, "probe", socketPath])]]]],
+                "pluginConfigs": [modName: ["options": ["socket": socketPath]]],
+            ]
+        }
+        root.merge([
             // OSC 9;4 is the second witness to a session's state (ADR-166), so a user who turned the
             // progress report off for their own terminal still gets it in Clinic's, which draws no bar.
             "terminalProgressBarEnabled": true,
-        ]
+        ]) { _, new in new }
         if let worktreeBaseRef { root["worktree"] = ["baseRef": worktreeBaseRef] }
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])
     }
+
+    /// The session mod's plugin name, as its `plugin.json` states it: the key its options are stored under.
+    public static let modName = "clinic-session"
+    /// The first CLI release that loads mods.
+    public static let modMinimumCLIVersion = "2.1.287"
 
     static func statusLine(helperPath: String, socketPath: String) -> [String: Any] {
         [
@@ -136,5 +163,48 @@ public enum HookSettings {
             "command": [helperPath, "statusline", socketPath].map(ClaudeLaunch.shellQuote).joined(separator: " "),
             "padding": 0,
         ]
+    }
+}
+
+/// How a session's hook events reach Clinic (ADR-177).
+public enum HookTransport: String, Sendable, Hashable, CaseIterable {
+    /// A settings hook per event, each starting `clinic-hook` (ADR-015). Works on every CLI.
+    case command
+    /// Clinic's session mod, loaded with `--plugin-dir`, posting from inside the CLI.
+    case mod
+
+    /// What `auto` resolves to: the mod on a CLI that can load one, unless it failed to on that version.
+    public static func resolve(preference: String?, cliVersion: String?, failedOnVersion: String?) -> HookTransport {
+        if let preference, let forced = HookTransport(rawValue: preference) { return forced }
+        guard let cliVersion, isVersion(cliVersion, atLeast: HookSettings.modMinimumCLIVersion) else { return .command }
+        return failedOnVersion == cliVersion ? .command : .mod
+    }
+
+    /// `claude --version` prints `2.1.287 (Claude Code)`.
+    public static func parseCLIVersion(_ output: String) -> String? {
+        let first = output.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init)
+        guard let first, first.first?.isNumber == true, first.contains(".") else { return nil }
+        return first
+    }
+
+    /// `claude --version`, through the same `PATH` every other CLI call uses (ADR-086). Nil when the
+    /// CLI is missing or prints something else.
+    public static func detectCLIVersion(executable: String = "claude") async -> String? {
+        var env = ProcessEnvironment.withToolPaths()
+        for key in env.keys where key == "CLAUDECODE" || key.hasPrefix("CLAUDE_CODE_") || key == "CLAUDE_PID" || key == "CLAUDE_EFFORT" {
+            env[key] = nil
+        }
+        let result = await ToolProcess.run(executable: executable, arguments: ["--version"], environment: env)
+        return result.status == 0 ? parseCLIVersion(result.stdoutString) : nil
+    }
+
+    static func isVersion(_ version: String, atLeast minimum: String) -> Bool {
+        func parts(_ s: String) -> [Int] { s.split(separator: ".").map { Int($0.prefix(while: \.isNumber)) ?? 0 } }
+        let a = parts(version), b = parts(minimum)
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return true
     }
 }

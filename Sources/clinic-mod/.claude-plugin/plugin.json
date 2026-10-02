@@ -1,0 +1,14 @@
+{
+  "name": "clinic-session",
+  "version": "0.1.0",
+  "description": "Reports a Claude Code session's state to Clinic, the app hosting it.",
+  "author": { "name": "Drew Heavner", "url": "https://github.com/r0adkll/clinic" },
+  "userConfig": {
+    "socket": {
+      "type": "string",
+      "title": "Hook socket",
+      "description": "The Unix socket Clinic listens on. Clinic sets this in the settings file it launches a session with; empty means nothing is reported.",
+      "default": ""
+    }
+  }
+}

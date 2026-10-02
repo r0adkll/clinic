@@ -1,8 +1,11 @@
 import Foundation
 import Darwin
 
-/// Unix-domain socket server receiving hook payloads from `clinic-hook` (ADR-015).
-/// Protocol: one connection per payload; the client writes the JSON document and closes its write side.
+/// Unix-domain socket server receiving hook payloads from `clinic-hook` (ADR-015) and from Clinic's
+/// session mod (ADR-177).
+/// Protocol: one connection per payload. The helper writes the JSON document and closes its write side.
+/// The mod can only speak HTTP, so it sends the same document as the body of a `POST` and is answered
+/// `204`; `HookWire` tells the two apart by the first bytes.
 /// Runs its accept loop on a dedicated dispatch queue; delivers decoded events through an AsyncStream.
 public final class HookServer: @unchecked Sendable {
     public let socketPath: String
@@ -124,24 +127,92 @@ public final class HookServer: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        var message = HookWire.Message.incomplete
         while data.count < 4 * 1024 * 1024 {
             let n = read(fd, &buffer, buffer.count)
-            if n > 0 { data.append(buffer, count: n) } else { break }
+            guard n > 0 else { break }
+            data.append(buffer, count: n)
+            // The helper ends its payload by closing; an HTTP client keeps the connection open and
+            // waits for an answer, so its request is over when the body it announced has arrived.
+            message = HookWire.read(data)
+            if case .http = message { break }
         }
         guard !data.isEmpty else { return }
-        do {
-            continuation.yield(try HookEvent.decode(data))
-        } catch {
-            onUndecodable?(data, error)
+        let payload: Data
+        switch message {
+        case .http(let body):
+            payload = body
+            respond(HookWire.accepted, to: fd)
+        case .incomplete:
+            respond(HookWire.rejected, to: fd)
+            onUndecodable?(data, HookServerError.truncatedRequest)
+            return
+        case .raw(let document):
+            payload = document
         }
+        do {
+            continuation.yield(try HookEvent.decode(payload))
+        } catch {
+            onUndecodable?(payload, error)
+        }
+    }
+
+    /// Best effort: a client that stopped waiting must not take the app down with `SIGPIPE`.
+    private func respond(_ response: Data, to fd: Int32) {
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        response.withUnsafeBytes { raw in _ = write(fd, raw.baseAddress, raw.count) }
+    }
+}
+
+/// How one hook payload is framed on the socket (ADR-177).
+///
+/// `clinic-hook` writes a bare JSON document and closes. The session mod reaches the socket through the
+/// CLI's `$.http.fetch`, which speaks HTTP: a `POST` with a `Content-Length` and the same document as
+/// its body. A JSON document starts with `{`, so the request line is unambiguous.
+public enum HookWire {
+    public enum Message: Equatable, Sendable {
+        /// A bare document, complete when the client closes.
+        case raw(Data)
+        /// A whole HTTP request; the associated value is its body.
+        case http(body: Data)
+        /// An HTTP request whose headers or body have not all arrived.
+        case incomplete
+    }
+
+    public static let accepted = Data("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+    public static let rejected = Data("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+
+    private static let requestLine = Data("POST ".utf8)
+    private static let headerEnd = Data("\r\n\r\n".utf8)
+
+    public static func read(_ data: Data) -> Message {
+        guard data.starts(with: requestLine) else {
+            // Fewer bytes than the method name could still become one.
+            return data.count < requestLine.count && requestLine.starts(with: data) ? .incomplete : .raw(data)
+        }
+        guard let end = data.range(of: headerEnd) else { return .incomplete }
+        let head = String(decoding: data[data.startIndex..<end.lowerBound], as: UTF8.self)
+        var length = 0
+        for line in head.components(separatedBy: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            if line[..<colon].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
+                length = Int(line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)) ?? 0
+            }
+        }
+        let body = data[end.upperBound...]
+        guard body.count >= length else { return .incomplete }
+        return .http(body: Data(body.prefix(length)))
     }
 }
 
 public enum HookServerError: Error, CustomStringConvertible {
     case pathTooLong(String)
     case posix(String, Int32)
+    case truncatedRequest
     public var description: String {
         switch self {
+        case .truncatedRequest: return "an HTTP request ended before its body did"
         case .pathTooLong(let p): return "socket path too long (max 103 bytes): \(p)"
         case .posix(let call, let e): return "\(call) failed: \(String(cString: strerror(e))) (\(e))"
         }

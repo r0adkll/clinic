@@ -311,6 +311,15 @@ final class TabStore {
             // (ADR-095). Kept out of `handle` because it is not part of tab state.
             self?.automations?.handle(hookEvent: event)
         }
+        hooks.onModUnavailable = { [weak self] id in
+            guard let self else { return }
+            // Said once, in words: this session's state now rests on the terminal and the transcript
+            // (ADR-166), and the ones started next use settings hooks again (ADR-177).
+            let tab = self.tab(routing: id)
+            self.notify(tab, sessionId: id, title: tab?.title ?? "Clinic",
+                        body: "Claude Code did not load Clinic's session mod, so this session reports less. New sessions will use settings hooks.",
+                        kind: .error)
+        }
         notifications.onActivate = { [weak self] id, ref in self?.reveal(sessionId: id, pullRequest: ref) }
         // ADR-080 retention: once the launch has settled, so restored sessions count as live.
         Task { [weak self] in
@@ -349,7 +358,7 @@ final class TabStore {
         sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         let running = backgroundAgents?.runningAgent(for: summary.id)
-        var launch = ClaudeLaunch(mode: running.map { .attach(agentId: $0.id) } ?? .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        var launch = ClaudeLaunch(mode: running.map { .attach(agentId: $0.id) } ?? .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         launch.mcpConfigPath = running == nil ? mcp?.configPath(for: summary.id) : nil
         guard let tab = makeTab(kind: .session(summary.id), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: sessions.displayName(for: summary)) else { return }
@@ -509,11 +518,12 @@ final class TabStore {
                                   effort: String?, prompt: String?, workItem: WorkItemRef?, spawnedBy parent: SessionID? = nil) {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree,
-                                  settingsFilePath: hooks.settingsFileURL(worktreeBaseRef: worktree ? worktreeBaseRef : nil).path, prompt: prompt)
+                                  settingsFilePath: hooks.settingsFileURL(worktreeBaseRef: worktree ? worktreeBaseRef : nil).path,
+                                  pluginDirectory: hooks.pluginDirectory, prompt: prompt)
         launch.worktreeName = worktreeName
         launch.mcpConfigPath = mcp?.configPath(for: id)
         guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }
-        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         resume.mcpConfigPath = launch.mcpConfigPath
         tab.lastResume = resume
         tab.model = model
@@ -531,7 +541,7 @@ final class TabStore {
     /// `claude --resume <id> --fork-session` in a new tab; rebinds on SessionStart (ADR-063).
     func fork(_ summary: SessionSummary) {
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: true), settingsFilePath: hooks.settingsFileURL.path)
+        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: true), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         launch.mcpConfigPath = nil   // the per-session config is written once the fork's id is known
         guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: "Fork of " + sessions.displayName(for: summary)) else { return }
@@ -548,7 +558,7 @@ final class TabStore {
 
     /// `claude --continue` in a project directory (ADR-063).
     func continueLast(in projectPath: String) {
-        let launch = ClaudeLaunch(mode: .continueLast, settingsFilePath: hooks.settingsFileURL.path)
+        let launch = ClaudeLaunch(mode: .continueLast, settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "Continue last session") else { return }
         tab.awaitingId = true
         selectedTabId = tab.id
@@ -558,7 +568,7 @@ final class TabStore {
     func openInGhostty(_ summary: SessionSummary) {
         guard let ghostty = Self.ghosttyBinary else { return }
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        let launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: false), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ghostty)
         p.arguments = ["--working-directory=\(cwd)", "-e"] + [launch.executable] + launch.arguments
@@ -1107,7 +1117,7 @@ final class TabStore {
             waiting.awaitingId = false
             let cwd = event.cwd ?? waiting.pwd ?? waiting.projectPath
             sessions.registerPending(id: event.sessionId, cwd: cwd, title: waiting.title)
-            var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+            var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
             resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)
             waiting.lastResume = resume
             found = waiting
@@ -1191,7 +1201,7 @@ final class TabStore {
         tab.statusLine = nil
         tab.unread = false
         sessions.registerPending(id: id, cwd: cwd ?? tab.pwd ?? tab.projectPath)
-        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
+        var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path, pluginDirectory: hooks.pluginDirectory)
         resume.mcpConfigPath = mcp?.configPath(for: id)
         tab.lastResume = resume
         if tab.state == .exited, !tab.childExited { tab.state = .idle }   // an older build's reducer, or a lost ordering

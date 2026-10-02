@@ -45,6 +45,23 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchAgents
+      # The session mod (ADR-177), file by file so the type declarations the CLI lays beside it during
+      # development stay out of the bundle. HookService copies Resources/clinic-mod out at launch.
+      - path: Sources/clinic-mod/.claude-plugin/plugin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: clinic-mod/.claude-plugin
+      - path: Sources/clinic-mod/hooks/hooks.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: clinic-mod/hooks
+      - path: Sources/clinic-mod/hooks/register.ts
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: clinic-mod/hooks
     dependencies:
       - package: ClinicCore
       - package: GhosttyBridge

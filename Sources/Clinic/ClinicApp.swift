@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind)
         }
         tabs.automations = automations
-        automations.start(sessions: sessions, settingsFilePath: hooks.settingsFileURL.path,
+        automations.start(sessions: sessions, settingsFilePath: hooks.commandSettingsFileURL.path,
                           chatsDirectory: SessionStore.chatsDirectory)
         // Starting by hand re-arms the wake agent that an explicit quit switched off.
         AutomationWake.clearQuitSuppression()

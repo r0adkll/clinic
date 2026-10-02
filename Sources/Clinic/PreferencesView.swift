@@ -10,6 +10,10 @@ enum Prefs {
     /// Master on/off. The files it plays, if any, are ADR-097's `NotificationSounds.defaultsKey`.
     static let notificationSound = "ClinicNotificationSound"
     static let hookTrace = "ClinicHookTrace"
+    /// Hidden (ADR-177): `mod` or `command` forces how sessions report; unset, Clinic chooses.
+    static let hookTransport = "ClinicHookTransport"
+    /// The CLI version on which the session mod failed to load, so Clinic stops trying until it changes.
+    static let modFailedOnCLIVersion = "ClinicModFailedOnCLIVersion"
     /// Where new worktrees branch from when a project has no choice of its own (ADR-118).
     static let worktreeBase = "ClinicWorktreeBase"
     /// `system`, `light` or `dark`; and `system`, a named accent, or `#RRGGBB` (ADR-152).

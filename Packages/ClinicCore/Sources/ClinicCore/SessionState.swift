@@ -28,6 +28,8 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var stopHookActive: Bool?
     /// Set on the `StatusLine` pseudo-event: the CLI's status line input, forwarded by `clinic-hook statusline` (ADR-157).
     public var statusLine: StatusLineReport?
+    /// `mod` when the session mod sent it (ADR-177); nil from `clinic-hook`.
+    public var via: String?
     public var receivedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -36,7 +38,17 @@ public struct HookEvent: Codable, Sendable, Hashable {
         case notificationType = "notification_type", message, prompt, toolName = "tool_name", permissionMode = "permission_mode"
         case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
         case statusLine = "_clinic_status_line"
+        case via = "_clinic_via"
     }
+
+    /// Sent by the session mod once per process, when it has loaded (ADR-177).
+    public static let modAttached = "ModAttached"
+    /// `SessionStart` as the one settings hook the mod transport keeps reports it: proof that the CLI
+    /// started and runs hooks, against which the mod's own notice is awaited (ADR-177).
+    public static let commandProbe = "CommandProbe"
+    /// Sent by the session mod when the main loop's turn ends, with why in `reason`:
+    /// `answer`, `aborted`, `refusal` or `error` (ADR-177).
+    public static let turnEnd = "TurnEnd"
 
     public init(hookEventName: String, sessionId: SessionID, transcriptPath: String? = nil, cwd: String? = nil, source: String? = nil,
                 reason: String? = nil, agentId: String? = nil, notificationType: String? = nil, message: String? = nil, prompt: String? = nil, toolName: String? = nil, permissionMode: String? = nil,
@@ -62,6 +74,7 @@ public struct HookEvent: Codable, Sendable, Hashable {
         permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         stopHookActive = try c.decodeIfPresent(Bool.self, forKey: .stopHookActive)
+        via = try c.decodeIfPresent(String.self, forKey: .via)
         receivedAt = try c.decodeIfPresent(Date.self, forKey: .receivedAt) ?? Date()
         // The status line input is a document of its own shape, not a hook payload, so it is read from
         // the top level rather than from a key.
@@ -100,6 +113,12 @@ public enum SessionStateMachine {
             return nil
         case "Stop", "StopFailure":
             return .idle
+        case HookEvent.turnEnd:
+            // The mod's word on why the main loop's turn ended (ADR-177). An answered turn fires `Stop`
+            // and an API error `StopFailure`, which carry more; an interrupt and a refusal fire neither,
+            // and until the mod this ending waited three seconds for the terminal to notice (ADR-166).
+            guard event.agentId == nil, event.reason == "aborted" || event.reason == "refusal" else { return nil }
+            return state == .working || state == .waitingForPermission ? .idle : nil
         case "SessionEnd":
             // `/clear` ends the session id, not the process: a `SessionStart` with a new id follows
             // within milliseconds and the tab is re-keyed to it (ADR-166).

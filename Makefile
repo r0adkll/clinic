@@ -1,4 +1,4 @@
-.PHONY: setup ghostty project build dev dev-build dev-stop dev-reset test release publish screenshots clean
+.PHONY: setup ghostty project build dev dev-build dev-stop dev-reset test test-mod release publish screenshots clean
 
 setup:
 	brew install xcodegen zig@0.15 gettext
@@ -33,6 +33,11 @@ dev-reset:
 test:
 	swift test --package-path Packages/ClinicCore
 	swift test --package-path Packages/GhosttyBridge
+
+# The session mod (ADR-177). Needs the `claude` CLI, 2.1.287 or later, which is why it is not part of `test`.
+test-mod:
+	claude plugin validate Sources/clinic-mod
+	claude plugin test Sources/clinic-mod
 
 release:
 	scripts/release.sh

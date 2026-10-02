@@ -26,3 +26,6 @@ Local.xcconfig
 
 # Obsidian per-machine config for the docs vault (ADR-105)
 docs/.obsidian/
+
+# What the CLI lays beside a mod it loads from this folder (types for the editor)
+Sources/clinic-mod/.claude-plugin/types/
