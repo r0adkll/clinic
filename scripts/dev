@@ -4,6 +4,8 @@
 #   scripts/dev            build, quit a running Clinic Dev, launch the new one   (make dev)
 #   scripts/dev build      build only                                             (make dev-build)
 #   scripts/dev run        launch what is built, without building
+#   scripts/dev attached   build, quit a running one, then run it in this terminal until it exits:
+#                          its output prints here and ending the command ends the app (.clinic/run.json)
 #   scripts/dev stop       quit a running Clinic Dev                              (make dev-stop)
 #   scripts/dev reset      stop, then delete its data directory and preferences   (make dev-reset)
 #   scripts/dev path       print the app's path
@@ -71,6 +73,20 @@ run() {
     /usr/bin/open "${flags[@]}" -a "$APP" ${envs[@]+"${envs[@]}"} ${args[@]+--args "${args[@]}"}
 }
 
+# The app as a child of this shell rather than of launchd, for a run configuration: the run's pane shows
+# what it prints, and stopping the run stops the app. Same bare environment as `run`.
+attached() {
+  [ -d "$APP" ] || { echo "error: $APP is not built. Run: make dev" >&2; exit 1; }
+  local envs=()
+  [ -n "${CLINIC_DEV_CLAUDE_CONFIG_DIR:-}" ] && envs+=("CLAUDE_CONFIG_DIR=$CLINIC_DEV_CLAUDE_CONFIG_DIR")
+  # shellcheck disable=SC2206
+  local args=(${CLINIC_DEV_ARGS:-})
+  echo "running $NAME (stop this run to quit it)"
+  exec env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${SHELL:-/bin/zsh}" \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="${TMPDIR:-/tmp}" ${envs[@]+"${envs[@]}"} \
+    "$APP/Contents/MacOS/$NAME" ${args[@]+"${args[@]}"}
+}
+
 reset() {
   stop
   sleep 3   # a dying app flushes its cached preferences; deleting sooner loses to that flush
@@ -83,8 +99,9 @@ case "${1:-}" in
   "")    build; stop; run ;;
   build) build ;;
   run)   run ;;
+  attached) build; stop; attached ;;
   stop)  stop ;;
   reset) reset ;;
   path)  echo "$APP" ;;
-  *)     sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  *)     sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

@@ -1,18 +1,25 @@
 {
   "version": 1,
-  "default": "clinic",
+  "default": "clinic-dev",
   "configurations": [
     {
-      "id": "clinic",
-      "name": "Clinic",
+      "id": "clinic-dev",
+      "name": "Clinic Dev",
       "icon": "macwindow",
-      "command": "make project && xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation -quiet build && env CLINIC_APP_SUPPORT=$HOME/Library/Caches/clinic-dev build/Build/Products/Debug/Clinic.app/Contents/MacOS/Clinic",
+      "command": "scripts/dev attached",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "build-dev",
+      "name": "Build Clinic Dev",
+      "icon": "hammer",
+      "command": "scripts/dev build",
       "rerunAfterTurn": false
     },
     {
       "id": "build",
-      "name": "Build",
-      "icon": "hammer",
+      "name": "Build Clinic",
+      "icon": "hammer.circle",
       "command": "make project && xcodebuild -project Clinic.xcodeproj -scheme Clinic -configuration Debug -derivedDataPath build -skipPackagePluginValidation -skipMacroValidation -quiet build",
       "rerunAfterTurn": false
     },
@@ -42,6 +49,13 @@
       "name": "Release",
       "icon": "shippingbox",
       "command": "make release",
+      "rerunAfterTurn": false
+    },
+    {
+      "id": "reset-dev",
+      "name": "Reset Clinic Dev",
+      "icon": "trash",
+      "command": "scripts/dev reset",
       "rerunAfterTurn": false
     }
   ]

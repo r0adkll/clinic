@@ -37,6 +37,10 @@ bundle id `com.r0adkll.clinic`, and until now a build under test was the same ap
 - **`make dev` builds *Clinic Dev***: `com.r0adkll.clinic.dev`, data in `~/Library/Application Support/Clinic Dev`,
   derived data in `build/dev`. It then quits a running Clinic Dev and launches the new one. `make dev-build`,
   `make dev-stop` and `make dev-reset` do the parts; `scripts/dev` is the implementation.
+- **The project's run configurations run Clinic Dev.** `.clinic/run.json` defaults to *Clinic Dev*
+  (`scripts/dev attached`): build, quit a running one, then run the app as the run's own child, so the pane
+  shows its output and stopping the run quits it. *Build Clinic Dev* and *Reset Clinic Dev* sit beside it.
+  The old *Clinic* configuration, a smoke instance sharing the real app's preferences, is gone.
 - **The data directory's name comes from the Info.plist key `ClinicDataDirectory`**, read once by
   `ClinicPaths.directoryName`. Every path that said `"Clinic"` goes through it. A process without the key, such
   as a test runner, gets `Clinic`. `CLINIC_APP_SUPPORT` still moves the parent directory for smoke runs.
@@ -66,3 +70,6 @@ bundle id `com.r0adkll.clinic`, and until now a build under test was the same ap
   unchanged before and after. `make build` still produces `Clinic.app` as `com.r0adkll.clinic` with data
   directory `Clinic`, and ClinicCore's 586 tests pass. Not seen: the DEV band on the Dock icon, because this
   machine gives the session no screen capture.
+- Verified 2026-10-02: `scripts/dev attached` built, ran the app as its child with no `CLAUDE_*` variable and
+  its own data directory, and the app was gone after its process was ended. Not run: the configuration from
+  Clinic's Run pill.

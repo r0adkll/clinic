@@ -4637,3 +4637,13 @@ agent, `clinic-wake` reads its own bundle's identity, and the Dock icon wears a 
 Verified: Clinic Dev ran beside the live app with its own sockets, hook settings and preferences, and a haiku
 session in it delivered its hooks. The live app's files were unchanged. `make build` still yields the stock
 identity, and 586 ClinicCore tests pass. Not seen: the Dock band. Next: the transport and status line mod.
+
+## 2026-10-02 — Run configurations run Clinic Dev (ADR-176)
+User: land the Clinic Dev change on `main`, rebase the mods branch on it, and update the project's `run.json`
+for dev builds.
+
+`main` fast-forwarded to the ADR-176 commit. `scripts/dev attached` builds, then runs Clinic Dev as a child of
+the calling shell. `.clinic/run.json` now defaults to *Clinic Dev* with that command, adds *Build Clinic Dev*
+and *Reset Clinic Dev*, renames the stock build *Build Clinic*, and drops the smoke-instance *Clinic* entry.
+
+Verified: attached mode started the app clean and ending the process ended the app. Not run: the Run pill.
