@@ -4741,3 +4741,14 @@ In Clinic Dev: two questions with a multi-select came back exactly from the pane
 notice, worded as a question; discarding a round leaves the terminal dialog answerable. A subagent has no
 `AskUserQuestion` tool on 2.1.287, so that case cannot occur. Added an `attention for …` log line per notice
 and changed the card's line for an open dialog to *Has a question for you* (not seen by eye).
+
+## 2026-10-03 — ADR-177's open points closed
+User: continue.
+
+Fallback verified by breaking the installed mod copy: notice, recorded version, next launch on settings hooks.
+`/model sonnet` through the mod in tmux showed two faults, both fixed: `PostModelSwitch` names the new model
+`to_model` (Clinic read `new_model`, so the field was always empty), and the mod's status report after the
+switch asked the engine too early and named the old model. The card shows the model name and context figure.
+The CLI is now 2.1.289 and the mod loads on it. Not this work's: Clinic's footer model menu left the session
+waiting on a dialog in Clinic Dev instead of switching, and a terminate call arrived while a quit sheet was
+up (two ⌘Q presses look like that), which ended the dev app mid-test.

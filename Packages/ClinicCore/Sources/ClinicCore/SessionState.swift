@@ -24,7 +24,9 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public var prompt: String?
     public var toolName: String?
     public var permissionMode: String?
-    public var model: String?             // PostModelSwitch (field name best-effort)
+    /// PostModelSwitch: the resolved id the session runs after the switch (`to_model`; older builds of
+    /// this decoder read `new_model`, which the CLI never sent).
+    public var model: String?
     public var stopHookActive: Bool?
     /// Set on the `StatusLine` pseudo-event: the CLI's status line input, forwarded by `clinic-hook statusline` (ADR-157).
     public var statusLine: StatusLineReport?
@@ -42,7 +44,7 @@ public struct HookEvent: Codable, Sendable, Hashable {
         case hookEventName = "hook_event_name", sessionId = "session_id", transcriptPath = "transcript_path", cwd, source
         case reason, agentId = "agent_id"
         case notificationType = "notification_type", message, prompt, toolName = "tool_name", permissionMode = "permission_mode"
-        case model = "new_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
+        case model = "to_model", stopHookActive = "stop_hook_active", receivedAt = "_clinic_received_at"
         case statusLine = "_clinic_status_line"
         case via = "_clinic_via"
         case toolUseId = "tool_use_id", questions, answers
@@ -52,6 +54,9 @@ public struct HookEvent: Codable, Sendable, Hashable {
     public static let askQuestion = "AskQuestion"
     /// Sent by the session mod when that dialog ended in the terminal, answered or dismissed (ADR-179).
     public static let askResolved = "AskResolved"
+
+    /// What this decoder read before 2026-10-03, and traces from then still carry.
+    private enum LegacyKeys: String, CodingKey { case newModel = "new_model" }
 
     /// Sent by the session mod once per process, when it has loaded (ADR-177).
     public static let modAttached = "ModAttached"
@@ -85,6 +90,7 @@ public struct HookEvent: Codable, Sendable, Hashable {
         toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
         permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode)
         model = try c.decodeIfPresent(String.self, forKey: .model)
+            ?? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(String.self, forKey: .newModel)
         stopHookActive = try c.decodeIfPresent(Bool.self, forKey: .stopHookActive)
         via = try c.decodeIfPresent(String.self, forKey: .via)
         // Read only on the mod's own events: `PostToolUse` and others carry a `tool_use_id` and keys

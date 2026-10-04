@@ -93,5 +93,17 @@ user's own ([[ADR-157 The Status Line Reports Context]]).
 - `/clear`, 2026-10-02: the user ran a working session in Clinic Dev and reported it works. The log has
   `session f1d287ed… cleared; tab follows 11a1589a…`, with no hook for an unknown session and no terminal
   correction in the three hours around it.
-- Not verified: the fallback notice, since nothing here stops a mod from loading; `PostModelSwitch` through
-  the mod; the sidebar card's figures by eye.
+- Verified 2026-10-03, in Clinic Dev on CLI 2.1.289 (the CLI updated overnight; the mod loads on it):
+  - *The fallback.* With the installed mod copy broken on purpose, a resumed session sent its probe, and ten
+    seconds later the log said *the session mod did not load … falling back to settings hooks*, the notice
+    was raised and `ClinicModFailedOnCLIVersion` read `2.1.289`. The next launch logged *hook transport:
+    command* and its session reported through `clinic-hook`. Clearing the key restored the mod.
+  - *A model switch.* In tmux, `/model sonnet` through the mod produced `PostModelSwitch` and a status report.
+    Two faults found: the payload names the new model `to_model`, which Clinic's decoder had never read
+    (it looked for `new_model`), and the engine still answered the old model when the mod asked right after
+    the hook, so the report named the old one. Both fixed: the decoder reads `to_model` (and the old key for
+    old traces), and the mod reports the model the event names.
+  - *The card.* With a live haiku session the card read *Haiku 4.5* and a context percentage, and the usage
+    panel both plan windows. Read through the accessibility API, not seen by eye.
+  - Found on the way: Clinic's footer menu types `/model sonnet` and shows the new name at once, but on
+    this CLI the session then sat waiting on a dialog rather than switching. Not this ADR's; noted in the log.

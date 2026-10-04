@@ -153,7 +153,8 @@ export const register: Register = (on, options) => {
   on('classic.PostModelSwitch', async ($, e, next) => {
     void send($, e)
     const result = await next(e)
-    void reportStatus($)
+    // The engine still answers the old model here; the event names the new one.
+    void reportStatus($, e.to_model)
     return result
   })
   on('classic.SessionEnd', ($, e, next) => {
