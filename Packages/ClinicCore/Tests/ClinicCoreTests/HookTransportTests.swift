@@ -139,8 +139,11 @@ import Testing
         #expect(SessionStateMachine.reduce(.working, event: turnEnd("aborted")) == .idle)
         #expect(SessionStateMachine.reduce(.waitingForPermission, event: turnEnd("aborted")) == .idle)
         #expect(SessionStateMachine.reduce(.working, event: turnEnd("refusal")) == .idle)
-        // `Stop` and `StopFailure` speak for these two, with more to say.
-        #expect(SessionStateMachine.reduce(.working, event: turnEnd("answer")) == nil)
+        // `Stop` precedes an answered turn's end and has already moved it; one still moving here had none
+        // (a permission prompt answered No, ADR-180). `StopFailure` speaks for an error, with the message.
+        #expect(SessionStateMachine.reduce(.working, event: turnEnd("answer")) == .idle)
+        #expect(SessionStateMachine.reduce(.waitingForPermission, event: turnEnd("answer")) == .idle)
+        #expect(SessionStateMachine.reduce(.working, event: turnEnd("error")) == nil)
         #expect(SessionStateMachine.reduce(.working, event: turnEnd("error")) == nil)
         // A subagent's turn is not the session's, and a session at rest stays there.
         #expect(SessionStateMachine.reduce(.working, event: turnEnd("aborted", agent: "a1")) == nil)

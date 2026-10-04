@@ -10,10 +10,20 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     /// Clicked: which session, and the pull request the notification was about, when it was about one
     /// (ADR-128).
     var onActivate: ((SessionID, PullRequestRef?) -> Void)?
+    /// Approve or Deny pressed on a "needs permission" notification (ADR-180).
+    var onPermissionAnswer: ((SessionID, Bool) -> Void)?
+
+    static let permissionCategory = "clinic.permission"
+    static let approveAction = "clinic.permission.approve"
+    static let denyAction = "clinic.permission.deny"
 
     func requestAuthorization() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        // A "needs permission" notification carries the two answers the CLI's prompt takes (ADR-180).
+        let approve = UNNotificationAction(identifier: Self.approveAction, title: "Approve", options: [])
+        let deny = UNNotificationAction(identifier: Self.denyAction, title: "Deny", options: [.destructive])
+        center.setNotificationCategories([UNNotificationCategory(identifier: Self.permissionCategory, actions: [approve, deny], intentIdentifiers: [])])
         center.requestAuthorization(options: [.alert, .badge]) { granted, error in
             if let error { Self.log.error("notification auth: \(error, privacy: .public)") }
             Self.log.info("notification auth granted=\(granted)")
@@ -21,8 +31,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// `silent` when Clinic has already played the sound itself, or sound is off (ADR-097).
-    func post(sessionId: SessionID, title: String, body: String, silent: Bool, pullRequest: URL? = nil) {
+    func post(sessionId: SessionID, title: String, body: String, silent: Bool, pullRequest: URL? = nil, answerable: Bool = false) {
         let content = UNMutableNotificationContent()
+        if answerable { content.categoryIdentifier = Self.permissionCategory }
         content.title = title
         content.body = body
         content.userInfo = ["sessionId": sessionId.rawValue]
@@ -44,7 +55,13 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         guard let raw = info["sessionId"] as? String else { return }
         let id = SessionID(raw)
         let ref = (info["pullRequest"] as? String).flatMap(URL.init(string:)).flatMap { PullRequestRef(url: $0) }
+        let action = response.actionIdentifier
         await MainActor.run {
+            // Approve and Deny answer from the notification, without bringing Clinic forward (ADR-180).
+            if action == Self.approveAction || action == Self.denyAction {
+                onPermissionAnswer?(id, action == Self.approveAction)
+                return
+            }
             NSApp.activate()
             onActivate?(id, ref)
         }

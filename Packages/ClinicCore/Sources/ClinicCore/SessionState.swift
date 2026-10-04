@@ -139,10 +139,12 @@ public enum SessionStateMachine {
         case "Stop", "StopFailure":
             return .idle
         case HookEvent.turnEnd:
-            // The mod's word on why the main loop's turn ended (ADR-177). An answered turn fires `Stop`
-            // and an API error `StopFailure`, which carry more; an interrupt and a refusal fire neither,
-            // and until the mod this ending waited three seconds for the terminal to notice (ADR-166).
-            guard event.agentId == nil, event.reason == "aborted" || event.reason == "refusal" else { return nil }
+            // The mod's word that the main loop's turn is over (ADR-177). `Stop` and `StopFailure` come
+            // first when they come at all, and carry more; by now the turn they ended is idle. A turn
+            // still working or waiting here ended without them: an interrupt, a refusal, or a permission
+            // prompt answered *No*, which the CLI ends with `answer` and no `Stop` (2.1.289, ADR-180).
+            // Until the mod these waited three seconds for the terminal to notice (ADR-166).
+            guard event.agentId == nil, event.reason != "error" else { return nil }
             return state == .working || state == .waitingForPermission ? .idle : nil
         case "SessionEnd":
             // `/clear` ends the session id, not the process: a `SessionStart` with a new id follows

@@ -349,7 +349,22 @@ struct SessionCard: View {
                 .foregroundStyle(now.urgent && !isSelected ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                 .lineLimit(2)
                 .padding(.leading, Self.textInset)
+            if let tab, tabs.canAnswerPermission(tab) { permissionAnswers(tab) }
         }
+    }
+
+    /// The two answers the CLI's prompt takes, typed into it for the reader (ADR-180).
+    private func permissionAnswers(_ tab: Tab) -> some View {
+        HStack(spacing: 6) {
+            Button("Approve") { tabs.answerPermission(tab, allow: true) }
+                .help("Answer Yes to this permission prompt, as pressing 1 in the terminal would")
+            Button("Deny") { tabs.answerPermission(tab, allow: false) }
+                .help("Answer No, as pressing 3 in the terminal would; Claude stops and asks what to do instead")
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .padding(.leading, Self.textInset)
+        .padding(.top, 2)
     }
 
     private var now: (text: Text, urgent: Bool)? {

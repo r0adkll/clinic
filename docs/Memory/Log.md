@@ -4752,3 +4752,15 @@ switch asked the engine too early and named the old model. The card shows the mo
 The CLI is now 2.1.289 and the mod loads on it. Not this work's: Clinic's footer model menu left the session
 waiting on a dialog in Clinic Dev instead of switching, and a terminate call arrived while a quit sheet was
 up (two ⌘Q presses look like that), which ended the dev app mid-test.
+
+## 2026-10-04 — Permission prompts are answered from Clinic (ADR-180)
+User chose: type into the CLI's prompt, controls on the card and as notification actions, no "don't ask again".
+
+Measured the prompt in tmux: `1` approves, `3` and Esc interrupt the turn (`TurnEnd answer`, no `Stop`, no
+`PermissionDenied`). The card gets Approve and Deny while waiting; the needs-permission notification gets
+them as actions. The first build typed through the IME text path and the prompt ignored it; a synthesized key
+event (`pressKey`) works. `TurnEnd` now ends any turn still working or waiting, since `Stop` always precedes
+it when it comes.
+
+Verified in Clinic Dev: Approve ran the command, Deny left the card at Ready. Not verified: the notification
+actions (Clinic Dev has notifications denied), the buttons by eye.
