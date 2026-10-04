@@ -4661,3 +4661,14 @@ Verified in Clinic Dev with a shell tab and with a live session: two rounds of h
 by small `swiftc` accessibility tools that press a button by name. One mistake on the way: a loose match on
 "Sidebar" pressed a recent-session row and resumed session 83204988 in Clinic Dev; no prompt was sent, and
 the process ended with the app.
+
+## 2026-10-04 — The mods effort is abandoned (ADR-179, ADR-180)
+User: *"I'm not really seeing the 'Mods' value here and this ultimately seems to just complicate the
+product"*, then: abandon it and clean up the branch.
+
+Agreed. The branch `mods-integration` built a session mod (its ADR-177), the question dialog in the Grill
+pane (its ADR-179) and permission answers (ADR-180), all verified. Only the last needed no mod, so it is
+ported to `main` with the `to_model` decoder fix, the attention log line, the Return smoke key and the card's
+*Has a question for you*. The two research notes written during the dev session come across too. ADR-179 on
+`main` records the decision and why. The branch is deleted after tagging its tip `archive/mods-integration`.
+Clinic Dev's data directory loses the mod copy and the mod settings files the branch build left there.

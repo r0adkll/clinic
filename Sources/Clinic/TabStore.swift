@@ -253,6 +253,8 @@ final class TabStore {
                 url: URL? = nil, pullRequest: PullRequestRef? = nil) {
         let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url,
                                    pullRequest: pullRequest)
+        // What Clinic said and about which session: the history is in memory only, so this is the record.
+        Self.log.info("attention for \(sessionId?.rawValue ?? "-", privacy: .public): \(body, privacy: .public)")
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
@@ -261,7 +263,7 @@ final class TabStore {
         } else {
             let silent = sounds.playForSystemNotification()
             notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body,
-                               silent: silent, pullRequest: pullRequest?.url)
+                               silent: silent, pullRequest: pullRequest?.url, answerable: kind == .needsPermission)
         }
         tab?.unread = true
         updateBadge()
@@ -312,6 +314,7 @@ final class TabStore {
             self?.automations?.handle(hookEvent: event)
         }
         notifications.onActivate = { [weak self] id, ref in self?.reveal(sessionId: id, pullRequest: ref) }
+        notifications.onPermissionAnswer = { [weak self] id, allow in self?.answerPermission(sessionId: id, allow: allow) }
         // ADR-080 retention: once the launch has settled, so restored sessions count as live.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
@@ -1146,6 +1149,31 @@ final class TabStore {
         tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
         transition(tab, to: new, waitingOn: SessionStateMachine.waitingOn(tab.waitingOn, from: old, to: new, event: event),
                    failed: event.hookEventName == "StopFailure", message: event.message)
+    }
+
+    // MARK: Answering a permission prompt from Clinic (ADR-180)
+
+    /// Whether Approve and Deny apply: the session is at the CLI's permission prompt, and that prompt is
+    /// not Claude's question dialog, which takes choices rather than a yes or no.
+    func canAnswerPermission(_ tab: Tab) -> Bool {
+        guard tab.state == .waitingForPermission, let id = tab.sessionId else { return false }
+        return activities?.activity(for: id)?.currentTool?.name != "AskUserQuestion"
+    }
+
+    /// Presses the key the CLI's own prompt takes: `1` is *Yes*, `3` is *No*, which the CLI treats as an
+    /// interrupt and asks what to do instead. Clinic is the reader's hands here, not an authority: the
+    /// prompt stays the CLI's, and nothing is remembered. A key press, not committed text: the prompt
+    /// reads keys and ignores a typed "1".
+    func answerPermission(_ tab: Tab, allow: Bool) {
+        guard canAnswerPermission(tab) else { return }
+        Self.log.notice("permission \(allow ? "approved" : "denied", privacy: .public) from Clinic for \(tab.sessionId?.rawValue ?? "?", privacy: .public)")
+        if allow { tab.surface.pressKey(keycode: 18, character: "1") } else { tab.surface.pressKey(keycode: 20, character: "3") }   // kVK_ANSI_1, kVK_ANSI_3
+    }
+
+    /// A notification's Approve or Deny: the session may have moved on, so the state is checked again.
+    func answerPermission(sessionId: SessionID, allow: Bool) {
+        guard let tab = tab(routing: sessionId) else { return }
+        answerPermission(tab, allow: allow)
     }
 
     /// Moves a tab to a state and tells the user what the move means (ADR-033). Hooks come through here,

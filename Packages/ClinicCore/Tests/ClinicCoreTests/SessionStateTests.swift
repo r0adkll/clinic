@@ -111,3 +111,16 @@ import Testing
         #expect(hook.statusLine == nil)
     }
 }
+
+@Suite struct ModelSwitchEventTests {
+    @Test func theSwitchNamesTheModelTheSessionRunsNow() throws {
+        let json = #"{"hook_event_name":"PostModelSwitch","session_id":"11111111-2222-3333-4444-555555555555","from_model":"claude-haiku-4-5-20251001","to_model":"claude-sonnet-5-5","requested_model":"sonnet","source":"command"}"#
+        #expect(try HookEvent.decode(Data(json.utf8)).model == "claude-sonnet-5-5")
+        // The field this decoder used to read, so an old trace replays the same way.
+        let legacy = #"{"hook_event_name":"PostModelSwitch","session_id":"11111111-2222-3333-4444-555555555555","new_model":"claude-opus-5-5"}"#
+        #expect(try HookEvent.decode(Data(legacy.utf8)).model == "claude-opus-5-5")
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601   // as the trace writes it
+        let encoded = try encoder.encode(try HookEvent.decode(Data(json.utf8)))
+        #expect(try HookEvent.decode(encoded).model == "claude-sonnet-5-5")
+    }
+}

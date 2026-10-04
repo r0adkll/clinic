@@ -265,6 +265,24 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
         _ = ghostty_surface_key(surface, ev)
     }
 
+    /// Presses and releases one unmodified key, as the keyboard would: a digit answering a CLI prompt that
+    /// reads key presses and ignores committed text (ADR-180). `keycode` is the macOS virtual key code,
+    /// `character` what the key produces.
+    public func pressKey(keycode: UInt32, character: Character) {
+        guard let surface, let scalar = character.unicodeScalars.first else { return }
+        String(character).withCString { text in
+            var ev = ghostty_input_key_s()
+            ev.keycode = keycode
+            ev.text = text
+            ev.unshifted_codepoint = scalar.value
+            ev.action = GHOSTTY_ACTION_PRESS
+            _ = ghostty_surface_key(surface, ev)
+            ev.action = GHOSTTY_ACTION_RELEASE
+            ev.text = nil
+            _ = ghostty_surface_key(surface, ev)
+        }
+    }
+
     /// The text currently visible in the viewport (what the user sees), for the agent's `read_terminal` tool.
     public var visibleText: String? { readText(GHOSTTY_POINT_VIEWPORT) }
 
