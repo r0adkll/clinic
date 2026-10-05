@@ -13,16 +13,24 @@ final class MCPToolService {
     private weak var history: NotificationStore?
     private weak var notifications: NotificationService?
     private weak var prs: PRStore?
+    private weak var reports: SessionReportService?
 
     init(appSupport: URL = ClinicPaths.appSupport) {
         server = MCPServer(socketPath: MCPServer.defaultSocketPath(appSupport: appSupport, suffix: HookService.instanceSuffix))
         configDirectory = appSupport.appendingPathComponent(ClinicPaths.directoryName, isDirectory: true).appendingPathComponent("mcp", isDirectory: true)
     }
 
-    func start(tabs: TabStore, sessions: SessionStore, history: NotificationStore, notifications: NotificationService, prs: PRStore) {
+    func start(tabs: TabStore, sessions: SessionStore, history: NotificationStore, notifications: NotificationService, prs: PRStore,
+               reports: SessionReportService? = nil) {
         self.tabs = tabs; self.sessions = sessions; self.history = history; self.notifications = notifications; self.prs = prs
+        self.reports = reports
         server.handler = { [weak self] req in
-            await MainActor.run { MCPServer.Response(self?.handle(req) ?? ["error": ["code": -32603, "message": "Clinic is shutting down"]]) }
+            guard let self else { return MCPServer.Response(["error": ["code": -32603, "message": "Clinic is shutting down"]]) }
+            return await self.respond(req)
+        }
+        // A start_session that waits holds its call until the child reports (ADR-182); nothing else may.
+        server.timeout = { req in
+            req.method == "tools/call" && req.toolName == "start_session" && (req.arguments["wait"] as? Bool ?? false) ? nil : MCPServer.defaultTimeout
         }
         do { try server.start(); Self.log.info("mcp server listening at \(self.server.socketPath, privacy: .public)") }
         catch { Self.log.error("mcp server failed: \(error, privacy: .public)") }
@@ -35,6 +43,15 @@ final class MCPToolService {
     }
 
     var enabledTools: [MCPToolSpec] { MCPToolSpec.all.filter(Self.isEnabled) }
+
+    /// The tools one session sees: everything switched on, less `report_to_parent` for a session that
+    /// has no parent to report to (ADR-182). A fork's shim asks with its placeholder id before the
+    /// real one is known, so the tab's pending flag counts too.
+    func enabledTools(for sessionId: SessionID) -> [MCPToolSpec] {
+        let tab = tabs?.tab(routing: sessionId)
+        let reporting = tab?.pendingReporting == true || (reports?.isReporting(tab?.sessionId ?? sessionId) ?? false)
+        return enabledTools.filter { $0.name != "report_to_parent" || reporting }
+    }
 
     /// Writes the per-session config file and returns its path (ADR-056).
     func configPath(for id: SessionID) -> String? {
@@ -51,15 +68,18 @@ final class MCPToolService {
 
     // MARK: Dispatch
 
-    private func handle(_ req: MCPServer.Request) -> [String: Any] {
+    /// The wrapped response crosses back to the server's thread; the dictionary alone could not.
+    private func respond(_ req: MCPServer.Request) async -> MCPServer.Response { MCPServer.Response(await handle(req)) }
+
+    private func handle(_ req: MCPServer.Request) async -> [String: Any] {
         switch req.method {
         case "tools/list":
             Self.log.info("tools/list from session \(req.sessionId.rawValue, privacy: .public)")
-            return ["result": ["tools": enabledTools.map(\.listEntry)]]
+            return ["result": ["tools": enabledTools(for: req.sessionId).map(\.listEntry)]]
         case "instructions":
             // The shim asks at `initialize` rather than answering from a constant, so a tool the user
             // has switched off is never advertised (ADR-131).
-            return ["result": ["instructions": MCPToolSpec.instructions(for: enabledTools)]]
+            return ["result": ["instructions": MCPToolSpec.instructions(for: enabledTools(for: req.sessionId))]]
         case "tools/call":
             guard let name = req.toolName, let spec = MCPToolSpec.all.first(where: { $0.name == name }) else {
                 return MCPToolSpec.textResult("Unknown tool", isError: true)
@@ -68,7 +88,10 @@ final class MCPToolService {
             guard let tab = tabs?.tab(routing: req.sessionId) else { return MCPToolSpec.textResult("Session is not open in Clinic.", isError: true) }
             Self.log.info("tool \(name, privacy: .public) for \(req.sessionId.rawValue, privacy: .public)")
             // The shim was launched with the tab's first id; after `/clear` the tab has another (ADR-166).
-            return call(name, args: req.arguments, tab: tab, sessionId: tab.sessionId ?? req.sessionId)
+            let sessionId = tab.sessionId ?? req.sessionId
+            // The one call that may suspend: a start_session that waits for its child's report (ADR-182).
+            if name == "start_session" { return await startSession(args: req.arguments, tab: tab, sessionId: sessionId) }
+            return call(name, args: req.arguments, tab: tab, sessionId: sessionId)
         default:
             return ["error": ["code": -32601, "message": "Unsupported method \(req.method)"]]
         }
@@ -148,21 +171,70 @@ final class MCPToolService {
             prs?.ensureLoaded([ref])
             return MCPToolSpec.textResult("Attached PR #\(ref.number).")
 
-        case "start_session":
-            let prompt = (args["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !prompt.isEmpty else { return MCPToolSpec.textResult("prompt is required", isError: true) }
-            let directory = (args["directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tab.pwd ?? tab.projectPath
-            let model = args["model"] as? String
-            let keep = tabs?.selectedTabId
-            tabs?.newSession(projectPath: directory, model: model, worktree: false, prompt: prompt, parent: SessionParent(id: sessionId, kind: .spawn))
-            if let keep { tabs?.selectedTabId = keep }
-            return MCPToolSpec.textResult("Started a sibling session in \(directory) as a background tab.")
+        case "report_to_parent":
+            // ADR-182: the child says its result is ready; Clinic carries it.
+            let message = (args["message"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { return MCPToolSpec.textResult("message is required", isError: true) }
+            guard let reports else { return MCPToolSpec.textResult("Reporting is unavailable.", isError: true) }
+            return MCPToolSpec.textResult(reports.report(from: sessionId, message: message))
 
         case "list_run_configurations", "run", "read_run_output", "stop_run":
             return runTool(name, args: args, tab: tab)
 
         default:
             return MCPToolSpec.textResult("Unknown tool \(name)", isError: true)
+        }
+    }
+
+    // MARK: Children (ADR-182)
+
+    /// `start_session`: a child under the caller, fresh or a fork of it, briefed to report back. With
+    /// `wait` the call holds until the first report and returns it; the user stopping or closing the
+    /// child, or Clinic quitting, ends the wait with an error the parent can act on.
+    private func startSession(args: [String: Any], tab: Tab, sessionId: SessionID) async -> [String: Any] {
+        let prompt = (args["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return MCPToolSpec.textResult("prompt is required", isError: true) }
+        guard let tabs, let sessions, let reports else { return MCPToolSpec.textResult("Clinic cannot start sessions right now.", isError: true) }
+        let fork = args["fork"] as? Bool ?? false
+        let report = args["report"] as? Bool ?? true
+        let wait = args["wait"] as? Bool ?? false
+        let directory = fork ? (tab.pwd ?? tab.projectPath)
+            : ((args["directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tab.pwd ?? tab.projectPath)
+        // The parent's own model and effort unless told otherwise; the permission mode is never inherited.
+        let model = (args["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tab.model
+        let effort = (args["effort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tab.effort
+        guard !wait || report else { return MCPToolSpec.textResult("wait needs report: a child that does not report has nothing to wait for.", isError: true) }
+        let brief = reports.brief(parent: sessionId, parentTitle: tab.title, directory: directory, reporting: report)
+        let keep = tabs.selectedTabId
+        let childId: SessionID?
+        if fork {
+            guard let summary = sessions.sessions[sessionId] else { return MCPToolSpec.textResult("This session cannot be forked yet.", isError: true) }
+            tabs.fork(summary, prompt: prompt, model: model, effort: effort, appendSystemPrompt: brief, reporting: report)
+            childId = nil
+        } else {
+            childId = tabs.newSession(projectPath: directory, model: model, worktree: false, effort: effort, prompt: prompt,
+                                      parent: SessionParent(id: sessionId, kind: .spawn), appendSystemPrompt: brief, reporting: report)
+            guard childId != nil else { return MCPToolSpec.textResult("Clinic could not start the session.", isError: true) }
+        }
+        if let keep { tabs.selectedTabId = keep }
+        let what = fork ? "a fork of this session" : "child session \(childId?.rawValue ?? "")"
+        let where_ = fork ? "" : " in \(directory)"
+        guard wait else {
+            let back = report ? " It is briefed to report back with report_to_parent; the report arrives here as your next prompt." : ""
+            let idNote = fork ? " Its id is assigned when it starts." : ""
+            return MCPToolSpec.textResult("Started \(what)\(where_) as a background tab.\(idNote)\(back)")
+        }
+        Self.log.info("session \(sessionId.rawValue, privacy: .public) waits for a report from \(childId?.rawValue ?? "a fork", privacy: .public)")
+        do {
+            let message = try await reports.awaitFirstReport(for: sessionId, from: childId)
+            let child = childId.flatMap { sessions.sessions[$0] }
+            let title = child.map(sessions.displayName(for:)) ?? (fork ? "the fork" : "the child")
+            let header = SessionReporting.header(childTitle: title, project: child.flatMap(ProjectGrouping.project(for:))?.name, id: childId ?? sessionId)
+            return MCPToolSpec.textResult(SessionReporting.compose(header: header, message: message))
+        } catch let ended as SessionReportService.WaitEnded {
+            return MCPToolSpec.textResult("The child session ended before reporting: \(ended.reason). Its tab (if still open) has what it did.", isError: true)
+        } catch {
+            return MCPToolSpec.textResult("The wait ended: \(error)", isError: true)
         }
     }
 

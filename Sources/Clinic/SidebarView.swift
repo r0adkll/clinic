@@ -311,6 +311,7 @@ struct SessionContextMenu: View {
     @Environment(TabStore.self) private var tabs
     @Environment(SessionStore.self) private var sessions
     @Environment(BackgroundAgentsService.self) private var background
+    @Environment(SessionReportService.self) private var reports
     let summary: SessionSummary
 
     var body: some View {
@@ -322,6 +323,7 @@ struct SessionContextMenu: View {
             if tab.isAtPrompt { Button("Background") { tabs.background(tab) } }
         }
         Button("Fork Session") { tabs.fork(summary) }
+        Button("New Child Session…") { tabs.startChildSession(of: summary) }
         // Lineage (ADR-181): up to the parent, and folding what hangs under this one.
         if let parent = sessions.parent(of: summary.id), sessions.sessions[parent.id] != nil {
             Button("Go to Parent") { tabs.reveal(sessionId: parent.id) }
@@ -329,6 +331,16 @@ struct SessionContextMenu: View {
         if !sessions.visibleDescendants(of: summary.id).isEmpty {
             let folded = sessions.isCollapsed(session: summary.id)
             Button(folded ? "Expand Children" : "Collapse Children") { sessions.setCollapsed(session: summary.id, !folded) }
+        }
+        // Reporting (ADR-182): a child's switch, and a parent's held reports.
+        if reports.isReporting(summary.id) {
+            Toggle("Report to Parent", isOn: Binding(get: { !reports.isPaused(summary.id) }, set: { reports.setPaused(summary.id, !$0) }))
+        }
+        if let pending = reports.pendingReports(for: summary.id).first {
+            let who = sessions.sessions[pending.from].map(sessions.displayName(for:)) ?? "a child session"
+            Button("Deliver Report from \(who) Now") {
+                if tabs.tab(for: summary.id) == nil { tabs.open(session: summary) } else { reports.deliverPending(to: summary.id) }
+            }
         }
         if let tab = tabs.tab(for: summary.id) { MoveToWindowMenu(tab: tab) }
         if TabStore.ghosttyBinary != nil { Button("Open in Ghostty") { tabs.openInGhostty(summary) } }
@@ -524,14 +536,21 @@ struct SessionHoverActions: View {
     }
 }
 
-/// The PR mark, mute and star at a row's trailing edge.
+/// The PR mark, a held report, mute and star at a row's trailing edge.
 struct SessionBadges: View {
     @Environment(SessionStore.self) private var sessions
+    @Environment(SessionReportService.self) private var reports
     let summary: SessionSummary
 
     var body: some View {
         HStack(spacing: 4) {
             PRMarkView(refs: summary.pullRequests)
+            // A child's report waiting for this session (ADR-182).
+            if let pending = reports.pendingReports(for: summary.id).first {
+                let who = sessions.sessions[pending.from].map(sessions.displayName(for:)) ?? "a child session"
+                Image(systemName: "envelope.badge").font(.caption).foregroundStyle(.secondary)
+                    .help("Report from \(who) waiting: it is delivered when this session can take a prompt")
+            }
             if sessions.state.mutedSessions.contains(summary.id) { Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary) }
             if sessions.isFavorite(summary.id) { Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow) }
         }

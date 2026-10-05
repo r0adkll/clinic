@@ -83,13 +83,15 @@ struct SessionDetailsSheet: View {
 struct LineageSection: View {
     @Environment(SessionStore.self) private var sessions
     @Environment(TabStore.self) private var tabs
+    @Environment(SessionReportService.self) private var reports
     let summary: SessionSummary
     let dismiss: () -> Void
 
     var body: some View {
         let parent = sessions.parent(of: summary.id)
         let children = sessions.children(of: summary.id).compactMap { sessions.sessions[$0] }
-        if parent != nil || !children.isEmpty {
+        let log = reports.reports(for: summary.id).suffix(10).reversed()
+        if parent != nil || !children.isEmpty || !log.isEmpty {
             Text("Lineage").font(.headline).padding(.top, 4)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 if let parent {
@@ -112,6 +114,23 @@ struct LineageSection: View {
                                     Text(sessions.parent(of: child.id)?.kind == .fork ? "fork" : "spawned")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
+                            }
+                        }
+                    }
+                }
+                // What children reported, newest first, and whether it reached this session (ADR-182).
+                if !log.isEmpty {
+                    GridRow(alignment: .top) {
+                        Text("Reports").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(log)) { r in
+                                HStack(spacing: 6) {
+                                    Text(sessions.sessions[r.from].map(sessions.displayName(for:)) ?? "a child session").lineLimit(1)
+                                    Text(r.at.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                                    Text(r.deliveredAt.map { "delivered " + $0.formatted(date: .omitted, time: .shortened) } ?? "held")
+                                        .font(.caption).foregroundStyle(r.deliveredAt == nil ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+                                }
+                                .help(r.message)
                             }
                         }
                     }

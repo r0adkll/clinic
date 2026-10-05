@@ -86,4 +86,12 @@ already was.
 - A fork started from a plain terminal, or one made before this ADR, has no parent and sits at the root.
 - One `repeatForever` animation more only for a collapsed parent with a live descendant; expanded trees
   animate their children's rows as before.
-- Verification is recorded in [[Log]] when the branch lands.
+- Verified 2026-10-04 in an isolated Clinic Dev against the screenshot fixtures with a lineage patched
+  into `state.json`: a pantry session spawned by the storefront session sat indented under it with *in
+  pantry* in its caption and card meta, its own fork a level deeper with the branch glyph, hairlines
+  joining them, pantry's count down by one and storefront's up by two; the ledger's Grill session,
+  collapsed, read *1 ›*. Compact and card styles both. `SessionTreeTests` pin the ordering, folding,
+  filtering, orphan and cycle rules; ClinicCore's 599 tests pass. Not verified by eye: the fold chevron on
+  hover, Go to Parent, Details' Lineage section, archive with a subtree and its undo.
+- The fork kind glyph is `arrow.branch`, not `arrow.triangle.branch`: the card's meta line already uses
+  the latter for the git branch, and the two sat one line apart in the first smoke.

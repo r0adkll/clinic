@@ -17,6 +17,11 @@ final class NewSessionDraft: Identifiable {
     var worktreeBase: WorktreeBase
     /// The task this draft was started from (ADR-114); Send links the new session to it.
     var workItem: WorkItemRef?
+    /// A child of this session (ADR-182): fresh or a fork of it, reporting back or not. Not restored
+    /// across launches: the parent's tab and the reason for the child are of the moment.
+    var parentId: SessionID?
+    var startAsFork = false
+    var reportBack = true
     /// Clinic is creating the worktree from a named branch; Send is held until it lands (ADR-118).
     var isStarting = false
     /// Why the last Send couldn't create the worktree, in git's words.
@@ -133,7 +138,19 @@ struct NewSessionScreen: View {
                     .lineLimit(1).truncationMode(.head)
             }
             Spacer(minLength: 8)
-            if let branch {
+            // A child's composer says whose child (ADR-182).
+            if let parentId = draft.parentId, let parent = sessions.sessions[parentId] {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.turn.down.right").imageScale(.small)
+                    Text("Under ") + Text(sessions.displayName(for: parent)).fontWeight(.medium)
+                }
+                .font(.caption).lineLimit(1)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.accent.opacity(0.16), in: Capsule())
+                .foregroundStyle(Color.accent)
+                .help("This session starts as a child of “\(sessions.displayName(for: parent))” and sits under it in the sidebar")
+            }
+            if let branch, draft.parentId == nil || !draft.startAsFork {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.trianglehead.branch").imageScale(.small)
                     Text(draft.worktree ? baseName(draft.worktreeBase) : branch)
@@ -198,7 +215,12 @@ struct NewSessionScreen: View {
                     .textFieldStyle(.plain).font(.callout).frame(maxWidth: 130)
             }
             effortMenu
-            if !isChats { worktreeChip }
+            if draft.parentId != nil {
+                startAsMenu
+                reportChip
+            } else if !isChats {
+                worktreeChip
+            }
             Spacer(minLength: 4)
             saveButton
             Button { tabs.sendDraft(draft) } label: {
@@ -255,6 +277,35 @@ struct NewSessionScreen: View {
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help("Model")
+    }
+
+    /// Fresh, or a fork of the parent's conversation (ADR-182). A fork keeps the parent's directory.
+    private var startAsMenu: some View {
+        Menu {
+            Picker("Start as", selection: $draft.startAsFork) {
+                Text("Fresh session").tag(false)
+                Text("Fork of the parent's conversation").tag(true)
+            }.pickerStyle(.inline).labelsHidden()
+        } label: {
+            chip(active: draft.startAsFork) {
+                Image(systemName: draft.startAsFork ? "arrow.branch" : "sparkles").imageScale(.small)
+                Text(draft.startAsFork ? "Fork" : "Fresh")
+            }
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help(draft.startAsFork ? "Starts with everything the parent knows, in the parent's directory" : "Starts with an empty conversation")
+    }
+
+    /// Whether the child is briefed to hand its result back (ADR-182).
+    private var reportChip: some View {
+        Button { draft.reportBack.toggle() } label: {
+            chip(active: draft.reportBack) {
+                Image(systemName: draft.reportBack ? "envelope.badge" : "envelope").imageScale(.small)
+                Text("Report back")
+            }
+        }
+        .buttonStyle(.plain)
+        .help(draft.reportBack ? "The child is briefed to report to the parent when done; the report arrives as the parent's next prompt" : "The child is told who started it and nothing more")
     }
 
     private var effortMenu: some View {

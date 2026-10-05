@@ -93,4 +93,18 @@ Facts checked first, CLI 2.1.289:
 - `ClaudeLaunch` gains `appendSystemPrompt`; `clinic-hook`'s shim stops timing out a `tools/call` it is
   relaying, since Clinic's own guard answers everything but a waited call.
 - Peer messaging stays the CLI's: Clinic neither sees nor records a message the child sends that way.
-- Verification is recorded in [[Log]] when the branch lands.
+- A fork started as a child gets its MCP config at launch, keyed by the tab's placeholder id, which the tab
+  keeps as a former id after `SessionStart` rebinds it: before this a fork's process had no Clinic tools
+  until it was resumed, and a reporting fork would have had nothing to report with.
+- Verified 2026-10-04 in Clinic Dev on CLI 2.1.289, both sessions on haiku, in a scratch folder whose
+  `.claude/settings.json` allows the two tools: the parent, told to call `start_session` with `wait: true`,
+  did; the child's command line carried `--append-system-prompt` with the brief and the parent's peer name
+  (`proj-51`); the child called `report_to_parent("pong")` 19 s later; Clinic resolved the parent's wait,
+  the parent's tool result read *Report from child session … pong* and its last message was *pong*. The
+  sidebar nested the child under the parent and the parent's card read *Waiting for New session*.
+  `state.json` held the parent, the child's reporting record and the delivered report. `clinic-hook`'s
+  shim and the server waited the 19 s without timing out. Not verified: a held report delivered on the
+  parent's next prompt or resume, the hold notification, the reminder, the Report to Parent toggle,
+  Deliver Now, the New Child Session composer, and `fork: true` from the tool.
+- The brief quotes the parent's display name, which for a parent with no title yet is its first prompt,
+  truncated. Harmless, since the child also gets the peer name, but a titled parent reads better.

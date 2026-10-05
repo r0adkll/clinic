@@ -224,6 +224,7 @@ struct SessionCard: View {
     @Environment(SessionStore.self) private var sessions
     @Environment(TabStore.self) private var tabs
     @Environment(BackgroundAgentsService.self) private var background
+    @Environment(SessionReportService.self) private var reports
     let summary: SessionSummary
     let tab: Tab?
     let activity: SessionActivity?
@@ -371,6 +372,12 @@ struct SessionCard: View {
 
     private var now: (text: Text, urgent: Bool)? {
         let tool = activity?.currentTool
+        let id = summary.id
+        // A parent blocked in start_session(wait:) says who it waits for (ADR-182).
+        if reports.isWaiting(id), tab?.state == .working {
+            let who = reports.waitedChild(of: id).flatMap { sessions.sessions[$0] }.map(sessions.displayName(for:)) ?? "its child session"
+            return (Text("Waiting for ") + Text(who).fontWeight(.semibold), false)
+        }
         switch tab?.state {
         case .working:
             guard let tool else { return nil }
@@ -385,6 +392,11 @@ struct SessionCard: View {
         default:
             if tab == nil, let agent = background.runningAgent(for: summary.id), let waiting = agent.waitingFor {
                 return (Text(waiting), agent.needsAttention)
+            }
+            // A child's report held for this session (ADR-182) outranks the recap: it is what happens next.
+            if let pending = reports.pendingReports(for: id).first {
+                let who = sessions.sessions[pending.from].map(sessions.displayName(for:)) ?? "a child session"
+                return (Text("Report from ") + Text(who).fontWeight(.semibold) + Text(" waiting"), false)
             }
             return (activity?.recap ?? summary.recap).map { (Text($0), false) }
         }
