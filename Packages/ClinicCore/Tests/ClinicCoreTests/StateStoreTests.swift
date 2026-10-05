@@ -62,14 +62,14 @@ import Testing
         let store = StateStore(url: url, debounce: .milliseconds(10))
         let id = SessionID("11111111-2222-3333-4444-555555555555")
         let child = SessionID("66666666-2222-3333-4444-555555555555")
-        await store.update { $0.favorites.insert(id); $0.manualNames[id] = "Named"; $0.archived[id] = Date(timeIntervalSince1970: 1_000_000); $0.spawnedBy[child] = id }
+        await store.update { $0.favorites.insert(id); $0.manualNames[id] = "Named"; $0.archived[id] = Date(timeIntervalSince1970: 1_000_000); $0.parents[child] = SessionParent(id: id, kind: .spawn, since: Date(timeIntervalSince1970: 5)) }
         await store.flush()
         let reloaded = StateStore(url: url)
         let s = await reloaded.state
         #expect(s.favorites.contains(id))
         #expect(s.manualNames[id] == "Named")
         #expect(s.archived[id] == Date(timeIntervalSince1970: 1_000_000))
-        #expect(s.spawnedBy[child] == id)
+        #expect(s.parents[child] == SessionParent(id: id, kind: .spawn, since: Date(timeIntervalSince1970: 5)))
     }
 
     /// ADR-176: a process whose Info.plist names no data directory (this test runner, the released app's

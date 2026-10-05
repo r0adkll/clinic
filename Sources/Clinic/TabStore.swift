@@ -55,6 +55,8 @@ final class Tab: Identifiable {
     var isAttached = false
     /// Awaiting `SessionStart` to learn the real session id (fork / continue).
     var awaitingId = false
+    /// The parent to record once a fork learns its id (ADR-181).
+    @ObservationIgnored var pendingParent: SessionParent?
     /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
     var closingGracefully = false
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
@@ -486,18 +488,18 @@ final class TabStore {
     /// `workItem` records the task it was started from (ADR-114). `worktreeBase` defaults to the
     /// project's (ADR-118); a named branch creates the worktree before the tab opens.
     func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, worktreeBase: WorktreeBase? = nil,
-                    effort: String? = nil, prompt: String? = nil, workItem: WorkItemRef? = nil, spawnedBy parent: SessionID? = nil) {
+                    effort: String? = nil, prompt: String? = nil, workItem: WorkItemRef? = nil, parent: SessionParent? = nil) {
         let base = worktreeBase ?? self.worktreeBase(for: projectPath)
         guard worktree, case .branch(let ref) = base else {
             launchNewSession(projectPath: projectPath, model: model, worktree: worktree, worktreeName: worktreeName,
-                             worktreeBaseRef: worktree ? base.cliBaseRef : nil, effort: effort, prompt: prompt, workItem: workItem, spawnedBy: parent)
+                             worktreeBaseRef: worktree ? base.cliBaseRef : nil, effort: effort, prompt: prompt, workItem: workItem, parent: parent)
             return
         }
         Task {
             do {
                 let plan = try await prepareWorktree(projectPath: projectPath, ref: ref, name: worktreeName ?? "")
                 launchNewSession(projectPath: projectPath, model: model, worktree: true, worktreeName: plan.name,
-                                 worktreeBaseRef: base.cliBaseRef, effort: effort, prompt: prompt, workItem: workItem, spawnedBy: parent)
+                                 worktreeBaseRef: base.cliBaseRef, effort: effort, prompt: prompt, workItem: workItem, parent: parent)
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Couldn't create a worktree from \(ref)"
@@ -509,7 +511,7 @@ final class TabStore {
     }
 
     func launchNewSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String?, worktreeBaseRef: String?,
-                                  effort: String?, prompt: String?, workItem: WorkItemRef?, spawnedBy parent: SessionID? = nil) {
+                                  effort: String?, prompt: String?, workItem: WorkItemRef?, parent: SessionParent? = nil) {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree,
                                   settingsFilePath: hooks.settingsFileURL(worktreeBaseRef: worktree ? worktreeBaseRef : nil).path, prompt: prompt)
@@ -523,7 +525,7 @@ final class TabStore {
         tab.effort = effort
         sessions.registerPending(id: id, cwd: projectPath)
         if let workItem { sessions.linkWorkItem(workItem, to: id) }
-        if let parent { sessions.update { s in s.spawnedBy[id] = parent } }
+        if let parent { sessions.setParent(parent, of: id) }
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
             s.lastWorktreeByProject[projectPath] = worktree
@@ -539,6 +541,7 @@ final class TabStore {
         guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: "Fork of " + sessions.displayName(for: summary)) else { return }
         tab.awaitingId = true
+        tab.pendingParent = SessionParent(id: summary.id, kind: .fork)
         selectedTabId = tab.id
     }
 
@@ -1110,6 +1113,8 @@ final class TabStore {
             waiting.awaitingId = false
             let cwd = event.cwd ?? waiting.pwd ?? waiting.projectPath
             sessions.registerPending(id: event.sessionId, cwd: cwd, title: waiting.title)
+            // A fork now has an id to hang under its parent (ADR-181).
+            if let parent = waiting.pendingParent { sessions.setParent(parent, of: event.sessionId); waiting.pendingParent = nil }
             var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
             resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)
             waiting.lastResume = resume

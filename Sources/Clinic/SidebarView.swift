@@ -82,20 +82,24 @@ struct SidebarView: View {
             let favorites = sessions.favoriteSessions.filter { sessions.matches($0, query: query) }
             if !favorites.isEmpty {
                 Section("Favorites") {
-                    ForEach(favorites) { summary in row(summary) }
+                    ForEach(favorites) { summary in row(summary, lineage: favoriteLineage(summary)) }
                 }
             }
             ForEach(sessions.projects) { project in
-                let rows = sessions.sessions(in: project).filter { sessions.matches($0, query: query) }
+                // A tree (ADR-181): children hang under their parent here, whatever project they run in.
+                let rows = sessions.treeRows(in: project, query: query)
                 let collapsed = query.isEmpty && sessions.isCollapsed(project)
+                let count = rows.reduce(0) { $0 + 1 + $1.folded.count }
                 if !rows.isEmpty || query.isEmpty {
                     Section {
                         if !collapsed {
-                            ForEach(rows) { summary in row(summary) }
+                            ForEach(rows) { node in
+                                if let summary = sessions.sessions[node.id] { row(summary, lineage: lineage(node, in: project)) }
+                            }
                             if rows.isEmpty { NewSessionPlaceholderRow(project: project) }
                         }
                     } header: {
-                        ProjectHeader(project: project, count: rows.count, collapsed: collapsed)
+                        ProjectHeader(project: project, count: count, collapsed: collapsed)
                     }
                 }
             }
@@ -115,22 +119,41 @@ struct SidebarView: View {
         }
     }
 
-    /// Compact, a card, or whichever the session's liveness calls for (ADR-156).
+    /// Compact, a card, or whichever the session's liveness calls for (ADR-156). `lineage` places the
+    /// row in its project's tree (ADR-181); a Favorites row passes only who it came out of.
     @ViewBuilder
-    private func row(_ summary: SessionSummary) -> some View {
+    private func row(_ summary: SessionSummary, lineage: RowLineage) -> some View {
         let item = SidebarItem.session(summary.id)
         let tab = tabs.tab(for: summary.id)
         let checked = window.selectMode ? window.bulkSelection.contains(item) : nil
         let toggle = { if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) } }
         let style = SessionRowStyle(rawValue: rowStyle) ?? .default
         if style == .compact {
-            SessionRow(summary: summary, tab: tab, showPath: showFolderPaths, checked: checked, onToggle: toggle)
+            SessionRow(summary: summary, tab: tab, showPath: showFolderPaths, checked: checked, onToggle: toggle, lineage: lineage)
                 .tag(item)
         } else {
             SessionCardSlot(summary: summary, tab: tab, style: style, showPath: showFolderPaths,
-                            isSelected: selection.wrappedValue.contains(item), checked: checked, onToggle: toggle)
+                            isSelected: selection.wrappedValue.contains(item), checked: checked, onToggle: toggle, lineage: lineage)
                 .tag(item)
         }
+    }
+
+    /// A tree row's lineage, with what its folded descendants are doing (ADR-181).
+    private func lineage(_ node: SessionTree.Row, in project: Project) -> RowLineage {
+        var l = RowLineage(depth: node.depth, parent: node.parent, hasChildren: node.hasChildren, folded: node.folded)
+        l.parentName = node.parent.flatMap { sessions.sessions[$0.id] }.map(sessions.displayName(for:))
+        let foldedTabs = node.folded.compactMap { tabs.tab(for: $0) }
+        l.foldedNeedsYou = foldedTabs.contains { $0.state == .waitingForInput || $0.state == .waitingForPermission }
+        l.foldedRunning = foldedTabs.contains { $0.state == .working || $0.state == .launching }
+        if let own = sessions.sessions[node.id].flatMap(ProjectGrouping.project(for:)), own.path != project.path { l.elsewhere = own.name }
+        return l
+    }
+
+    /// Who a Favorites row came out of, for its kind glyph; no depth, since Favorites stay flat.
+    private func favoriteLineage(_ summary: SessionSummary) -> RowLineage {
+        var l = RowLineage(parent: sessions.parent(of: summary.id))
+        l.parentName = l.parent.flatMap { sessions.sessions[$0.id] }.map(sessions.displayName(for:))
+        return l
     }
 }
 
@@ -299,6 +322,14 @@ struct SessionContextMenu: View {
             if tab.isAtPrompt { Button("Background") { tabs.background(tab) } }
         }
         Button("Fork Session") { tabs.fork(summary) }
+        // Lineage (ADR-181): up to the parent, and folding what hangs under this one.
+        if let parent = sessions.parent(of: summary.id), sessions.sessions[parent.id] != nil {
+            Button("Go to Parent") { tabs.reveal(sessionId: parent.id) }
+        }
+        if !sessions.visibleDescendants(of: summary.id).isEmpty {
+            let folded = sessions.isCollapsed(session: summary.id)
+            Button(folded ? "Expand Children" : "Collapse Children") { sessions.setCollapsed(session: summary.id, !folded) }
+        }
         if let tab = tabs.tab(for: summary.id) { MoveToWindowMenu(tab: tab) }
         if TabStore.ghosttyBinary != nil { Button("Open in Ghostty") { tabs.openInGhostty(summary) } }
         OpenInMenu(path: summary.lastCwd ?? summary.cwd ?? "")
@@ -377,11 +408,16 @@ enum SessionActions {
     }
 
     /// Archiving an open session closes its tab first (with the usual confirmation if Claude is running), then offers to trash its worktree (ADR-065).
+    /// A parent takes its visible descendants with it, as one undoable action (ADR-181); a refused close stops the whole thing.
     static func archive(_ summary: SessionSummary, sessions: SessionStore, tabs: TabStore) {
-        if let tab = tabs.tab(for: summary.id), !tabs.close(tab) { return }
+        let group = [summary] + sessions.visibleDescendants(of: summary.id)
+        for s in group { if let tab = tabs.tab(for: s.id), !tabs.close(tab) { return } }
         Task { @MainActor in
-            let trashed = await RepoUpkeep.offerWorktreeTrash(for: summary, tabs: tabs, agents: tabs.backgroundAgents)
-            sessions.archive(summary.id, trashedWorktree: trashed)
+            var entries: [(SessionID, RepoUpkeep.TrashedWorktree?)] = []
+            for s in group {
+                entries.append((s.id, await RepoUpkeep.offerWorktreeTrash(for: s, tabs: tabs, agents: tabs.backgroundAgents)))
+            }
+            sessions.archiveGroup(entries)
         }
     }
 }
@@ -394,6 +430,8 @@ struct SessionRow: View {
     /// Non-nil in select mode: shows a checkbox (ADR-074).
     var checked: Bool? = nil
     var onToggle: () -> Void = {}
+    /// Where the row sits in its project's tree (ADR-181).
+    var lineage = RowLineage()
     @State private var hovering = false
 
     var body: some View {
@@ -403,11 +441,19 @@ struct SessionRow: View {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
                 }.buttonStyle(.plain)
             }
-            SessionLeadingGlyph(summary: summary, tab: tab)
+            // The glyph column: state above, and under it who this came out of. A collapsed parent
+            // carries its folded descendants' status (ADR-181).
+            VStack(spacing: 2) {
+                SessionLeadingGlyph(summary: summary, tab: tab, needsYou: lineage.foldedNeedsYou, running: lineage.foldedRunning)
+                LineageKindGlyph(lineage: lineage)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(sessions.displayName(for: summary)).lineLimit(1)
                 HStack(spacing: 5) {
                     Text(summary.activityDate, format: .relative(presentation: .named))
+                    if let elsewhere = lineage.elsewhere {
+                        Text("·"); Text("in \(elsewhere)").lineLimit(1)
+                    }
                     if showPath, let cwd = summary.lastCwd ?? summary.cwd {
                         Text("·"); Text(TabFooter.abbreviate(cwd)).lineLimit(1).truncationMode(.head)
                     }
@@ -415,9 +461,11 @@ struct SessionRow: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
+            LineageFoldControl(id: summary.id, lineage: lineage, hovering: hovering)
             if hovering { SessionHoverActions(summary: summary, tab: tab) } else { SessionBadges(summary: summary) }
         }
         .padding(.vertical, 3)
+        .lineageIndent(lineage)
         .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -431,8 +479,11 @@ struct SessionLeadingGlyph: View {
     @Environment(BackgroundAgentsService.self) private var background
     let summary: SessionSummary
     let tab: Tab?
-    /// Something under a card wants the reader (ADR-156); a resting session's glyph says so.
+    /// Something under a card wants the reader (ADR-156), or a folded child does (ADR-181); a resting
+    /// session's glyph says so.
     var needsYou = false
+    /// A folded child works while this session rests (ADR-181): the arc turns on the parent.
+    var running = false
 
     static let size: CGFloat = 10
 
@@ -445,7 +496,7 @@ struct SessionLeadingGlyph: View {
                 .font(.caption).foregroundStyle(agent.needsAttention ? .orange : .secondary).frame(width: Self.size)
                 .help(agent.needsAttention ? "Detached — needs you" : "Running detached (\(agent.state ?? agent.status))")
         } else {
-            StateGlyph(tab: tab, needsYou: needsYou)
+            StateGlyph(tab: tab, needsYou: needsYou, childRunning: running)
         }
     }
 }
@@ -624,6 +675,8 @@ struct StateGlyph: View {
     var size: CGFloat = 10
     /// A card's child wants the reader (ADR-156): a session at rest, or not open, breathes as if waiting.
     var needsYou = false
+    /// A folded child works (ADR-181): a session at rest, or not open, turns the arc for it.
+    var childRunning = false
 
     var body: some View {
         Group {
@@ -651,8 +704,10 @@ struct StateGlyph: View {
     /// Live state outranks the `unread` flag: a session that is working again has more to say than
     /// the fact that its last answer went unseen.
     private var appearance: Appearance {
-        guard let tab else { return needsYou ? .attention(.orange) : .absent }
-        if needsYou, tab.state == .idle || tab.state == .exited { return .attention(.orange) }
+        let resting = tab == nil || tab?.state == .idle || tab?.state == .exited
+        if needsYou, resting { return .attention(.orange) }
+        if childRunning, resting { return .spinner(AnyShapeStyle(HierarchicalShapeStyle.secondary)) }
+        guard let tab else { return .absent }
         switch tab.state {
         // The working arc takes no colour of its own, so it inherits the row's label — legible on a
         // selected row, where a fixed dark tint would vanish into the selection fill.
@@ -665,8 +720,10 @@ struct StateGlyph: View {
     }
 
     private var helpText: String {
-        guard let tab else { return needsYou ? "Waiting for your answers" : "Not open" }
-        if needsYou, tab.state == .idle || tab.state == .exited { return "Waiting for your answers" }
+        let resting = tab == nil || tab?.state == .idle || tab?.state == .exited
+        if needsYou, resting { return "Waiting for your answers" }
+        if childRunning, resting { return "A session under this one is working" }
+        guard let tab else { return "Not open" }
         switch tab.state {
         case .launching: return "Starting"
         case .working: return "Working"
