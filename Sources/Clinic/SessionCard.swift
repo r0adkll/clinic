@@ -161,20 +161,7 @@ struct SessionCardContent {
                 action: { tabs.select(tab); tabs.showPane(.terminal, in: tab) }))
         }
 
-        // Sessions this one started with `start_session`, while they are open.
-        for (childId, parent) in sessions.state.spawnedBy where parent == id {
-            guard let childTab = tabs.tab(for: childId), childTab.state != .exited, !childTab.childExited else { continue }
-            let name = sessions.sessions[childId].map(sessions.displayName(for:)) ?? childTab.title
-            let status: SessionCardChild.Status = switch childTab.state {
-            case .working, .launching: .running(since: nil)
-            case .waitingForInput, .waitingForPermission: .needsYou
-            default: .quiet
-            }
-            rows.append(SessionCardChild(
-                id: "session-\(childId)", icon: .symbol("arrow.turn.down.right"), label: name, detail: "Session",
-                status: status, help: "Go to the session it started",
-                action: { tabs.reveal(sessionId: childId) }))
-        }
+        // Sessions this one started are rows of their own under it (ADR-181), not children of the card.
 
         content.children = rows.enumerated()
             .sorted { ($0.element.status.rank, $0.offset) < ($1.element.status.rank, $1.offset) }
@@ -237,6 +224,7 @@ struct SessionCard: View {
     @Environment(SessionStore.self) private var sessions
     @Environment(TabStore.self) private var tabs
     @Environment(BackgroundAgentsService.self) private var background
+    @Environment(SessionReportService.self) private var reports
     let summary: SessionSummary
     let tab: Tab?
     let activity: SessionActivity?
@@ -245,6 +233,8 @@ struct SessionCard: View {
     var isSelected = false
     var checked: Bool? = nil
     var onToggle: () -> Void = {}
+    /// Where the card sits in its project's tree (ADR-181).
+    var lineage = RowLineage()
     @State private var hovering = false
     @State private var expanded = false
 
@@ -266,6 +256,7 @@ struct SessionCard: View {
             }
         }
         .padding(.vertical, 5)
+        .lineageIndent(lineage)
         .opacity(sessions.isArchived(summary.id) ? 0.5 : 1)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -276,12 +267,18 @@ struct SessionCard: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            SessionLeadingGlyph(summary: summary, tab: tab, needsYou: content.needsYou)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            // State above, and under it who this came out of; a collapsed parent carries its folded
+            // descendants' status (ADR-181).
+            VStack(spacing: 2) {
+                SessionLeadingGlyph(summary: summary, tab: tab, needsYou: content.needsYou || lineage.foldedNeedsYou, running: lineage.foldedRunning)
+                LineageKindGlyph(lineage: lineage)
+            }
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.top] + 9 }
             Text(sessions.displayName(for: summary))
                 .fontWeight(.medium)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            LineageFoldControl(id: summary.id, lineage: lineage, hovering: hovering)
             if hovering {
                 SessionHoverActions(summary: summary, tab: tab)
             } else {
@@ -307,17 +304,23 @@ struct SessionCard: View {
         let percent = live ? report?.contextUsedPercentage : nil
         let tokens = live && percent == nil ? activity?.contextTokens : nil
         let path = showPath ? (summary.lastCwd ?? summary.cwd).map(TabFooter.abbreviate) : nil
-        let place = branch != nil || path != nil
+        // A child drawn under a parent in another project leads with where it actually runs (ADR-181).
+        let elsewhere = lineage.elsewhere
+        let place = branch != nil || path != nil || elsewhere != nil
         if place || !facts.isEmpty || percent != nil || tokens != nil {
             // Where gives way before how: a long branch truncates in the middle rather than pushing the
             // model, effort and context off the edge (ADR-158).
             HStack(spacing: 4) {
+                if let elsewhere {
+                    Text("in \(elsewhere)").lineLimit(1)
+                }
                 if let branch {
+                    if elsewhere != nil { Text("·") }
                     Image(systemName: "arrow.triangle.branch").imageScale(.small)
                     Text(branch).lineLimit(1).truncationMode(.middle)
                 }
                 if let path {
-                    if branch != nil { Text("·") }
+                    if branch != nil || elsewhere != nil { Text("·") }
                     Text(path).lineLimit(1).truncationMode(.head)
                 }
                 ForEach(Array(facts.enumerated()), id: \.offset) { i, fact in
@@ -369,6 +372,12 @@ struct SessionCard: View {
 
     private var now: (text: Text, urgent: Bool)? {
         let tool = activity?.currentTool
+        let id = summary.id
+        // A parent blocked in start_session(wait:) says who it waits for (ADR-182).
+        if reports.isWaiting(id), tab?.state == .working {
+            let who = reports.waitedChild(of: id).flatMap { sessions.sessions[$0] }.map(sessions.displayName(for:)) ?? "its child session"
+            return (Text("Waiting for ") + Text(who).fontWeight(.semibold), false)
+        }
         switch tab?.state {
         case .working:
             guard let tool else { return nil }
@@ -383,6 +392,11 @@ struct SessionCard: View {
         default:
             if tab == nil, let agent = background.runningAgent(for: summary.id), let waiting = agent.waitingFor {
                 return (Text(waiting), agent.needsAttention)
+            }
+            // A child's report held for this session (ADR-182) outranks the recap: it is what happens next.
+            if let pending = reports.pendingReports(for: id).first {
+                let who = sessions.sessions[pending.from].map(sessions.displayName(for:)) ?? "a child session"
+                return (Text("Report from ") + Text(who).fontWeight(.semibold) + Text(" waiting"), false)
             }
             return (activity?.recap ?? summary.recap).map { (Text($0), false) }
         }
@@ -557,6 +571,7 @@ struct SessionCardSlot: View {
     var isSelected = false
     var checked: Bool? = nil
     var onToggle: () -> Void = {}
+    var lineage = RowLineage()
 
     var body: some View {
         // A terminal's foreground job changes without an event to observe, so a card with a terminal
@@ -576,9 +591,9 @@ struct SessionCardSlot: View {
         let live = tab != nil || background.runningAgent(for: summary.id) != nil || content.isLive
         if style == .cards || live {
             SessionCard(summary: summary, tab: tab, activity: activity, content: content, showPath: showPath,
-                        isSelected: isSelected, checked: checked, onToggle: onToggle)
+                        isSelected: isSelected, checked: checked, onToggle: onToggle, lineage: lineage)
         } else {
-            SessionRow(summary: summary, tab: tab, showPath: showPath, checked: checked, onToggle: onToggle)
+            SessionRow(summary: summary, tab: tab, showPath: showPath, checked: checked, onToggle: onToggle, lineage: lineage)
         }
     }
 }

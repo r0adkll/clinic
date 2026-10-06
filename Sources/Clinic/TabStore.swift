@@ -55,6 +55,9 @@ final class Tab: Identifiable {
     var isAttached = false
     /// Awaiting `SessionStart` to learn the real session id (fork / continue).
     var awaitingId = false
+    /// The parent to record once a fork learns its id (ADR-181), and whether it reports back (ADR-182).
+    @ObservationIgnored var pendingParent: SessionParent?
+    @ObservationIgnored var pendingReporting = false
     /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
     var closingGracefully = false
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
@@ -227,6 +230,8 @@ final class TabStore {
     /// Set by the app after construction (ADR-056, ADR-061).
     var mcp: MCPToolService?
     var backgroundAgents: BackgroundAgentsService?
+    /// Child reports and their delivery (ADR-182).
+    var reports: SessionReportService?
     /// Set by the app so hook events can reach scheduled runs (ADR-095).
     weak var automations: AutomationsModel?
     /// Set by the app so the end of a turn re-reads that session's pull requests (ADR-127).
@@ -391,6 +396,20 @@ final class TabStore {
         activeWindow.editingDraft = d
     }
 
+    /// The composer for a child of `summary` (ADR-182): the parent's project, model and effort, fresh or
+    /// a fork, reporting back by default. Replaces the project's unsent draft like a task's composer does.
+    func startChildSession(of summary: SessionSummary) {
+        let cwd = summary.lastCwd ?? summary.cwd ?? ""
+        let path = ProjectGrouping.project(for: summary)?.path ?? ProjectGrouping.projectPath(forCwd: cwd)
+        let parentTab = tab(for: summary.id)
+        let d = NewSessionDraft(projectPath: path, model: parentTab?.model ?? sessions.state.lastModelByProject[path], worktree: false,
+                                worktreeBase: worktreeBase(for: path))
+        if let effort = parentTab?.effort { d.effort = effort }
+        d.parentId = summary.id
+        drafts[path] = d
+        activeWindow.editingDraft = d
+    }
+
     private func window(showing d: NewSessionDraft) -> WindowState? { windows.first { $0.editingDraft?.id == d.id } }
 
     /// Throws the project's draft away, on disk too (ADR-160). Closing the screen keeps it.
@@ -418,6 +437,23 @@ final class TabStore {
         guard !d.isStarting else { return }
         let trimmed = empty ? nil : d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let prompt = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        // A child (ADR-182): briefed about its parent, a fork of it or fresh, reporting back or not.
+        if let parentId = d.parentId, let parentSummary = sessions.sessions[parentId] {
+            let parentTab = tab(for: parentId)
+            let directory = d.startAsFork ? (parentSummary.lastCwd ?? parentSummary.cwd ?? d.projectPath) : d.projectPath
+            let brief = reports?.brief(parent: parentId, parentTitle: parentTab?.title ?? sessions.displayName(for: parentSummary),
+                                       directory: directory, reporting: d.reportBack)
+            closeDraft(d)
+            if d.startAsFork {
+                fork(parentSummary, prompt: prompt ?? "", model: d.resolvedModel, effort: d.resolvedEffort, appendSystemPrompt: brief, reporting: d.reportBack)
+                if let t = tabs.last(where: { $0.pendingParent?.id == parentId }) { select(t) }
+            } else {
+                launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: false, worktreeName: nil, worktreeBaseRef: nil,
+                                 effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem,
+                                 parent: SessionParent(id: parentId, kind: .spawn), appendSystemPrompt: brief, reporting: d.reportBack)
+            }
+            return
+        }
         let worktree = d.worktree && !SessionStore.isChats(d.projectPath)
         guard worktree, case .branch(let ref) = d.worktreeBase else {
             closeDraft(d)
@@ -485,19 +521,23 @@ final class TabStore {
     /// New session with a pre-assigned id (ADR-017). `prompt` becomes the first turn (ADR-071).
     /// `workItem` records the task it was started from (ADR-114). `worktreeBase` defaults to the
     /// project's (ADR-118); a named branch creates the worktree before the tab opens.
+    /// Returns the new session's id when the launch is immediate; nil while a named worktree is prepared first.
+    @discardableResult
     func newSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String? = nil, worktreeBase: WorktreeBase? = nil,
-                    effort: String? = nil, prompt: String? = nil, workItem: WorkItemRef? = nil, spawnedBy parent: SessionID? = nil) {
+                    effort: String? = nil, prompt: String? = nil, workItem: WorkItemRef? = nil, parent: SessionParent? = nil,
+                    appendSystemPrompt: String? = nil, reporting: Bool = false) -> SessionID? {
         let base = worktreeBase ?? self.worktreeBase(for: projectPath)
         guard worktree, case .branch(let ref) = base else {
-            launchNewSession(projectPath: projectPath, model: model, worktree: worktree, worktreeName: worktreeName,
-                             worktreeBaseRef: worktree ? base.cliBaseRef : nil, effort: effort, prompt: prompt, workItem: workItem, spawnedBy: parent)
-            return
+            return launchNewSession(projectPath: projectPath, model: model, worktree: worktree, worktreeName: worktreeName,
+                                    worktreeBaseRef: worktree ? base.cliBaseRef : nil, effort: effort, prompt: prompt, workItem: workItem, parent: parent,
+                                    appendSystemPrompt: appendSystemPrompt, reporting: reporting)
         }
         Task {
             do {
                 let plan = try await prepareWorktree(projectPath: projectPath, ref: ref, name: worktreeName ?? "")
                 launchNewSession(projectPath: projectPath, model: model, worktree: true, worktreeName: plan.name,
-                                 worktreeBaseRef: base.cliBaseRef, effort: effort, prompt: prompt, workItem: workItem, spawnedBy: parent)
+                                 worktreeBaseRef: base.cliBaseRef, effort: effort, prompt: prompt, workItem: workItem, parent: parent,
+                                 appendSystemPrompt: appendSystemPrompt, reporting: reporting)
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Couldn't create a worktree from \(ref)"
@@ -506,16 +546,21 @@ final class TabStore {
                 alert.runModal()
             }
         }
+        return nil
     }
 
+    /// `appendSystemPrompt` is a child's brief and `reporting` arms its report (ADR-182).
+    @discardableResult
     func launchNewSession(projectPath: String, model: String?, worktree: Bool, worktreeName: String?, worktreeBaseRef: String?,
-                                  effort: String?, prompt: String?, workItem: WorkItemRef?, spawnedBy parent: SessionID? = nil) {
+                          effort: String?, prompt: String?, workItem: WorkItemRef?, parent: SessionParent? = nil,
+                          appendSystemPrompt: String? = nil, reporting: Bool = false) -> SessionID? {
         let id = SessionID.generate()
         var launch = ClaudeLaunch(mode: .new(id: id), model: model, effort: effort, worktree: worktree,
                                   settingsFilePath: hooks.settingsFileURL(worktreeBaseRef: worktree ? worktreeBaseRef : nil).path, prompt: prompt)
         launch.worktreeName = worktreeName
         launch.mcpConfigPath = mcp?.configPath(for: id)
-        guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return }
+        launch.appendSystemPrompt = appendSystemPrompt
+        guard let tab = makeTab(kind: .session(id), cwd: projectPath, projectPath: projectPath, initialInput: launch.shellLine, title: "New session") else { return nil }
         var resume = ClaudeLaunch(mode: .resume(id: id, fork: false), settingsFilePath: hooks.settingsFileURL.path)
         resume.mcpConfigPath = launch.mcpConfigPath
         tab.lastResume = resume
@@ -523,23 +568,38 @@ final class TabStore {
         tab.effort = effort
         sessions.registerPending(id: id, cwd: projectPath)
         if let workItem { sessions.linkWorkItem(workItem, to: id) }
-        if let parent { sessions.update { s in s.spawnedBy[id] = parent } }
+        if let parent { sessions.setParent(parent, of: id) }
+        if parent != nil, reporting { reports?.arm(child: id) }
         sessions.update { s in
             if let model { s.lastModelByProject[projectPath] = model } else { s.lastModelByProject[projectPath] = nil }
             s.lastWorktreeByProject[projectPath] = worktree
         }
         selectedTabId = tab.id
+        return id
     }
 
-    /// `claude --resume <id> --fork-session` in a new tab; rebinds on SessionStart (ADR-063).
-    func fork(_ summary: SessionSummary) {
+    /// `claude --resume <id> --fork-session` in a new tab; rebinds on SessionStart (ADR-063). With a
+    /// `prompt` it is a child started as a fork (ADR-182): briefed, optionally reporting, and left in
+    /// the background like a spawned one.
+    func fork(_ summary: SessionSummary, prompt: String? = nil, model: String? = nil, effort: String? = nil,
+              appendSystemPrompt: String? = nil, reporting: Bool = false) {
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: true), settingsFilePath: hooks.settingsFileURL.path)
-        launch.mcpConfigPath = nil   // the per-session config is written once the fork's id is known
-        guard let tab = makeTab(kind: .session(SessionID.generate()), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
+        var launch = ClaudeLaunch(mode: .resume(id: summary.id, fork: true), model: model, effort: effort,
+                                  settingsFilePath: hooks.settingsFileURL.path, prompt: prompt)
+        // The fork's real id arrives with SessionStart; until then the tab wears a placeholder, and the
+        // MCP config carries that placeholder so the fork's process has Clinic's tools from the start
+        // (ADR-182): the shim keeps sending it, and the tab answers to it as a former id (ADR-166).
+        let placeholder = SessionID.generate()
+        launch.mcpConfigPath = mcp?.configPath(for: placeholder)
+        launch.appendSystemPrompt = appendSystemPrompt
+        guard let tab = makeTab(kind: .session(placeholder), cwd: cwd, projectPath: ProjectGrouping.projectPath(forCwd: cwd),
                                 initialInput: launch.shellLine, title: "Fork of " + sessions.displayName(for: summary)) else { return }
         tab.awaitingId = true
-        selectedTabId = tab.id
+        tab.pendingParent = SessionParent(id: summary.id, kind: .fork)
+        tab.pendingReporting = reporting
+        tab.model = model
+        tab.effort = effort
+        if prompt == nil { selectedTabId = tab.id }
     }
 
     /// A session in the shared Chats scratch directory (ADR-068).
@@ -715,7 +775,10 @@ final class TabStore {
         if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
         tab.panel.tearDown()
-        if let id = tab.sessionId { sessions.removePending(id: id) }
+        if let id = tab.sessionId {
+            sessions.removePending(id: id)
+            reports?.childEnded(id, reason: "its tab was closed")
+        }
         updateBadge()
         return true
     }
@@ -1105,11 +1168,20 @@ final class TabStore {
             found = cleared
         }
         if found == nil, event.hookEventName == "SessionStart", let waiting = tabs.first(where: { $0.awaitingId && $0.sessionId != nil }) {
-            // Fork / continue: adopt the id the CLI reports (ADR-063).
+            // Fork / continue: adopt the id the CLI reports (ADR-063). The placeholder stays a former id,
+            // since the fork's MCP shim was launched with it (ADR-182).
+            if let placeholder = waiting.sessionId { waiting.formerSessionIds.insert(placeholder) }
             waiting.kind = .session(event.sessionId)
             waiting.awaitingId = false
             let cwd = event.cwd ?? waiting.pwd ?? waiting.projectPath
             sessions.registerPending(id: event.sessionId, cwd: cwd, title: waiting.title)
+            // A fork now has an id to hang under its parent (ADR-181), and to report with (ADR-182).
+            if let parent = waiting.pendingParent {
+                sessions.setParent(parent, of: event.sessionId)
+                waiting.pendingParent = nil
+                if waiting.pendingReporting { reports?.arm(child: event.sessionId); reports?.childIdentified(event.sessionId, parent: parent.id) }
+                waiting.pendingReporting = false
+            }
             var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
             resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)
             waiting.lastResume = resume
@@ -1125,6 +1197,10 @@ final class TabStore {
         snapshots.handle(event, cwd: tab.pwd ?? tab.projectPath)
         let endedTurn = event.hookEventName == "Stop"
         if endedTurn { runs.turnEnded(in: tab, snapshots: snapshots) }
+        // A child that ends a turn without ever reporting is reminded once; one whose session ends
+        // releases a parent waiting on it (ADR-182).
+        if endedTurn, let id = tab.sessionId { reports?.childStopped(id) }
+        if event.hookEventName == "SessionEnd", event.reason != "clear", let id = tab.sessionId { reports?.childEnded(id, reason: "its session ended") }
         if event.hookEventName == "SessionEnd", event.reason == "clear" { tab.clearedAt = event.receivedAt }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
@@ -1195,6 +1271,8 @@ final class TabStore {
             }
         }
         updateBadge()
+        // A parent that can take a prompt again receives what its children held for it (ADR-182).
+        reports?.deliverPending(to: sessionId)
     }
 
     // MARK: /clear (ADR-166)

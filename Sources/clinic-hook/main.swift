@@ -30,9 +30,13 @@ func writeAll(_ fd: Int32, _ data: Data) -> Bool {
     return true
 }
 
+/// `timeoutSeconds` 0 waits as long as Clinic takes: a `start_session` that waits for its child's
+/// report holds its tool call open with no limit (ADR-182), and Clinic's own guard answers the rest.
 func readAll(_ fd: Int32, timeoutSeconds: Int = 20) -> Data {
-    var tv = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    if timeoutSeconds > 0 {
+        var tv = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
     var data = Data(); var buf = [UInt8](repeating: 0, count: 64 * 1024)
     while data.count < 8 * 1024 * 1024 {
         let n = read(fd, &buf, buf.count)
@@ -42,13 +46,13 @@ func readAll(_ fd: Int32, timeoutSeconds: Int = 20) -> Data {
 }
 
 /// One request → one response over a fresh connection.
-func roundTrip(socketPath: String, payload: Data) -> Data? {
+func roundTrip(socketPath: String, payload: Data, timeoutSeconds: Int = 20) -> Data? {
     guard let fd = connectSocket(socketPath) else { return nil }
     defer { close(fd) }
     var out = payload; out.append(0x0A)
     guard writeAll(fd, out) else { return nil }
     shutdown(fd, SHUT_WR)
-    let response = readAll(fd)
+    let response = readAll(fd, timeoutSeconds: timeoutSeconds)
     return response.isEmpty ? nil : response
 }
 
@@ -127,8 +131,9 @@ final class MCPShim {
     /// Relay to Clinic; nil when the app is unreachable.
     func relay(method: String, params: Any?) -> [String: Any]? {
         let req: [String: Any] = ["session_id": sessionId, "method": method, "params": params ?? [:]]
+        // A tool call waits as long as Clinic does (ADR-182); everything else keeps the short limit.
         guard let payload = try? JSONSerialization.data(withJSONObject: req),
-              let data = roundTrip(socketPath: socketPath, payload: payload),
+              let data = roundTrip(socketPath: socketPath, payload: payload, timeoutSeconds: method == "tools/call" ? 0 : 20),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return obj
     }

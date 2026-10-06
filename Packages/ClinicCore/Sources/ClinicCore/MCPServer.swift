@@ -20,6 +20,10 @@ public final class MCPServer: @unchecked Sendable {
     }
     /// Set by the app; must return `result` or `error` in the wrapped dictionary.
     public var handler: (@Sendable (Request) async -> Response)?
+    /// How long a request may take before the server answers with a timeout; nil waits without limit.
+    /// The default is 20 s for everything; the app lifts it for a `start_session` that waits (ADR-182).
+    public var timeout: (@Sendable (Request) -> TimeInterval?)?
+    public static let defaultTimeout: TimeInterval = 20
     private let queue = DispatchQueue(label: "com.r0adkll.clinic.mcp-server", attributes: .concurrent)
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -88,7 +92,9 @@ public final class MCPServer: @unchecked Sendable {
             let sem = DispatchSemaphore(value: 0)
             let box = ResponseBox()
             Task { box.value = await handler(req).json; sem.signal() }
-            if sem.wait(timeout: .now() + 20) == .timedOut { response = ["error": ["code": -32000, "message": "Clinic timed out handling \(method)"]] }
+            let limit = timeout.map { $0(req) } ?? Self.defaultTimeout
+            let deadline: DispatchTime = limit.map { .now() + $0 } ?? .distantFuture
+            if sem.wait(timeout: deadline) == .timedOut { response = ["error": ["code": -32000, "message": "Clinic timed out handling \(method)"]] }
             else { response = box.value ?? ["error": ["code": -32603, "message": "No response"]] }
         } else {
             response = ["error": ["code": -32600, "message": "Invalid request"]]
@@ -124,7 +130,34 @@ public struct MCPToolSpec: Sendable, Identifiable, Hashable {
         MCPToolSpec(name: "read_terminal", description: "Read the text currently visible in this session's terminal (what the user sees), up to `lines` lines from the bottom.", schema: #"{"type":"object","properties":{"lines":{"type":"integer","minimum":1,"maximum":500}}}"#, defaultEnabled: true),
         MCPToolSpec(name: "run_in_terminal", description: "Type a shell command into the user's shell panel beside this session (not your own tool shell). The user sees it run. Returns immediately.", schema: #"{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"#, defaultEnabled: false),
         MCPToolSpec(name: "attach_pr", description: "Attach a GitHub pull request URL to this session so Clinic shows its status and page.", schema: #"{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"#, defaultEnabled: true),
-        MCPToolSpec(name: "start_session", description: "Start a sibling Claude Code session in Clinic (background tab) with an initial prompt, optionally in another directory.", schema: #"{"type":"object","properties":{"prompt":{"type":"string"},"directory":{"type":"string"},"model":{"type":"string"}},"required":["prompt"]}"#, defaultEnabled: true),
+        // ADR-182: a child under this session, briefed to report back.
+        MCPToolSpec(
+            name: "start_session",
+            description: """
+                Start a child Claude Code session in Clinic under this one, in a background tab, with an initial prompt, optionally in another directory. \
+                The child is briefed to call report_to_parent when its work is done; its report arrives here as your next prompt, or as this call's result when `wait` is true (the call then blocks until the first report; the user can stop the child). \
+                `fork: true` starts it as a fork of this conversation, with everything you know, instead of fresh. Model and effort default to this session's.
+                """,
+            schema: #"""
+                {"type":"object","properties":{
+                  "prompt":{"type":"string"},
+                  "directory":{"type":"string","description":"Where it runs; defaults to this session's directory"},
+                  "model":{"type":"string"},
+                  "effort":{"type":"string","enum":["low","medium","high","xhigh","max"]},
+                  "fork":{"type":"boolean","description":"Fork this conversation instead of starting fresh"},
+                  "report":{"type":"boolean","description":"Brief the child to report back; default true"},
+                  "wait":{"type":"boolean","description":"Block until the child's first report and return it"}},
+                 "required":["prompt"]}
+                """#,
+            defaultEnabled: true),
+        MCPToolSpec(
+            name: "report_to_parent",
+            description: """
+                Hand your result to the Clinic session that started you. Call it when the work is done, with a report written for that session: what you did, what you found, what it should do next. \
+                Clinic pastes it into that session as its next prompt, or holds it until that session can take one. You may call it again if you have more to report.
+                """,
+            schema: #"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}"#,
+            defaultEnabled: true),
         // ADR-131. The description carries the trigger *and* the two ways this gets used wrongly:
         // one call per question instead of per round, and treating the tool as a replacement for
         // writing the round out (which would leave the transcript, and so replay, empty).
@@ -181,6 +214,7 @@ public struct MCPToolSpec: Sendable, Identifiable, Hashable {
     private static let instructionByTool: [String: String] = [
         "set_session_title": "Use set_session_title once you know what the session is about.",
         "notify_user": "Use notify_user when you need the user's attention.",
+        "report_to_parent": "report_to_parent is how you hand a result to the session that started you: call it when your work is done.",
         "ask_round": """
             When you are about to ask the user a round of numbered questions that each carry your \
             recommended answer — which is exactly what the grilling and grill-me skills do — post the \

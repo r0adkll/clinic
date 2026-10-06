@@ -42,6 +42,8 @@ public struct ClaudeLaunch: Sendable, Hashable {
     /// `--permission-mode`. An unattended run declares its own posture (ADR-095); an interactive one
     /// leaves this nil and uses the user's default.
     public var permissionMode: String?
+    /// `--append-system-prompt`: a child session's brief about who started it (ADR-182).
+    public var appendSystemPrompt: String?
 
     public init(mode: Mode, model: String? = nil, effort: String? = nil, worktree: Bool = false, settingsFilePath: String, executable: String = "claude", prompt: String? = nil) {
         self.mode = mode; self.model = model; self.effort = effort; self.worktree = worktree; self.settingsFilePath = settingsFilePath; self.executable = executable; self.prompt = prompt
@@ -67,6 +69,7 @@ public struct ClaudeLaunch: Sendable, Hashable {
         if let model, !model.isEmpty { args += ["--model", model] }
         if let effort, !effort.isEmpty { args += ["--effort", effort] }
         if let permissionMode, !permissionMode.isEmpty { args += ["--permission-mode", permissionMode] }
+        if let appendSystemPrompt, !appendSystemPrompt.isEmpty { args += ["--append-system-prompt", appendSystemPrompt] }
         if worktree, mode.acceptsWorktree {
             args.append("-w")
             if let n = worktreeName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { args.append(n) }

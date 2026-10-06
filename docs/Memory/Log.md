@@ -4672,3 +4672,29 @@ ported to `main` with the `to_model` decoder fix, the attention log line, the Re
 *Has a question for you*. The two research notes written during the dev session come across too. ADR-179 on
 `main` records the decision and why. The branch is deleted after tagging its tip `archive/mods-integration`.
 Clinic Dev's data directory loses the mod copy and the mod settings files the branch build left there.
+
+## 2026-10-04 — Sessions have parents, and a child reports back (ADR-181, ADR-182)
+User: can Clinic nest a fork under the session it came from, and let a session start another session (in
+another project too) that reports its result back? Then: *"Grill me more about this new feature set"*, four
+rounds, and: create a worktree/branch, write the ADR, start implementing.
+
+Facts first: a fork's transcript holds no reference to its parent (probed in an isolated config dir), so
+lineage is Clinic's record; the CLI lists peer sessions by name and lets one message another; it has
+`--append-system-prompt`; Clinic's hooks cannot block a Stop. The grill settled the tree (fork and spawn
+only, under the parent in the parent's project, true tree, subtree ordering, fold with a count, archive the
+subtree, kind glyph, Go to Parent, Lineage in Details) and the protocol. The user rejected delivering on
+`Stop` — *"near impossible to determine when the result is ready"* — so the child calls `report_to_parent`;
+Clinic pastes it when the parent can take a prompt, holds and notifies otherwise, reminds a child that stops
+without reporting, and `start_session` gains `fork`, `report` and `wait`.
+
+Branch `session-lineage` (worktree). Built: `SessionTree` and `parents` in ClinicCore (replacing
+`spawnedBy`, which decodes into it), the sidebar tree with `RowLineage`, `SessionReportService`, the two
+tools, the brief, the shim's open-ended tool call, the New Child Session composer, and the Details log.
+
+Verified: the tree by screenshot in an isolated Clinic Dev with a lineage patched into the fixtures; the
+protocol end to end with two haiku sessions in Clinic Dev — `start_session(wait: true)`, the brief on the
+child's command line, `report_to_parent("pong")`, the parent's wait resolved with the headed report. 606
+ClinicCore tests pass. One obstacle: libghostty cannot create a surface while the display is asleep
+(`CVDisplayLink … display count (0)`), so the e2e script wraps itself in `caffeinate -d -u`. Not verified:
+held delivery and its notification, the reminder, the toggle, Deliver Now, the composer by eye, `fork: true`.
+Next: try those in Clinic Dev, then land on `main`.

@@ -16,7 +16,8 @@ final class SessionStore {
     private(set) var state = ClinicState()
     private(set) var isScanning = false
     var showArchived = false { didSet { rebuildProjects() } }
-    private var archiveUndoStack: [(SessionID, RepoUpkeep.TrashedWorktree?)] = []
+    /// One entry per Archive action; a parent archived with its subtree is one entry (ADR-181).
+    private var archiveUndoStack: [[(SessionID, RepoUpkeep.TrashedWorktree?)]] = []
 
     private let scanner: SessionScanner
     private let watcher: DirectoryWatcher
@@ -52,9 +53,9 @@ final class SessionStore {
         // Owned ids whose transcript never appeared (a session closed before its first prompt while the app was quit) are stale.
         let stale = state.ownedSessions.keys.filter { map[$0] == nil }
         if !stale.isEmpty { update { s in for id in stale { s.ownedSessions[id] = nil } } }
-        // A spawned session whose transcript is gone has no card to hang under its parent (ADR-156).
-        let orphans = state.spawnedBy.keys.filter { map[$0] == nil }
-        if !orphans.isEmpty { update { s in for id in orphans { s.spawnedBy[id] = nil } } }
+        // A child whose transcript is gone has nothing to hang under its parent (ADR-181).
+        let orphans = state.parents.keys.filter { map[$0] == nil }
+        if !orphans.isEmpty { update { s in for id in orphans { s.parents[id] = nil; s.collapsedSessions.remove(id) } } }
         rebuildProjects()
         isScanning = false
     }
@@ -125,6 +126,41 @@ final class SessionStore {
                 let kb = byCreated ? (b.createdAt ?? b.activityDate) : b.activityDate
                 return (ka, a.id.rawValue) > (kb, b.id.rawValue)
             }
+    }
+
+    // MARK: Lineage (ADR-181)
+
+    /// A project's section as a tree: roots are its own parentless sessions, children hang under their
+    /// parent whatever project they run in. Folding is suspended while `query` is typed.
+    func treeRows(in project: Project, query: String) -> [SessionTree.Row] {
+        let byCreated = sessionSort == "created"
+        let filtering = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let items = sessions.values.filter(isVisible).map { s in
+            SessionTree.Item(id: s.id, projectPath: ProjectGrouping.project(for: s)?.path ?? "",
+                             sortKey: byCreated ? (s.createdAt ?? s.activityDate) : s.activityDate,
+                             matches: !filtering || matches(s, query: query))
+        }
+        return SessionTree.rows(project: project.path, items: items, parents: state.parents,
+                                collapsed: state.collapsedSessions, filtering: filtering)
+    }
+
+    func parent(of id: SessionID) -> SessionParent? { state.parents[id] }
+    func children(of id: SessionID) -> [SessionID] { state.children(of: id) }
+
+    /// Records who `child` came out of. Written only by the code that launched it.
+    func setParent(_ parent: SessionParent, of child: SessionID) {
+        guard parent.id != child else { return }
+        update { s in s.parents[child] = parent }
+    }
+
+    func isCollapsed(session id: SessionID) -> Bool { state.collapsedSessions.contains(id) }
+    func setCollapsed(session id: SessionID, _ collapsed: Bool) {
+        update { s in if collapsed { s.collapsedSessions.insert(id) } else { s.collapsedSessions.remove(id) } }
+    }
+
+    /// Visible descendants of `id`, nearest first: what Archive takes with a parent.
+    func visibleDescendants(of id: SessionID) -> [SessionSummary] {
+        SessionTree.descendants(of: id, parents: state.parents).compactMap { sessions[$0] }.filter(isVisible)
     }
 
     /// Favorited sessions across projects, most recent first.
@@ -235,15 +271,22 @@ final class SessionStore {
     var onArchive: ((SessionID) -> Void)?
 
     func archive(_ id: SessionID, trashedWorktree: RepoUpkeep.TrashedWorktree? = nil) {
-        archiveUndoStack.append((id, trashedWorktree))
-        onArchive?(id)
-        update { s in s.archived[id] = Date() }
+        archiveGroup([(id, trashedWorktree)])
+    }
+
+    /// Archives several sessions as one action, so one Undo brings them all back (ADR-181).
+    func archiveGroup(_ entries: [(SessionID, RepoUpkeep.TrashedWorktree?)]) {
+        guard !entries.isEmpty else { return }
+        archiveUndoStack.append(entries)
+        let now = Date()
+        for (id, _) in entries { onArchive?(id) }
+        update { s in for (id, _) in entries { s.archived[id] = now } }
     }
 
     /// Archives every visible session of a project and hides the project (ADR-065).
     func archiveProject(_ project: Project) {
         let ids = sessions(in: project).map(\.id)
-        for id in ids { archiveUndoStack.append((id, nil)) }
+        archiveUndoStack.append(ids.map { ($0, nil) })
         // Unregistering (rather than removing) lets an unarchived session bring the project back
         // at its old position, since the roster falls back to its earliest session (ADR-065).
         update { s in for id in ids { s.archived[id] = Date() }; s.unregisterProject(project.path) }
@@ -256,9 +299,9 @@ final class SessionStore {
     var canUndoArchive: Bool { !archiveUndoStack.isEmpty }
 
     func undoArchive() {
-        guard let (id, trashed) = archiveUndoStack.popLast() else { return }
-        unarchive(id)
-        if let trashed { Task { await RepoUpkeep.restore(trashed) } }
+        guard let group = archiveUndoStack.popLast() else { return }
+        update { s in for (id, _) in group { s.archived[id] = nil } }
+        for (_, trashed) in group { if let trashed { Task { await RepoUpkeep.restore(trashed) } } }
     }
 
     /// Case-insensitive substring match over name, prompt, project, branch and id. Empty query matches everything.

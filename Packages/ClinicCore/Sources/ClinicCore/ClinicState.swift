@@ -51,11 +51,36 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// (ADR-131). Persisted like `attachments` so a grill's decisions survive a relaunch — the pane
     /// itself is not persisted (ADR-079), only what it shows.
     public var grillRounds: [SessionID: [GrillRound]] = [:]
-    /// Sessions another session started with the `start_session` tool: child → parent (ADR-156).
-    /// Clinic's own record — the CLI writes nothing that links the two — so a parent's card can list them.
-    public var spawnedBy: [SessionID: SessionID] = [:]
+    /// Who each session came out of (ADR-181): a fork of it, or a session it (or the user, under it)
+    /// started. Clinic's own record — the CLI writes nothing that links the two — so the sidebar can
+    /// nest the child under its parent. Replaces ADR-156's `spawnedBy`, which decodes into it as spawns.
+    public var parents: [SessionID: SessionParent] = [:]
+    /// Parents whose children are folded in the sidebar (ADR-181), like `collapsedProjects`.
+    public var collapsedSessions: Set<SessionID> = []
+    /// What children reported to each parent (ADR-182), oldest first, capped at `SessionReport.maxPerParent`.
+    /// Persisted so a report held while the parent was closed survives a relaunch.
+    public var reports: [SessionID: [SessionReport]] = [:]
+    /// Children that report to their parent (ADR-182); absent means the child does not.
+    public var childReporting: [SessionID: ChildReporting] = [:]
 
     public init() {}
+
+    /// Records a report for `parent` (ADR-182). Delivered reports go first when the cap is reached;
+    /// a held one is never dropped for a delivered one.
+    public mutating func addReport(_ report: SessionReport, to parent: SessionID) {
+        var list = reports[parent] ?? []
+        list.append(report)
+        while list.count > SessionReport.maxPerParent, let i = list.firstIndex(where: { !$0.isPending }) { list.remove(at: i) }
+        reports[parent] = list
+        childReporting[report.from, default: ChildReporting()].reportedAt = childReporting[report.from]?.reportedAt ?? report.at
+    }
+
+    public func pendingReports(for parent: SessionID) -> [SessionReport] { (reports[parent] ?? []).filter(\.isPending) }
+
+    /// The sessions `id` is the parent of, nearest first (ADR-181).
+    public func children(of id: SessionID) -> [SessionID] {
+        parents.filter { $0.value.id == id && $0.key != id }.map(\.key).sorted { $0.rawValue < $1.rawValue }
+    }
 
     /// Records a project the user added, started a session in, or imported into. Idempotent: an
     /// existing registration keeps its original date, so the project keeps its place (ADR-077).
@@ -110,7 +135,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, spawnedBy
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, parents, collapsedSessions, reports, childReporting
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -143,7 +168,16 @@ public struct ClinicState: Codable, Sendable, Equatable {
         runDeviceByProject = (try? c.decodeIfPresent([String: [String: String]].self, forKey: .runDeviceByProject)) ?? [:]
         watchedPullRequests = (try? c.decodeIfPresent(Set<String>.self, forKey: .watchedPullRequests)) ?? []
         grillRounds = (try? c.decodeIfPresent([SessionID: [GrillRound]].self, forKey: .grillRounds)) ?? [:]
-        spawnedBy = (try? c.decodeIfPresent([SessionID: SessionID].self, forKey: .spawnedBy)) ?? [:]
+        parents = (try? c.decodeIfPresent([SessionID: SessionParent].self, forKey: .parents)) ?? [:]
+        collapsedSessions = (try? c.decodeIfPresent(Set<SessionID>.self, forKey: .collapsedSessions)) ?? []
+        reports = (try? c.decodeIfPresent([SessionID: [SessionReport]].self, forKey: .reports)) ?? [:]
+        childReporting = (try? c.decodeIfPresent([SessionID: ChildReporting].self, forKey: .childReporting)) ?? [:]
+        // ADR-156's `spawnedBy` (child → parent id) was written by `start_session` alone, so every entry is a spawn.
+        if let legacy = (try? decoder.container(keyedBy: LegacyKeys.self)).flatMap({ try? $0.decodeIfPresent([SessionID: SessionID].self, forKey: .spawnedBy) }) {
+            for (child, parent) in legacy where parents[child] == nil {
+                parents[child] = SessionParent(id: parent, kind: .spawn, since: Date(timeIntervalSince1970: 0))
+            }
+        }
         if projectsAddedAt.isEmpty { migrateProjectRegistrations(from: decoder) }
     }
 
@@ -162,7 +196,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         }
     }
 
-    private enum LegacyKeys: String, CodingKey { case addedProjects }
+    private enum LegacyKeys: String, CodingKey { case addedProjects, spawnedBy }
 
     /// Decodes one automation, or nothing. Wrapping the element rather than the array is what keeps a
     /// single bad record from emptying the list.

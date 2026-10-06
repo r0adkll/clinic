@@ -17,6 +17,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.usage)
                 .environment(appDelegate.prs)
                 .environment(appDelegate.backgroundAgents)
+                .environment(appDelegate.reports)
                 .environment(appDelegate.bindings)
                 .environment(appDelegate.caffeine)
                 .environment(appDelegate.marketplace)
@@ -59,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let prs = PRStore()
     let mcp = MCPToolService()
     let backgroundAgents = BackgroundAgentsService()
+    let reports = SessionReportService()
     /// What live sessions are doing, for the sidebar's cards (ADR-156).
     let activities = SessionActivityStore()
     let updates = UpdateCheck()
@@ -158,6 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabs.prs = prs
         tabs.mcp = mcp
         tabs.backgroundAgents = backgroundAgents
+        // A child's report reaches its parent through the same paste path as a Grill answer (ADR-182).
+        tabs.reports = reports
+        reports.start(tabs: tabs, sessions: sessions, agents: backgroundAgents)
         backgroundAgents.isAttachedProvider = { [weak self] in self?.tabs.tabs.contains(where: \.isAttached) ?? false }
         backgroundAgents.router = { [weak self] sid, title, body, kind in self?.tabs.notify(self?.tabs.tab(for: sid), sessionId: sid, title: title, body: body, kind: kind) }
         backgroundAgents.onRefresh = { [weak self] agents in self?.automations.reconcile(agents: agents) }
@@ -201,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updates.start { [weak self] version, url in
             self?.tabs.notify(nil, sessionId: nil, title: "Clinic \(version) is available", body: "You are on \(UpdateCheck.currentVersion). Click to open the release.", kind: .update, url: url)
         }
-        mcp.start(tabs: tabs, sessions: sessions, history: history, notifications: notifications, prs: prs)
+        mcp.start(tabs: tabs, sessions: sessions, history: history, notifications: notifications, prs: prs, reports: reports)
         if UserDefaults.standard.bool(forKey: Prefs.reopenLastSession) {
             Task {
                 await sessions.initialScan?.value
@@ -742,6 +747,7 @@ struct ClinicCommands: Commands {
             Button("Stop Session") { if let t = tabs.selectedTab { tabs.stop(t) } }
                 .keyboardShortcut(key(.stopSession)).disabled(!tabs.canStopSelected)
             Button("Fork Session") { if let s = selectedSession { tabs.fork(s) } }.keyboardShortcut(key(.forkSession)).disabled(selectedSession == nil)
+            Button("New Child Session…") { if let s = selectedSession { tabs.startChildSession(of: s) } }.disabled(selectedSession == nil)
             Button("Background This Session") { if let t = tabs.selectedTab { tabs.background(t) } }
                 .keyboardShortcut(key(.backgroundSession)).disabled(!tabs.canBackgroundSelected)
             Button("Details…") { NotificationCenter.default.post(name: .clinicSessionDetails, object: nil) }
