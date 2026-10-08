@@ -4828,3 +4828,36 @@ blob. Not exercised: pressing the source toggle, a video side, the side-by-side 
 
 **Found on the way.** `-ClinicDiffScope` takes the enum's raw value (`workingTree`), not the picker's word.
 
+
+## 2026-10-08 — Clinic answers the worktree exit dialog (ADR-190)
+
+User: *"When closing a session (or attempting to archive) Claude will prompt what to do with the worktree in
+the terminal and sometimes I miss it."* Then: default to Keep, make the answer a setting, and look at the
+worktree before the closing action so Clinic can ask up front and press that answer.
+
+**Probe.** `claude -w` in a scratch repository under the session scratchpad, driven through a Python pty
+with a `SessionEnd` hook that logs the time. The CLI's *Exiting worktree session* dialog shows before
+`SessionEnd`; the hook fires 0.3 s after the answer. A bare `2` removed the worktree and its branch. So the
+graceful close's five-second fallback was killing the CLI mid-dialog, archive bailed on the pending close,
+and Stop left the dialog waiting. Accepting trust for the scratch path added a project entry to `~/.claude.json`.
+
+**Core.** `Git/WorktreeExit.swift`: `WorktreeExitAnswer` (keep / remove / ask, `ClinicWorktreeExitAnswer`),
+`WorktreeExitDialog.isShowing(in:)` over whitespace-stripped screen text, `WorktreeExitFacts` (root
+finder, counts, summary sentence) and `GitRepository.worktreeExitFacts(at:)`. `WorktreeExitTests`: six
+tests, one over a real worktree.
+
+**App.** `TabStore`: `close` routes a running worktree session to `closeWorktreeSession`, which reads the
+facts, shows `confirmCloseWorktreeTab` (what the worktree holds, what the setting does, a Keep/Remove popup
+under *Ask*, Background kept), then `closeGracefully`; `stop` starts `watchWorktreeExit`, which presses
+`1`/`2` as a key event when the dialog shows; the fallback restarts after an answer and never fires over an
+unanswered dialog; `stopSession` asks under *Ask* and is what the menu and rows call; `closeAndWait` for
+archive. `SessionActions.archive` awaits each close and skips the ADR-065 offer for a decided worktree.
+Settings → Sessions gains a *Worktrees* section with the new picker beside the archive one.
+
+**Verified.** `swift test --filter WorktreeExitTests` (6 pass); `make build`. Clinic Dev with a new smoke
+key, `-ClinicNewSessionOnLaunch <scratch repo> -ClinicNewSessionWorktreeOnLaunch wt190 -ClinicStopAfterLaunch
+30`, a file written into the worktree from outside before the stop: the log read *worktree exit dialog:
+pressing keep* and the worktree and `worktree-wt190` stayed; with `ClinicWorktreeExitAnswer remove` written
+to the Dev defaults, *pressing remove* and both were gone. So the dialog is matched off a real Ghostty
+surface and a bare digit answers it there too. Not exercised: the close sheet and its popup (an `NSAlert`,
+read from the code), archive awaiting the close, the quit path.

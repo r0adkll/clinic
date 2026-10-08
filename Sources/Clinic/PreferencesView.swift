@@ -399,6 +399,7 @@ private struct AccentSwatches: View {
 private struct SessionsPane: View {
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
+    @AppStorage(WorktreeExitAnswer.preferenceKey) private var worktreeExit = "keep"
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
     @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
 
@@ -420,12 +421,24 @@ private struct SessionsPane: View {
                      + "New Session screen. Per-project model choices there override the default model.")
             }
 
-            Section("Archiving") {
-                Picker("When the session is in a worktree", selection: $archiveWorktree) {
+            Section {
+                Picker("When a worktree session exits", selection: $worktreeExit) {
+                    Text("Keep the worktree").tag("keep")
+                    Text("Remove the worktree and its branch").tag("remove")
+                    Text("Ask when closing").tag("ask")
+                }
+                Picker("Archiving a session in a worktree", selection: $archiveWorktree) {
                     Text("Ask").tag("ask")
                     Text("Always trash the worktree").tag("always")
                     Text("Never trash").tag("never")
                 }
+            } header: {
+                Text("Worktrees")
+            } footer: {
+                Text("Claude Code asks what to do with a worktree as its session exits. Clinic answers with this choice, "
+                     + "after the close sheet says what the worktree holds. Remove is the CLI's own: the directory, its "
+                     + "branch and any uncommitted work go for good. A clean worktree of an unnamed session is removed by "
+                     + "Claude Code itself. Archiving offers to trash a kept worktree instead; Undo Archive brings it back.")
             }
 
             Section {

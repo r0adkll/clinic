@@ -522,7 +522,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let path = UserDefaults.standard.string(forKey: "ClinicNewSessionOnLaunch"), !path.isEmpty {
             // `-ClinicPromptOnLaunch <text>`: send a first prompt, so a smoke run produces a real
             // turn to look at in the diff panel (ADR-080).
-            tabs.newSession(projectPath: path, model: "haiku", worktree: false,
+            // `-ClinicNewSessionWorktreeOnLaunch <name>`: start it in a worktree, so a stop meets the CLI's
+            // exit dialog (ADR-190).
+            let worktreeName = UserDefaults.standard.string(forKey: "ClinicNewSessionWorktreeOnLaunch")
+            tabs.newSession(projectPath: path, model: "haiku", worktree: !(worktreeName ?? "").isEmpty, worktreeName: worktreeName,
                             prompt: UserDefaults.standard.string(forKey: "ClinicPromptOnLaunch"))
             // `-ClinicStopAfterLaunch <seconds>`: exercise the graceful Stop path (ADR-063).
             // `-ClinicSwitchModelAfterLaunch <alias>`: exercise /model via the footer path (ADR-064).
@@ -744,7 +747,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.archiveSession)).disabled(selectedSession == nil)
             Button("Undo Archive") { sessions.undoArchive() }
                 .keyboardShortcut(key(.undoArchive)).disabled(!sessions.canUndoArchive)
-            Button("Stop Session") { if let t = tabs.selectedTab { tabs.stop(t) } }
+            Button("Stop Session") { if let t = tabs.selectedTab { tabs.stopSession(t) } }
                 .keyboardShortcut(key(.stopSession)).disabled(!tabs.canStopSelected)
             Button("Fork Session") { if let s = selectedSession { tabs.fork(s) } }.keyboardShortcut(key(.forkSession)).disabled(selectedSession == nil)
             Button("New Child Session…") { if let s = selectedSession { tabs.startChildSession(of: s) } }.disabled(selectedSession == nil)

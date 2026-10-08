@@ -60,6 +60,11 @@ final class Tab: Identifiable {
     @ObservationIgnored var pendingReporting = false
     /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
     var closingGracefully = false
+    /// The answer to press into the CLI's worktree exit dialog once it shows, the task watching the
+    /// screen for it, and when it was pressed, which restarts the graceful close's clock (ADR-190).
+    @ObservationIgnored var worktreeExitAnswer: WorktreeExitAnswer?
+    @ObservationIgnored var worktreeExitWatcher: Task<Void, Never>?
+    @ObservationIgnored var worktreeAnsweredAt: Date?
     /// Text to type once the shell shows its first prompt (ADR-016). Sent on the first `pwd` report or after a short fallback delay.
     var pendingInput: String?
     var gitBranch: String?
@@ -762,6 +767,12 @@ final class TabStore {
     @discardableResult
     func close(_ tab: Tab, confirm: Bool = true) -> Bool {
         if confirm && tab.isRunningClaude {
+            // A worktree session is looked at first and asked about once, before the CLI is asked to
+            // exit, so its exit dialog is never left waiting (ADR-190).
+            if tab.state != nil, !tab.isAttached, let root = worktreeRoot(of: tab) {
+                Task { await closeWorktreeSession(tab, root: root) }
+                return false
+            }
             switch confirmCloseTab(tab) {
             case .cancel: return false
             case .background: background(tab); return false
@@ -771,6 +782,7 @@ final class TabStore {
         }
         let w = window(of: tab)
         runs.tabClosed(tab)
+        tab.worktreeExitWatcher?.cancel()
         tabs.removeAll { $0.id == tab.id }
         if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
@@ -801,22 +813,150 @@ final class TabStore {
         if sendSlashCommand("/effort " + level, to: tab) { tab.effort = level }
     }
 
-    /// Ctrl‑C twice: Claude Code's clean exit (ADR-063). The shell stays in the tab.
+    /// Ctrl‑C twice: Claude Code's clean exit (ADR-063). The shell stays in the tab. A worktree
+    /// session's exit dialog is answered by the watcher this starts (ADR-190).
     func stop(_ tab: Tab) {
         guard tab.isRunningClaude else { return }
+        if let root = worktreeRoot(of: tab) { watchWorktreeExit(tab, root: root) }
         tab.surface.sendInterrupt()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { tab.surface.sendInterrupt() }
     }
 
+    /// Stop from a menu or a row: a worktree session is asked about first when the setting says to
+    /// ask (ADR-190). Quit and the smoke keys use `stop`, which takes the setting, or Keep.
+    func stopSession(_ tab: Tab) {
+        guard tab.isRunningClaude else { return }
+        guard let root = worktreeRoot(of: tab), worktreeExitSetting == .ask, tab.worktreeExitAnswer == nil else { stop(tab); return }
+        Task {
+            let facts = await GitRepository.worktreeExitFacts(at: root)
+            guard tab.isRunningClaude, case .close(let answer) = confirmCloseWorktreeTab(tab, facts: facts, stopping: true) else { return }
+            tab.worktreeExitAnswer = answer
+            stop(tab)
+        }
+    }
+
     var canStopSelected: Bool { selectedTab?.isRunningClaude ?? false }
 
-    /// Stop, then close once the CLI reports `SessionEnd` (5 s fallback).
+    /// Stop, then close once the CLI reports `SessionEnd`. The fallback closes after five quiet
+    /// seconds: the clock restarts when the worktree dialog was just answered, because a removal is
+    /// still running, and never runs out while that dialog is on screen unanswered, because closing
+    /// would kill it with the question unasked (ADR-190).
     func closeGracefully(_ tab: Tab) {
         tab.closingGracefully = true
         stop(tab)
         Task { [weak self, weak tab] in
-            try? await Task.sleep(for: .seconds(5))
-            if let tab, tab.closingGracefully, self?.tabs.contains(where: { $0.id == tab.id }) == true { self?.close(tab, confirm: false) }
+            while true {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, let tab, tab.closingGracefully, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+                if let at = tab.worktreeAnsweredAt, Date().timeIntervalSince(at) < 5 { continue }
+                if let text = tab.surface.visibleText, WorktreeExitDialog.isShowing(in: text) { continue }
+                self.close(tab, confirm: false)
+                return
+            }
+        }
+    }
+
+    // MARK: Worktree sessions at exit (ADR-190)
+
+    /// The `.claude/worktrees/<name>` root a session tab runs in, or nil.
+    func worktreeRoot(of tab: Tab) -> String? {
+        guard tab.sessionId != nil else { return nil }
+        return WorktreeExitFacts.worktreeRoot(forCwd: tab.pwd ?? tab.projectPath)
+    }
+
+    /// The Settings answer. *Ask* is resolved by a sheet before the stop; where no sheet can be shown it means Keep.
+    var worktreeExitSetting: WorktreeExitAnswer {
+        WorktreeExitAnswer(rawValue: UserDefaults.standard.string(forKey: WorktreeExitAnswer.preferenceKey) ?? "") ?? .keep
+    }
+
+    /// Close a worktree session: read what the worktree holds, ask once, then stop with the answer
+    /// ready. Returns once the tab is gone, or false when the user cancelled or chose Background.
+    func closeWorktreeSession(_ tab: Tab, root: String) async -> Bool {
+        let facts = await GitRepository.worktreeExitFacts(at: root)
+        guard tabs.contains(where: { $0.id == tab.id }) else { return true }
+        guard tab.isRunningClaude else { return close(tab, confirm: false) }
+        switch confirmCloseWorktreeTab(tab, facts: facts, stopping: false) {
+        case .cancel: return false
+        case .background: background(tab); return false
+        case .close(let answer):
+            tab.worktreeExitAnswer = answer
+            closeGracefully(tab)
+            return await waitUntilClosed(tab)
+        }
+    }
+
+    /// `close`, awaited: true once the tab is gone, false when the user kept it (ADR-190 for archive).
+    func closeAndWait(_ tab: Tab) async -> Bool {
+        if tab.isRunningClaude, tab.state != nil, !tab.isAttached, let root = worktreeRoot(of: tab) { return await closeWorktreeSession(tab, root: root) }
+        if close(tab) { return true }
+        return await waitUntilClosed(tab)
+    }
+
+    private func waitUntilClosed(_ tab: Tab) async -> Bool {
+        while tabs.contains(where: { $0.id == tab.id }) {
+            guard tab.closingGracefully else { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return true
+    }
+
+    /// Watches the screen for the CLI's *Exiting worktree session* dialog and presses the answer once
+    /// it shows: `1` keeps, `2` removes, and a bare digit both selects and confirms. The dialog follows
+    /// the second Ctrl‑C within a second or two; the watch gives up after fifteen.
+    private func watchWorktreeExit(_ tab: Tab, root: String) {
+        tab.worktreeExitWatcher?.cancel()
+        let setting = worktreeExitSetting
+        let answer = tab.worktreeExitAnswer ?? (setting == .ask ? .keep : setting)
+        guard let digit = answer.digit else { return }
+        tab.worktreeExitWatcher = Task { [weak self, weak tab] in
+            for _ in 0..<100 {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled, let self, let tab, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+                if tab.state == .exited || tab.childExited { return }
+                guard let text = tab.surface.visibleText, WorktreeExitDialog.isShowing(in: text) else { continue }
+                Self.log.notice("worktree exit dialog: pressing \(answer.rawValue, privacy: .public) for \(tab.sessionId?.rawValue ?? "?", privacy: .public)")
+                tab.surface.pressKey(keycode: digit == "1" ? 18 : 19, character: digit)   // kVK_ANSI_1, kVK_ANSI_2
+                tab.worktreeAnsweredAt = Date()
+                return
+            }
+        }
+    }
+
+    enum WorktreeCloseChoice { case close(WorktreeExitAnswer), background, cancel }
+
+    /// The close (or stop) sheet for a worktree session: names the worktree, says what it holds and
+    /// what will happen to it, and, when the setting is *Ask*, takes the answer in a popup.
+    func confirmCloseWorktreeTab(_ tab: Tab, facts: WorktreeExitFacts, stopping: Bool) -> WorktreeCloseChoice {
+        let setting = worktreeExitSetting
+        let alert = NSAlert()
+        alert.messageText = stopping ? "Stop this session?" : "Close this session?"
+        let canBackground = !stopping && tab.sessionId != nil && tab.isAtPrompt
+        let verb = stopping ? "Stop" : "Close"
+        var text = "Claude Code is still running in the worktree \(facts.name). \(facts.summary)"
+        switch setting {
+        case .keep: text += " \(verb) asks it to exit cleanly and keeps the worktree."
+        case .remove: text += facts.isClean ? " \(verb) asks it to exit cleanly and removes the worktree." : " \(verb) asks it to exit cleanly and removes the worktree, its branch and that work."
+        case .ask: text += " \(verb) asks it to exit cleanly; choose below what happens to the worktree."
+        }
+        if facts.isClean { text += " Claude Code removes a clean worktree itself unless the session was named." }
+        if canBackground { text += " Background keeps it running detached so you can attach again." }
+        alert.informativeText = text
+        alert.alertStyle = .warning
+        var popup: NSPopUpButton?
+        if setting == .ask {
+            let p = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+            p.addItems(withTitles: ["Keep the worktree", facts.isClean ? "Remove the worktree" : "Remove the worktree and its branch"])
+            alert.accessoryView = p
+            popup = p
+        }
+        alert.addButton(withTitle: verb)
+        if canBackground { alert.addButton(withTitle: "Background") }
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .close(setting == .ask ? (popup?.indexOfSelectedItem == 1 ? .remove : .keep) : setting)
+        case .alertSecondButtonReturn: return canBackground ? .background : .cancel
+        default: return .cancel
         }
     }
 
@@ -1212,6 +1352,8 @@ final class TabStore {
         if event.hookEventName == "SessionEnd", event.reason != "clear", let id = tab.sessionId { reports?.childEnded(id, reason: "its session ended") }
         if event.hookEventName == "SessionEnd", event.reason == "clear" { tab.clearedAt = event.receivedAt }
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
+        // A tab that stays after its session ended starts the next one undecided (ADR-190).
+        if event.hookEventName == "SessionEnd" { tab.worktreeExitAnswer = nil; tab.worktreeAnsweredAt = nil }
         if let cwd = event.cwd, event.hookEventName == "SessionStart" || event.hookEventName == "CwdChanged" { tab.pwd = cwd }
         if event.hookEventName == "CwdChanged" { snapshots.forget(session: event.sessionId) }
         if let path = event.transcriptPath, event.hookEventName == "SessionStart" || event.hookEventName == "Stop" || event.hookEventName == "PostModelSwitch" {

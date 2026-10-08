@@ -319,7 +319,7 @@ struct SessionContextMenu: View {
         Button(agent?.isRunning == true ? "Attach" : "Open") { tabs.open(session: summary) }
         if let tab = tabs.tab(for: summary.id) {
             Button("Close Tab") { tabs.close(tab) }
-            if tab.isRunningClaude { Button("Stop") { tabs.stop(tab) } }
+            if tab.isRunningClaude { Button("Stop") { tabs.stopSession(tab) } }
             if tab.isAtPrompt { Button("Background") { tabs.background(tab) } }
         }
         Button("Fork Session") { tabs.fork(summary) }
@@ -421,13 +421,20 @@ enum SessionActions {
 
     /// Archiving an open session closes its tab first (with the usual confirmation if Claude is running), then offers to trash its worktree (ADR-065).
     /// A parent takes its visible descendants with it, as one undoable action (ADR-181); a refused close stops the whole thing.
+    /// A close is awaited, so a session that exits cleanly is archived once it has (ADR-190); a worktree the
+    /// close sheet already asked about, or that the CLI removed, is not offered again.
     static func archive(_ summary: SessionSummary, sessions: SessionStore, tabs: TabStore) {
         let group = [summary] + sessions.visibleDescendants(of: summary.id)
-        for s in group { if let tab = tabs.tab(for: s.id), !tabs.close(tab) { return } }
         Task { @MainActor in
+            var decided: Set<SessionID> = []
+            for s in group {
+                guard let tab = tabs.tab(for: s.id) else { continue }
+                guard await tabs.closeAndWait(tab) else { return }
+                if tab.worktreeExitAnswer == .remove || (tab.worktreeExitAnswer != nil && tabs.worktreeExitSetting == .ask) { decided.insert(s.id) }
+            }
             var entries: [(SessionID, RepoUpkeep.TrashedWorktree?)] = []
             for s in group {
-                entries.append((s.id, await RepoUpkeep.offerWorktreeTrash(for: s, tabs: tabs, agents: tabs.backgroundAgents)))
+                entries.append((s.id, decided.contains(s.id) ? nil : await RepoUpkeep.offerWorktreeTrash(for: s, tabs: tabs, agents: tabs.backgroundAgents)))
             }
             sessions.archiveGroup(entries)
         }
@@ -524,7 +531,7 @@ struct SessionHoverActions: View {
     var body: some View {
         let archived = sessions.isArchived(summary.id), starred = sessions.isFavorite(summary.id)
         HStack(spacing: 0) {
-            if let tab, tab.isRunningClaude { RowAction("stop.fill", help: "Stop") { tabs.stop(tab) } }
+            if let tab, tab.isRunningClaude { RowAction("stop.fill", help: "Stop") { tabs.stopSession(tab) } }
             if let tab { RowAction("xmark", help: "Close Tab") { tabs.close(tab) } }
             RowAction(starred ? "star.slash" : "star", help: starred ? "Remove from Favorites" : "Add to Favorites") {
                 sessions.toggleFavorite(summary.id)
