@@ -6,6 +6,11 @@ tags: [adr, git, diff, panel, snapshots]
 ---
 # ADR-170: The Diff panel follows the last change, and snapshots stop racing
 
+> **Amended 2026-10-06.** *Latest changes* waits for a reader who is in the middle of a turn and offers the
+> newer one ([[ADR-187 The Diff Panel Says What It Compares]]). It does not follow a turn that only moved the
+> checkout ([[ADR-185 A Turn Knows Where The Checkout Stood]]). The panel reloads through one loop, and the
+> watcher is started again when the pane returns ([[ADR-183 The Diff Panel Has One Loader]]).
+
 ## Context
 User (2026-09-24): *"The "Diff" panel doesn't seem to work very well at all. I can almost never see the diff
 for turns (or turns are not captured accurately in terms of actual code changes). Any of the other views also

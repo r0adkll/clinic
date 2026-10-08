@@ -81,6 +81,9 @@ final class PanelPane: Identifiable {
     let id = UUID()
     let kind: Kind
     var diff: DiffPanelModel?
+    /// A pull request pane's changed files. Held here rather than in the view, so the commands that
+    /// read a diff (ADR-188) reach it the way they reach the Diff panel's.
+    var changes: DiffBrowser?
     var editor: EditorModel?
     var terminal: GhosttySurfaceView?
     var images: ImageGallery?
@@ -159,7 +162,8 @@ final class SidePanel {
         isZoomed = false
     }
 
-    /// Only the pane on screen watches the file system; the others idle until they come back to the front.
+    /// Only the pane on screen watches the file system; the others idle until they come back to the
+    /// front, when `DiffPanelModel.bind` starts the watcher again (ADR-183).
     private func syncWatchers() {
         for pane in panes where !isVisible || pane.id != selectedId { pane.diff?.stopWatching() }
     }

@@ -6,6 +6,11 @@ tags: [adr, git, diff, ui, panel]
 ---
 # ADR-101: The Diff panel reads one file at a time, from a tree
 
+> **Amended 2026-10-06.** A refresh no longer moves the selection, and a file that leaves the diff stays on
+> screen, marked ([[ADR-187 The Diff Panel Says What It Compares]]). The file bar gains next and previous
+> change, a viewed mark and a menu, and a file with no lines says why
+> ([[ADR-188 The Diff Panel Is For Reviewing]]).
+
 ## Context
 User (2026-09-10): *"I'm now thinking that the continuous file scrolling of the diff view might not
 be the best pattern. Instead we should use the same pattern as the diff/file viewer on PRs and add a

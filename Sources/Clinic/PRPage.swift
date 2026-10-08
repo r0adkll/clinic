@@ -19,7 +19,9 @@ struct PRPage: View {
     /// `-ClinicPRPaneOnLaunch conversation|checks|files` (ADR-038): a smoke run can open the panel on
     /// a given tab rather than driving a synthetic click into it.
     @State private var pane: CodeHost.Pane = CodeHost.Pane(rawValue: UserDefaults.standard.string(forKey: "ClinicPRPaneOnLaunch") ?? "") ?? .conversation
-    @State private var files = DiffBrowser()
+    /// Used only if the pane has none of its own, which `TabStore.makePane` always gives it.
+    @State private var ownFiles = DiffBrowser()
+    private var files: DiffBrowser { tab.panel.pane(.pr(ref))?.changes ?? ownFiles }
     @State private var confirm: PendingAction?
     /// Merge-box lines whose checks the reader has shown or hidden, against the default: a blocking line
     /// starts open, so a failing build is a glance away, not a click (ADR-087).

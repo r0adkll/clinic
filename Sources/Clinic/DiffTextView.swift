@@ -78,6 +78,16 @@ enum DiffMetrics {
         }
     }
 
+    /// Behind the part of a changed line that differs from its counterpart (ADR-188): the line's own
+    /// tint again, stronger, so the edit inside a line stands out from the line.
+    static func emphasis(_ kind: DiffLine.Kind) -> NSColor? {
+        switch kind {
+        case .addition: NSColor.systemGreen.withAlphaComponent(0.30)
+        case .deletion: NSColor.systemRed.withAlphaComponent(0.30)
+        case .context, .noNewline: nil
+        }
+    }
+
     static func marker(_ kind: DiffLine.Kind) -> String {
         switch kind { case .addition: "+"; case .deletion: "−"; case .context: " "; case .noNewline: "\\" }
     }
@@ -103,23 +113,35 @@ final class DiffTextSource {
     private(set) var tokens: [String: [DiffToken]] = [:]
     private(set) var documentGeneration = 0
     private(set) var tokenGeneration = 0
+    /// Bumped when a *different file* comes on screen, which is the one time the body goes back to
+    /// the top (ADR-186). The same file arriving with new contents keeps the reader's line.
+    private(set) var fileGeneration = 0
+    /// A line the body has been asked to bring into view, and the request's number (ADR-188).
+    private(set) var revealLine = 0
+    private(set) var revealGeneration = 0
 
-    func replace(document: DiffDocument, keepingTokens keep: Bool) {
+    /// Where the body is scrolled to, written by the view as it scrolls. Not observed: nothing draws
+    /// from these, and a scroll must not invalidate a SwiftUI body sixty times a second.
+    @ObservationIgnored var topLine = 0
+    @ObservationIgnored var isScrolled = false
+
+    func replace(document: DiffDocument, keepingTokens keep: Bool, newFile: Bool) {
         self.document = document
         if !keep { tokens = [:] }
+        if newFile { fileGeneration += 1; topLine = 0; isScrolled = false }
         documentGeneration += 1
     }
 
-    func merge(tokens incoming: [String: [DiffToken]]) {
-        guard !incoming.isEmpty else { return }
-        tokens.merge(incoming) { _, new in new }
+    /// The colours for the document on screen, replacing whatever was there.
+    func replace(tokens incoming: [String: [DiffToken]]) {
+        guard incoming != tokens else { return }
+        tokens = incoming
         tokenGeneration += 1
     }
 
-    func clearTokens() {
-        guard !tokens.isEmpty else { return }
-        tokens = [:]
-        tokenGeneration += 1
+    func reveal(line: Int) {
+        revealLine = line
+        revealGeneration += 1
     }
 }
 
@@ -147,6 +169,24 @@ final class DiffContentTextView: NSTextView {
         }
     }
 
+    /// ⌘F and ⌘G, while the body has the keyboard (ADR-188). The find bar is AppKit's own; the app's
+    /// Edit menu has no Find item to reach it through, so the chords are taken here.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self,
+              event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock) == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased() else { return super.performKeyEquivalent(with: event) }
+        let action: NSTextFinder.Action
+        switch key {
+        case "f": action = .showFindInterface
+        case "g": action = .nextMatch
+        case "e": action = .setSearchString
+        default: return super.performKeyEquivalent(with: event)
+        }
+        let item = NSMenuItem()
+        item.tag = action.rawValue
+        performTextFinderAction(item)
+        return true
+    }
 }
 
 // MARK: - Gutter
@@ -181,6 +221,9 @@ final class DiffGutterView: NSView {
     /// The body's scroll position, pushed in on every scroll: the gutter follows vertically and
     /// ignores horizontal scrolling entirely.
     var scrollY: CGFloat = 0
+    /// What covers the top of the body — the find bar, when it is showing. The body's scroll position
+    /// already accounts for it; the gutter only has to not draw numbers beside it.
+    var topInset: CGFloat = 0
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
@@ -188,6 +231,7 @@ final class DiffGutterView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.textBackgroundColor.setFill()
         dirtyRect.fill()
+        if topInset > 0 { NSBezierPath(rect: NSRect(x: 0, y: topInset, width: bounds.width, height: bounds.height - topInset)).addClip() }
         let height = DiffMetrics.lineHeight
         let first = max(0, Int(floor(scrollY / height)))
         let last = min(document.lines.count - 1, Int(ceil((scrollY + bounds.height) / height)))
@@ -287,23 +331,47 @@ enum DiffTextRenderer {
         }
     }
 
+    @MainActor
+    static var baseAttributes: [NSAttributedString.Key: Any] {
+        [.font: DiffMetrics.font, .foregroundColor: NSColor.labelColor, .paragraphStyle: DiffMetrics.paragraph]
+    }
+
     /// The document as attributed text: one base style per line kind, with the highlighter's tokens
-    /// laid over the code. Backgrounds are drawn, not attributed, so they can span the full width.
+    /// laid over the code. Line backgrounds are drawn, not attributed, so they can span the full width.
     @MainActor
     static func attributed(_ document: DiffDocument, tokens: [String: [DiffToken]]) -> NSAttributedString {
-        let out = NSMutableAttributedString(string: document.text, attributes: [
-            .font: DiffMetrics.font,
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: DiffMetrics.paragraph,
-        ])
+        let out = NSMutableAttributedString(string: document.text, attributes: baseAttributes)
         out.beginEditing()
-        for line in document.lines {
+        colour(out, document: document, tokens: tokens)
+        out.endEditing()
+        return out
+    }
+
+    /// Lays the colours over text that is already there (ADR-186). Colour is not geometry: no glyph
+    /// moves, so the text view keeps its layout and its scroll position, and highlighting that lands
+    /// a moment after the text no longer throws the reader back to the top.
+    @MainActor
+    static func recolour(_ storage: NSMutableAttributedString, document: DiffDocument, tokens: [String: [DiffToken]]) {
+        let whole = NSRange(location: 0, length: storage.length)
+        storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: whole)
+        storage.removeAttribute(.backgroundColor, range: whole)
+        colour(storage, document: document, tokens: tokens)
+    }
+
+    @MainActor
+    private static func colour(_ out: NSMutableAttributedString, document: DiffDocument, tokens: [String: [DiffToken]]) {
+        let end = out.length
+        for line in document.lines where NSMaxRange(line.range) <= end {
             switch line.kind {
             case .hunk:
-                out.addAttributes([.foregroundColor: NSColor.secondaryLabelColor], range: line.range)
+                out.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: line.range)
             case .code(let kind):
                 if kind == .noNewline {
-                    out.addAttributes([.foregroundColor: NSColor.secondaryLabelColor], range: line.range)
+                    out.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: line.range)
+                }
+                if let emphasis = line.emphasis, let colour = DiffMetrics.emphasis(kind) {
+                    let range = NSRange(location: line.range.location + emphasis.location, length: emphasis.length)
+                    if NSMaxRange(range) <= NSMaxRange(line.range) { out.addAttribute(.backgroundColor, value: colour, range: range) }
                 }
                 guard let tokens = tokens[line.rowId] else { continue }
                 for token in tokens {
@@ -313,8 +381,6 @@ enum DiffTextRenderer {
                 }
             }
         }
-        out.endEditing()
-        return out
     }
 }
 
@@ -325,6 +391,7 @@ struct DiffTextRepresentable: NSViewRepresentable {
     /// Read by the enclosing body so SwiftUI knows when to call `updateNSView`.
     let documentGeneration: Int
     let tokenGeneration: Int
+    let revealGeneration: Int
     let colorScheme: ColorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator(source: source) }
@@ -333,7 +400,7 @@ struct DiffTextRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.apply(documentGeneration: documentGeneration, tokenGeneration: tokenGeneration,
-                                  colorScheme: colorScheme)
+                                  revealGeneration: revealGeneration, colorScheme: colorScheme)
     }
 
     @MainActor
@@ -348,13 +415,17 @@ struct DiffTextRepresentable: NSViewRepresentable {
         private var textWidth: CGFloat = 0
         private var appliedDocument = -1
         private var appliedTokens = -1
+        private var appliedFile = -1
+        private var appliedReveal: Int
         private var appliedScheme: ColorScheme?
 
         init(source: DiffTextSource) {
             self.source = source
+            appliedReveal = source.revealGeneration
 
-            // TextKit 2, built by hand: touching `textStorage` or `layoutManager` anywhere drops the
-            // view back to TextKit 1.
+            // TextKit 2, built by hand: touching the text view's `textStorage` or `layoutManager`
+            // anywhere drops the view back to TextKit 1. The content storage's own `textStorage` is
+            // the backing store and is safe to edit inside an editing transaction.
             let content = NSTextContentStorage()
             let layout = NSTextLayoutManager()
             content.addTextLayoutManager(layout)
@@ -373,6 +444,9 @@ struct DiffTextRepresentable: NSViewRepresentable {
             textView.isRichText = false
             textView.drawsBackground = true
             textView.backgroundColor = .textBackgroundColor
+            // AppKit's find bar, opened with ⌘F while the body has the keyboard (ADR-188).
+            textView.usesFindBar = true
+            textView.isIncrementalSearchingEnabled = true
             // `textContainerInset` is the one offset TextKit applies to drawing as well as layout;
             // a paragraph head indent lays out at the right x and then draws the run shifted left.
             textView.textContainerInset = NSSize(width: DiffMetrics.textInset, height: 0)
@@ -409,23 +483,41 @@ struct DiffTextRepresentable: NSViewRepresentable {
 
         deinit { NotificationCenter.default.removeObserver(self) }
 
-        func apply(documentGeneration: Int, tokenGeneration: Int, colorScheme: ColorScheme) {
+        func apply(documentGeneration: Int, tokenGeneration: Int, revealGeneration: Int, colorScheme: ColorScheme) {
             let schemeChanged = appliedScheme != colorScheme
             appliedScheme = colorScheme
             if documentGeneration != appliedDocument || schemeChanged {
+                let newFile = source.fileGeneration != appliedFile
                 appliedDocument = documentGeneration
                 appliedTokens = tokenGeneration
-                rebuild()
+                appliedFile = source.fileGeneration
+                rebuild(keepingPosition: !newFile)
             } else if tokenGeneration != appliedTokens {
                 appliedTokens = tokenGeneration
-                rebuild()
+                recolour()
             }
             resize()
+            if revealGeneration != appliedReveal {
+                appliedReveal = revealGeneration
+                reveal(line: source.revealLine)
+            }
         }
 
         /// The whole document is re-attributed rather than patched in place: building it is ~20 ms
-        /// for 7,500 lines, and it only changes when another file is selected or highlighting lands.
-        private func rebuild() {
+        /// for 7,500 lines, and it happens when the file on screen changes or its contents do.
+        ///
+        /// Only a *different file* starts at the top (ADR-186). The same file with new contents — a
+        /// working tree moving under the reader — keeps the line that was at the top of the viewport,
+        /// found again by its line number, and the offset into it.
+        private func rebuild(keepingPosition: Bool) {
+            let previous = textView.document
+            let clip = scrollView.contentView
+            // In the document's own coordinates: the clip view's origin is negative by the height of
+            // whatever covers its top (the find bar).
+            let origin = NSPoint(x: clip.bounds.origin.x, y: clip.bounds.origin.y + clip.contentInsets.top)
+            let height = DiffMetrics.lineHeight
+            let topLine = max(0, Int(floor(origin.y / height)))
+
             let document = source.document
             textWidth = DiffTextRenderer.width(of: document)
             textView.document = document
@@ -433,14 +525,53 @@ struct DiffTextRepresentable: NSViewRepresentable {
             // The gutter is only as wide as this file's line numbers, so the body re-lays out.
             body.needsLayout = true
             body.layoutSubtreeIfNeeded()
-            contentStorage.attributedString = DiffTextRenderer.attributed(document, tokens: source.tokens)
+            let attributed = DiffTextRenderer.attributed(document, tokens: source.tokens)
+            contentStorage.performEditingTransaction {
+                if let storage = contentStorage.textStorage { storage.setAttributedString(attributed) }
+                else { contentStorage.attributedString = attributed }
+            }
             resize()
             textView.needsDisplay = true
             gutter.needsDisplay = true
-            // A new file starts at the top left, never where the last one was left.
-            scrollView.contentView.scroll(to: .zero)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            gutter.scrollY = 0
+
+            var target = NSPoint.zero
+            if keepingPosition, origin.y > 0, let line = document.line(matching: topLine, of: previous) {
+                target = NSPoint(x: origin.x, y: CGFloat(line) * height + (origin.y - CGFloat(topLine) * height))
+            } else if keepingPosition, origin.y > 0 {
+                target = origin
+            }
+            scroll(to: target)
+        }
+
+        /// Highlighting that arrived for the text already on screen: colour only, in place.
+        private func recolour() {
+            guard let storage = contentStorage.textStorage, storage.length == (source.document.text as NSString).length else {
+                rebuild(keepingPosition: true)
+                return
+            }
+            let document = source.document, tokens = source.tokens
+            contentStorage.performEditingTransaction {
+                storage.beginEditing()
+                DiffTextRenderer.recolour(storage, document: document, tokens: tokens)
+                storage.endEditing()
+            }
+        }
+
+        /// Brings a line into view a few lines below the top, so the reader sees what leads up to it.
+        private func reveal(line: Int) {
+            let y = CGFloat(max(0, line - 3)) * DiffMetrics.lineHeight
+            scroll(to: NSPoint(x: 0, y: y))
+        }
+
+        private func scroll(to point: NSPoint) {
+            let clip = scrollView.contentView
+            let top = -clip.contentInsets.top
+            let limitY = max(top, textView.frame.height - clip.bounds.height)
+            let limitX = max(0, textView.frame.width - clip.bounds.width)
+            let clamped = NSPoint(x: min(max(0, point.x), limitX), y: min(max(top, point.y + top), limitY))
+            clip.scroll(to: clamped)
+            scrollView.reflectScrolledClipView(clip)
+            scrolled()
         }
 
         /// Height is lines × line height; width is the longest line × advance, never less than the
@@ -458,8 +589,14 @@ struct DiffTextRepresentable: NSViewRepresentable {
         }
 
         @objc private func scrolled() {
-            gutter.scrollY = scrollView.contentView.bounds.origin.y
+            let clip = scrollView.contentView
+            let y = clip.bounds.origin.y
+            gutter.scrollY = y
+            gutter.topInset = clip.contentInsets.top
             gutter.needsDisplay = true
+            // For the browser: which change is "next", and whether the reader has moved (ADR-187).
+            source.topLine = max(0, Int(floor((y + clip.contentInsets.top) / DiffMetrics.lineHeight)))
+            source.isScrolled = y + clip.contentInsets.top > 1
         }
 
         @objc private func resized() {
@@ -482,6 +619,7 @@ struct DiffTextBody: View {
         DiffTextRepresentable(source: source,
                               documentGeneration: source.documentGeneration,
                               tokenGeneration: source.tokenGeneration,
+                              revealGeneration: source.revealGeneration,
                               colorScheme: colorScheme)
     }
 }

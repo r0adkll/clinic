@@ -4698,3 +4698,104 @@ ClinicCore tests pass. One obstacle: libghostty cannot create a surface while th
 (`CVDisplayLink … display count (0)`), so the e2e script wraps itself in `caffeinate -d -u`. Not verified:
 held delivery and its notification, the reminder, the toggle, Deliver Now, the composer by eye, `fork: true`.
 Next: try those in Clinic Dev, then land on `main`.
+
+## 2026-10-06 — Diff viewer review (no code changed)
+User: *"The diff viewer is still not working well. Sometimes the views display completely different code or
+doesn't feel very intuitive at all. Can we perform an in-depth code review and suggest improvements both
+architecturally and UI/UX."* A review only; nothing was fixed. Read: `DiffPanelModel`, `DiffPanel`,
+`DiffBrowser`, `DiffTextView`, `DiffSyntaxHighlighter`, `SnapshotService`, and ClinicCore's `UnifiedDiff`,
+`DiffRows`, `DiffDocument`, `SnapshotStore`, `TurnSnapshot`, `GitRepository`, `FSEventsWatcher`, against
+ADR-080, 100, 101, 170, 171.
+
+**Why the panel shows the wrong code.** Found by reading unless marked *measured*.
+- **The file watcher never restarts.** `SidePanel.syncWatchers` stops it whenever the Diff pane is not the
+  one on screen; `DiffPanelModel.bind` returns early when the repo root is unchanged, and the watcher is only
+  built past that return (`DiffPanelModel.swift:125-136`). After the first hide or pane switch the panel
+  refreshes only at turn boundaries, so a running turn, Session and Working tree show old content.
+- **Loads are not ordered.** `reload()` awaits `loadDiff()` directly, from three callers (`.task`, the
+  `revision` change, the watcher), while a scope or turn change starts its own task and cancels only its own
+  kind (`DiffPanelModel.swift:162-204`). Each reads `scope` when it starts and assigns `files` when it ends.
+  A slow pass for the old scope can land after the new one: one scope's header over another scope's diff.
+- **Branch does not follow a commit.** A file event reloads the commit list but skips the diff when
+  `followsWorktree` is false (`:156`, `:183`), so *Latest commit* names the new commit over the old one's diff.
+- **A turn is a tree pair, so it holds whatever moved the tree.** *Measured* on the recorded snapshots (32
+  repos, 107 sessions, 882 turns): the largest turns are branch switches, e.g. 264 files in 39 s for *"PR stack
+  merged… switch back"*. Two turns in this repo carried 15 files that another session wrote at the same time.
+  39 of 783 consecutive turn pairs have a change between them that belongs to no turn.
+- **CRLF files collapse.** *Measured.* `UnifiedDiff.parse` splits on the `Character` `"\n"`, and `"\r\n"` is
+  one `Character` that is not equal to it. A CRLF hunk parses as one line, `+0 −0`, and the text view then
+  draws it as many lines under one line number.
+- **Line separators inside a line shift the gutter.** *Measured* in a TextKit 2 harness built like the
+  coordinator: U+2028 and form feed each add a visual line, so every tint and number below is off by one per
+  occurrence. Plain, CJK, emoji and tab lines measured exact at 8,000 lines, so the arithmetic geometry holds.
+- **Tracked files that match `.gitignore` read as deleted** in Working tree → All. *Measured.* The snapshot is
+  `git add -A` into an empty scratch index, without the `read-tree HEAD` ADR-080 specifies. None of the
+  repos in use today has such a file.
+- Non-ASCII paths print as octal escapes (`core.quotepath` is not turned off and `unquote` does not decode).
+
+**Why it does not feel right.**
+- Highlighting landing calls `rebuild()`, which scrolls to the top (`DiffTextView.swift:419-443`); so does a
+  live edit to the file being read. Tokens should be applied in place and a same-path reload should keep the line.
+- *Latest changes* swaps turn and file under the reader with no notice; a file that leaves the diff drops the
+  selection onto `files[0]`. Every background reload replaces the totals with a spinner; an error clears the tree.
+- Binary files say *0 bytes changed*; a pure rename, a mode change and an empty file render a blank body.
+- The highlighter joins every hunk of a file into one snippet per side (`sides(of:)`), not one per hunk as
+  ADR-080 says, so an unbalanced hunk mis-colours the ones after it.
+- No keys for next file or next change, no find, no word-level emphasis, no context expansion, no line that
+  says which two states are being compared, and no way to open the file at a line.
+
+**Proposed shape** (not decided; each needs an ADR): every scope resolves to a `(base, head)` tree pair in
+ClinicCore, loaded by one serial latest-wins loader keyed on that pair, so an unchanged pair costs nothing and
+cannot re-render; the watcher's life belongs to the model; turns record `HEAD` at both ends so a branch switch
+is labelled rather than shown as work; the parser splits on bytes and gets fixtures for CRLF, renames, binary
+and quoted paths; highlighting reads whole blobs by sha. None of `DiffPanelModel` or `DiffBrowser` is under
+test today, since the app target has no tests.
+
+## 2026-10-06 — The Diff panel is rebuilt around tree pairs (ADR-183 to ADR-188)
+User, after the review above: *"We should only take existing ADRs as input but should aim to improve this
+experience and write new ADRs. Lets start on these."* All seven recommendations were built, in six ADRs.
+
+**ClinicCore.**
+- `DiffTarget` / `DiffPair` / `DiffResolution` (new `Git/DiffTarget.swift`): every scope resolves to two
+  trees in `SnapshotStore.resolve`. Staged and Unstaged read the index as a tree from a copy, written into
+  the scratch store. The store caches parsed diffs and numstat by pair (ADR-183).
+- `UnifiedDiff.parse` splits on the scalar `\n` and keeps a CRLF ending off the line's text; path unquoting
+  decodes octal bytes; every git runs with `core.quotepath=off`; `DiffDocument.displayText` swaps
+  line-breaking characters for stand-ins; the snapshot adds tracked-but-ignored files (ADR-184).
+- `TurnSnapshot` and `SessionSnapshots` record commit and branch. A turn whose checkout moved resolves to
+  its own work, with the start's uncommitted paths carried onto the commit it landed on.
+  `sessionsOverlapping` counts other sessions writing during a turn (ADR-185).
+- `DiffDocument` gains emphasis ranges, `changeStarts` and `line(matching:of:)`; `UnifiedDiffFile` gains
+  `body`, `contentKey`, `renamedFrom`, `modeChange` (ADR-186, ADR-188).
+
+**App.**
+- `DiffPanelModel` is one serial loop (`request` / `drain`) with a selection epoch, owns its watcher and
+  restarts it on `bind`, skips a pass when the checkout has not moved, and holds *Latest changes* back from
+  an engaged reader (ADR-183, ADR-187).
+- `DiffTextView` recolours in place, keeps the reader's line across a refresh by old-side line number, and
+  takes ⌘F / ⌘G. The highlighter parses each side whole when the trees can be read (ADR-186).
+- `DiffBrowser` and its view: `fresh` refreshes only, a file that left the diff stays on screen marked, next
+  and previous change and file, a viewed mark, Show Whole File, and a state for each kind of file with no
+  lines. `DiffPanel` gains the comparison line, the notices under it and counts per scope. Five rebindable
+  actions in the Panel menu (ADR-187, ADR-188).
+
+**Verified.** `swift test --package-path Packages/ClinicCore`: 637 pass, 31 of them new
+(`DiffHardeningTests`, `DiffTargetTests`). In Clinic Dev against scratch repositories, read through the
+accessibility API and screenshots: live refresh after the panel was hidden and shown; Branch following a
+commit made outside; the reader's line kept when two lines were written above it (153 to 155, same code);
+CRLF and U+2028 files line for line; binary, mode-only, rename-only and empty files; whole-file view and
+next change; the viewed mark; scope counts; a comment coloured correctly inside a hunk that starts mid
+comment; a one-word edit emphasised. Turn boundaries were driven with synthetic hook events
+(`clinic-hook` fed JSON on stdin for the tab's session id), with the edits and a `git checkout` made
+between them: the panel held on turn 1 and offered turn 2, then showed turn 2 as one file with the move
+named, and three files under *Show everything*.
+
+**Not verified.** ⌘F in the app (a TextKit 2 harness showed the find bar working and the view staying on
+TextKit 2). The five chords by keyboard: the actions were pressed as buttons. The pull request Files tab was
+built against the new browser and not opened. The overlap notice on screen: its count is unit-tested.
+
+**Found on the way.** A real haiku session was the first plan for the turn test. A project
+`.claude/settings.json` that pre-approves tools makes the CLI's trust dialog default to *No, exit*, so
+`-ClinicEnterAfter` closed the session. The synthetic hooks replaced it and are cheaper.
+
+Not committed: the working tree holds the change for review.

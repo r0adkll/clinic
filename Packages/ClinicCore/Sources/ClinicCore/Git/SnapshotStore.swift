@@ -26,6 +26,13 @@ public actor SnapshotStore {
 
     private struct Key: Hashable { var repoKey: String; var sessionId: SessionID }
 
+    // What `resolve`, `diff` and `stat` remember (ADR-183). Declared here because an extension cannot
+    // hold stored properties; `DiffTarget.swift` is where they are used.
+    struct CarryKey: Hashable { var repoRoot: String; var onto: String; var dirty: String; var clean: String }
+    var carriedTrees: [CarryKey: String] = [:]
+    var recentDiffs: [(pair: DiffPair, diff: UnifiedDiff)] = []
+    var stats: [DiffPair: DiffStat] = [:]
+
     public init(directory: URL = ClinicPaths.directory.appendingPathComponent("snapshots", isDirectory: true),
                 retention: TimeInterval = 14 * 24 * 60 * 60) {
         self.directory = directory
@@ -53,9 +60,12 @@ public actor SnapshotStore {
                                 indexFile: base.appendingPathComponent("index").path)
     }
 
-    private func snapshotsURL(_ repoRoot: String, _ sessionId: SessionID) -> URL {
+    func turnsDirectory(_ repoRoot: String) -> URL {
         repoDirectory(repoRoot).appendingPathComponent("turns", isDirectory: true)
-            .appendingPathComponent("\(sessionId.rawValue).json")
+    }
+
+    private func snapshotsURL(_ repoRoot: String, _ sessionId: SessionID) -> URL {
+        turnsDirectory(repoRoot).appendingPathComponent("\(sessionId.rawValue).json")
     }
 
     // MARK: Reading
@@ -88,9 +98,12 @@ public actor SnapshotStore {
     @discardableResult
     public func beginSession(_ session: SessionID, repoRoot: String, at date: Date = Date()) async -> String? {
         guard let tree = await snapshot(repoRoot) else { return nil }
+        let head = await GitRepository(root: repoRoot).headState()
         var s = snapshots(session: session, repoRoot: repoRoot)
         s.baselineTree = tree
         s.baselineAt = date
+        s.baselineCommit = head.commit
+        s.baselineBranch = head.branch
         save(s)
         return tree
     }
@@ -99,14 +112,22 @@ public actor SnapshotStore {
     @discardableResult
     public func beginTurn(_ session: SessionID, repoRoot: String, prompt: String?, at date: Date = Date()) async -> TurnSnapshot? {
         guard let tree = await snapshot(repoRoot) else { return nil }
+        // Where `HEAD` stands, read beside the tree (ADR-185): the pair alone cannot say whether a
+        // change was written or checked out.
+        let head = await GitRepository(root: repoRoot).headState()
         var s = snapshots(session: session, repoRoot: repoRoot)
         // A prompt arriving while a turn is open (an interrupt, or a Stop we never saw) closes the
         // old one where it stands rather than leaving it in flight forever.
-        if s.openTurn != nil { s.turns[s.turns.count - 1].headTree = tree; s.turns[s.turns.count - 1].endedAt = date }
-        if s.baselineTree == nil { s.baselineTree = tree; s.baselineAt = date }
+        if s.openTurn != nil {
+            s.turns[s.turns.count - 1].headTree = tree
+            s.turns[s.turns.count - 1].endedAt = date
+            s.turns[s.turns.count - 1].headCommit = head.commit
+            s.turns[s.turns.count - 1].headBranch = head.branch
+        }
+        if s.baselineTree == nil { s.baselineTree = tree; s.baselineAt = date; s.baselineCommit = head.commit; s.baselineBranch = head.branch }
         let turn = TurnSnapshot(sessionId: session, repoRoot: repoRoot, index: s.turns.count + 1,
                                 prompt: Self.firstLine(prompt), detail: Self.notificationSummary(prompt),
-                                startedAt: date, baseTree: tree)
+                                startedAt: date, baseTree: tree, baseCommit: head.commit, baseBranch: head.branch)
         s.turns.append(turn)
         save(s)
         return turn
@@ -117,8 +138,15 @@ public actor SnapshotStore {
     public func endTurn(_ session: SessionID, repoRoot: String, at date: Date = Date()) async -> TurnSnapshot? {
         var s = snapshots(session: session, repoRoot: repoRoot)
         guard s.openTurn != nil, let tree = await snapshot(repoRoot) else { return nil }
+        let head = await GitRepository(root: repoRoot).headState()
+        // Re-read: both awaits above let another event in, and saving the copy taken before them
+        // would write over whatever it recorded.
+        s = snapshots(session: session, repoRoot: repoRoot)
+        guard s.openTurn != nil else { return nil }
         s.turns[s.turns.count - 1].headTree = tree
         s.turns[s.turns.count - 1].endedAt = date
+        s.turns[s.turns.count - 1].headCommit = head.commit
+        s.turns[s.turns.count - 1].headBranch = head.branch
         save(s)
         return s.turns.last
     }
@@ -151,7 +179,7 @@ public actor SnapshotStore {
     /// Runs `work` after every write queued before it. Without this a hook's snapshot and the diff
     /// panel's refresh raced for the scratch `index.lock`; the loser failed, and a turn whose
     /// `UserPromptSubmit` or `Stop` snapshot lost was never opened or never closed (ADR-170).
-    private func exclusive<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+    func exclusive<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
         let previous = tail
         let task = Task {
             await previous?.value
@@ -238,6 +266,7 @@ public actor SnapshotStore {
     /// Deletes every snapshot Clinic holds. The next turn starts a fresh lineage.
     public func removeAll() {
         cache.removeAll()
+        carriedTrees.removeAll(); recentDiffs.removeAll(); stats.removeAll()
         try? fm.removeItem(at: directory)
     }
 

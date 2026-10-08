@@ -337,6 +337,30 @@ public actor GitRepository {
             let retry = await GitProcess.run(["add", "-A", "."], in: root, environment: env)
             guard retry.status == 0 else { throw retry.error(["add", "-A", "."]) }
         }
+        await addTrackedButIgnored(env)
+        return try await writeTree(env)
+    }
+
+    /// `add -A` leaves out a file that matches `.gitignore`, even one the repository tracks — a
+    /// force-added file, or one whose ignore rule came later. Its absence from the snapshot read as a
+    /// deletion against `HEAD`, and its edits were invisible to every turn (ADR-184). The user's own
+    /// index says which files those are; it is only read.
+    private func addTrackedButIgnored(_ env: [String: String]) async {
+        let listed = await GitProcess.run(["ls-files", "-ci", "--exclude-standard", "-z"], in: root)
+        guard listed.status == 0, !listed.stdout.isEmpty else { return }
+        // A file gone from disk has nothing to add, and naming it would fail the whole command.
+        let present = listed.stdout.split(separator: 0, omittingEmptySubsequences: true).filter {
+            FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(String(decoding: $0, as: UTF8.self)))
+        }
+        guard !present.isEmpty else { return }
+        var input = Data()
+        for path in present { input.append(contentsOf: path); input.append(0) }
+        var literal = env
+        literal["GIT_LITERAL_PATHSPECS"] = "1"
+        _ = await GitProcess.run(["add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"], in: root, stdin: input, environment: literal)
+    }
+
+    private func writeTree(_ env: [String: String]) async throws -> String {
         let out = try await git(["write-tree"], environment: env).stdoutString
         let sha = out.trimmingCharacters(in: .whitespacesAndNewlines)
         guard sha.count >= 40 else {
@@ -345,10 +369,123 @@ public actor GitRepository {
         return sha
     }
 
+    /// The user's index as a tree, **without writing to the repository** (ADR-183): `git write-tree`
+    /// against the real index would add tree objects to the user's object store, so it runs against a
+    /// copy of the index and writes into `scratch`. The blobs a staged file names are already in the
+    /// repository, which the scratch store reads through alternates.
+    ///
+    /// Throws while the index holds unmerged entries: a conflicted index is not a tree.
+    public func indexTree(_ scratch: GitObjectScratch) async throws -> String {
+        try scratch.prepare()
+        let located = try await git(["rev-parse", "--git-path", "index"]).stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let index = located.hasPrefix("/") ? located : (root as NSString).appendingPathComponent(located)
+        guard FileManager.default.fileExists(atPath: index) else { return try await emptyTree() }
+        let copy = scratch.indexFile + ".staged"
+        try? FileManager.default.removeItem(atPath: copy)
+        try? FileManager.default.removeItem(atPath: copy + ".lock")
+        try FileManager.default.copyItem(atPath: index, toPath: copy)
+        var env = scratch.environment(repoRoot: root)
+        env["GIT_INDEX_FILE"] = copy
+        return try await writeTree(env)
+    }
+
+    /// `onto`, with every path that differs between `clean` and `dirty` taken from `dirty` (ADR-185).
+    ///
+    /// This is how uncommitted work is carried across a checkout that moved: `clean` is the commit a
+    /// turn started on, `dirty` the snapshot taken there, and `onto` the commit the checkout moved to.
+    /// The result is the tree the turn would have started from had the checkout already been there.
+    /// Written through a scratch index of its own, so callers still serialise it with the snapshots.
+    public func tree(_ onto: String, carrying dirty: String, over clean: String, scratch: GitObjectScratch) async throws -> String {
+        guard clean != dirty else { return onto }
+        try scratch.prepare()
+        var env = scratch.environment(repoRoot: root)
+        let index = scratch.indexFile + ".carry"
+        env["GIT_INDEX_FILE"] = index
+        try? FileManager.default.removeItem(atPath: index)
+        try? FileManager.default.removeItem(atPath: index + ".lock")
+
+        // `:<old mode> <new mode> <old sha> <new sha> <status>\0<path>\0`, one pair per changed path.
+        let raw = try await git(["diff-tree", "-r", "--raw", "--no-renames", "--no-abbrev", "-z", clean, dirty], environment: env).stdout
+        let fields = raw.split(separator: 0, omittingEmptySubsequences: true)
+        var input = Data()
+        var i = 0
+        while i + 1 < fields.count {
+            let meta = String(decoding: fields[i], as: UTF8.self).split(separator: " ")
+            let path = fields[i + 1]
+            i += 2
+            guard meta.count >= 5 else { continue }
+            // Mode 0 removes the path, which is what a file deleted before the turn began needs.
+            let removed = meta[4].hasPrefix("D")
+            input.append(contentsOf: "\(removed ? "0" : String(meta[1])) \(meta[3])\t".utf8)
+            input.append(contentsOf: path)
+            input.append(0)
+        }
+        _ = try await git(["read-tree", onto], environment: env)
+        if !input.isEmpty {
+            _ = try await git(["update-index", "--replace", "-z", "--index-info"], stdin: input, environment: env)
+        }
+        return try await writeTree(env)
+    }
+
+    // MARK: Trees and commits (ADR-183, ADR-185)
+
+    /// The commit `HEAD` names and the branch it is on; both nil in a repository with no commits, and
+    /// the branch nil when detached.
+    public func headState() async -> (commit: String?, branch: String?) {
+        let r = await GitProcess.run(["rev-parse", "--verify", "-q", "HEAD"], in: root)
+        let commit = r.status == 0 ? r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return (commit.isEmpty ? nil : commit, await currentBranch())
+    }
+
+    /// The tree of nothing, which is what a root commit and an unborn branch diff against.
+    public func emptyTree() async throws -> String {
+        let out = try await git(["hash-object", "-t", "tree", "/dev/null"]).stdoutString
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The tree of a commit's first parent, or the empty tree for a root commit — the base `git show
+    /// -m --first-parent` diffs a commit against.
+    public func parentTree(of sha: String) async throws -> String {
+        let r = await GitProcess.run(["rev-parse", "--verify", "-q", "\(sha)^^{tree}"], in: root)
+        let tree = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.status == 0 && !tree.isEmpty ? tree : try await emptyTree()
+    }
+
+    public func mergeBase(_ a: String, _ b: String) async -> String? {
+        let r = await GitProcess.run(["merge-base", a, b], in: root)
+        let sha = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.status == 0 && !sha.isEmpty ? sha : nil
+    }
+
+    public func isAncestor(_ ancestor: String, of descendant: String) async -> Bool {
+        await GitProcess.run(["merge-base", "--is-ancestor", ancestor, descendant], in: root).status == 0
+    }
+
+    /// The newest commit on `head`'s first-parent line that was committed before `date`: the history
+    /// that was already there, as opposed to what has been committed since (ADR-185).
+    public func newestCommit(reachableFrom head: String, before date: Date) async -> String? {
+        let r = await GitProcess.run(["rev-list", "-1", "--first-parent", "--before=@\(Int(date.timeIntervalSince1970))", head], in: root)
+        let sha = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.status == 0 && !sha.isEmpty ? sha : nil
+    }
+
+    /// A file as it stands in a tree, when it is text of a size worth highlighting whole (ADR-186).
+    public func text(of path: String, in tree: String, scratch: GitObjectScratch?, limit: Int = 1_000_000) async -> String? {
+        try? scratch?.prepare()
+        let env = scratch?.environment(repoRoot: root) ?? [:]
+        let object = "\(tree):\(path)"
+        let size = await GitProcess.run(["cat-file", "-s", object], in: root, environment: env)
+        guard size.status == 0, let bytes = Int(size.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)), bytes <= limit else { return nil }
+        let blob = await GitProcess.run(["cat-file", "blob", object], in: root, environment: env)
+        guard blob.status == 0, !blob.stdout.contains(0) else { return nil }
+        return String(data: blob.stdout, encoding: .utf8)
+    }
+
     /// `--numstat` totals for a tree pair. Cheap next to a patch, which is what makes per-turn
     /// `+n −n` in the turn menu affordable.
     public func stat(from base: String, to head: String, scratch: GitObjectScratch?) async throws -> DiffStat {
         guard base != head else { return DiffStat() }
+        try scratch?.prepare()
         let env = scratch?.environment(repoRoot: root) ?? [:]
         let out = try await git(["diff-tree", "-r", "--numstat", "--no-color", base, head], environment: env).stdoutString
         return DiffStat(numstat: out)
@@ -362,10 +499,24 @@ public actor GitRepository {
 
     /// Unified diff between two trees. `scratch` must be the store the trees were written into,
     /// otherwise git cannot resolve them.
-    public func diff(from base: String, to head: String, scratch: GitObjectScratch?) async throws -> UnifiedDiff {
+    ///
+    /// `context` widens the lines of context around each change, and `paths` narrows the diff to
+    /// those files, which is how one file is re-read whole (ADR-188). A renamed file needs both of
+    /// its names in `paths`, or it reads as an addition.
+    public func diff(from base: String, to head: String, scratch: GitObjectScratch?,
+                     context: Int? = nil, paths: [String] = []) async throws -> UnifiedDiff {
         guard base != head else { return UnifiedDiff() }
-        let env = scratch?.environment(repoRoot: root) ?? [:]
-        let args = ["diff-tree", "-p", "-r", "--find-renames"] + Self.diffFlags + [base, head]
+        // Git refuses a `GIT_OBJECT_DIRECTORY` that does not exist, and two commits can be compared
+        // before any snapshot has made it.
+        try scratch?.prepare()
+        var env = scratch?.environment(repoRoot: root) ?? [:]
+        var args = ["diff-tree", "-p", "-r", "--find-renames"] + Self.diffFlags
+        if let context { args.append("-U\(context)") }
+        args += [base, head]
+        if !paths.isEmpty {
+            env["GIT_LITERAL_PATHSPECS"] = "1"
+            args += ["--"] + paths
+        }
         return UnifiedDiff.parse(try await git(args, environment: env).stdoutString)
     }
 
@@ -413,7 +564,9 @@ enum GitProcess {
     private static func runSync(_ args: [String], in directory: String, stdin: Data?, environment: [String: String]) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = ["git", "-C", directory] + args
+        // `core.quotepath=off`: paths arrive as UTF-8 rather than as octal escapes (ADR-184). The parser
+        // decodes the escapes too, for a diff that did not come from here.
+        p.arguments = ["git", "-c", "core.quotepath=off", "-C", directory] + args
         p.environment = Self.environment(adding: environment)
 
         let out = Pipe(), err = Pipe()

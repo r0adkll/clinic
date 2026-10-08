@@ -801,6 +801,18 @@ struct ClinicCommands: Commands {
             Button("Post a Sample Round") { tabs.postSampleGrillRound() }
                 .disabled(!tabs.canPostSampleGrillRound)
             Divider()
+            // ADR-188: reading a diff without the mouse, in the Diff panel or a pull request's files.
+            Button("Next Change") { tabs.frontDiffBrowser?.goToChange(1) }
+                .keyboardShortcut(key(.nextDiffChange)).disabled(tabs.frontDiffBrowser == nil)
+            Button("Previous Change") { tabs.frontDiffBrowser?.goToChange(-1) }
+                .keyboardShortcut(key(.previousDiffChange)).disabled(tabs.frontDiffBrowser == nil)
+            Button("Next Changed File") { tabs.frontDiffBrowser?.selectAdjacentFile(1) }
+                .keyboardShortcut(key(.nextDiffFile)).disabled(tabs.frontDiffBrowser == nil)
+            Button("Previous Changed File") { tabs.frontDiffBrowser?.selectAdjacentFile(-1) }
+                .keyboardShortcut(key(.previousDiffFile)).disabled(tabs.frontDiffBrowser == nil)
+            Button("Mark File Viewed") { tabs.frontDiffBrowser?.toggleViewed() }
+                .keyboardShortcut(key(.markDiffFileViewed)).disabled(tabs.frontDiffBrowser == nil)
+            Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)
             Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)

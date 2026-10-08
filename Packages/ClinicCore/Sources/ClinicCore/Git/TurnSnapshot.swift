@@ -69,9 +69,22 @@ public struct TurnSnapshot: Codable, Sendable, Hashable, Identifiable {
     public var endedAt: Date?
     public var baseTree: String
     public var headTree: String?
+    /// Where `HEAD` stood when each tree was taken (ADR-185). A tree pair holds whatever moved the
+    /// tree, and these are what tell a turn's own edits from a checkout that moved under it. nil for
+    /// turns recorded before this existed, and in a repository with no commits; the branch is nil
+    /// when detached.
+    public var baseCommit: String?
+    public var baseBranch: String?
+    public var headCommit: String?
+    public var headBranch: String?
 
     public init(sessionId: SessionID, repoRoot: String, index: Int, prompt: String? = nil, detail: String? = nil,
-                startedAt: Date, endedAt: Date? = nil, baseTree: String, headTree: String? = nil) {
+                startedAt: Date, endedAt: Date? = nil, baseTree: String, headTree: String? = nil,
+                baseCommit: String? = nil, baseBranch: String? = nil, headCommit: String? = nil, headBranch: String? = nil) {
+        self.baseCommit = baseCommit
+        self.baseBranch = baseBranch
+        self.headCommit = headCommit
+        self.headBranch = headBranch
         self.sessionId = sessionId
         self.repoRoot = repoRoot
         self.index = index
@@ -122,9 +135,15 @@ public struct SessionSnapshots: Codable, Sendable, Equatable {
     /// and clear restarts deliberately leave it alone, so "Session" means "since this attach".
     public var baselineTree: String?
     public var baselineAt: Date?
+    /// Where `HEAD` stood at the baseline (ADR-185); nil before this was recorded.
+    public var baselineCommit: String?
+    public var baselineBranch: String?
     public var turns: [TurnSnapshot]
 
-    public init(sessionId: SessionID, repoRoot: String, baselineTree: String? = nil, baselineAt: Date? = nil, turns: [TurnSnapshot] = []) {
+    public init(sessionId: SessionID, repoRoot: String, baselineTree: String? = nil, baselineAt: Date? = nil,
+                baselineCommit: String? = nil, baselineBranch: String? = nil, turns: [TurnSnapshot] = []) {
+        self.baselineCommit = baselineCommit
+        self.baselineBranch = baselineBranch
         self.sessionId = sessionId
         self.repoRoot = repoRoot
         self.baselineTree = baselineTree

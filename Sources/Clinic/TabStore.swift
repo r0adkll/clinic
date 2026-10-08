@@ -935,6 +935,13 @@ final class TabStore {
     /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
     var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
     var isImagesPaneFront: Bool { selectedTab?.panel.isFront(.attachments) ?? false }
+    /// The diff the reader is looking at: the Diff panel's, or a pull request pane's (ADR-188).
+    var frontDiffBrowser: DiffBrowser? {
+        guard let panel = selectedTab?.panel, panel.isVisible, let pane = panel.selected else { return nil }
+        let browser = pane.diff?.browser ?? pane.changes
+        return browser?.isEmpty == false ? browser : nil
+    }
+
     var canToggleBrowserList: Bool { isFilesPaneFront || isImagesPaneFront }
     var browserListShown: Bool { isImagesPaneFront ? ImagePrefs.shared.showList : EditorPrefs.shared.showTree }
 
@@ -1037,7 +1044,9 @@ final class TabStore {
         case .grill:
             guard tab.sessionId != nil else { return nil }
             pane.grill = GrillPaneModel()
-        case .pr, .run:
+        case .pr:
+            pane.changes = DiffBrowser()
+        case .run:
             break
         }
         return pane

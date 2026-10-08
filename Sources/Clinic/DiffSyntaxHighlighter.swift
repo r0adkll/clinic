@@ -64,54 +64,92 @@ struct DiffSyntaxTheme: Sendable, Equatable {
     }
 }
 
-/// Syntax-highlights a diff with tree-sitter (ADR-080).
+/// Syntax-highlights a diff with tree-sitter (ADR-080, ADR-186).
 ///
-/// A hunk is not a file, so each side of a hunk is parsed as its own snippet: the new side (context
-/// plus additions) and the old side (context plus deletions). tree-sitter is error tolerant, so a
-/// fragment still yields the captures that matter for reading a diff — keywords, strings, comments,
-/// types — without fetching and parsing both whole files for every hunk.
+/// Where the file's own text can be had — a diff between two trees Clinic can read — each side is
+/// parsed **whole** and its colours mapped onto the diff by line number. That is the only parse that
+/// is right: a hunk that opens inside a string or a block comment has no way to know it.
+///
+/// Where it cannot (a pull request's diff, a file too large to be worth it), each side of each hunk
+/// is parsed as its own snippet: the new side (context plus additions) and the old side (context
+/// plus deletions). tree-sitter is error tolerant, so a fragment still yields the captures that
+/// matter for reading a diff. One snippet per hunk, never the hunks joined: lines that are not
+/// neighbours in the file are not neighbours to a parser either, and an unbalanced hunk used to
+/// mis-colour every hunk after it.
 actor DiffSyntaxHighlighter {
     /// Compiling a highlights query is the expensive part, so one per language is kept for the life
     /// of the app; parsers are cheap and made per call.
     private var queries: [String: Query] = [:]
     private var unsupported: Set<String> = []
 
-    /// Coloured ranges for the line rows of `files`, keyed by row id, in each row's own
-    /// coordinates. Rows with no language, or no captures, are simply absent and render plain.
+    /// Coloured ranges for the line rows of `file`, keyed by row id, in each row's own coordinates.
+    /// Rows with no language, or no captures, are simply absent and render plain.
     ///
-    /// Ranges rather than `AttributedString`s (ADR-100): the body is a text view, so what it needs
-    /// is something to apply to its storage, and ranges cross the actor boundary far more cheaply.
-    ///
-    /// Cancellation is checked per file, not just on return: a superseded pass that runs to
-    /// completion still holds this actor, and a dozen of them queued behind each other turned a
-    /// 1.5 s highlight into 15 s of pegged CPU.
-    func highlights(for files: [DiffFileRows], theme: DiffSyntaxTheme) async -> [String: [DiffToken]] {
+    /// `new` and `old` are the file's text on each side, when the caller could read them.
+    func highlights(for file: DiffFileRows, new: String? = nil, old: String? = nil, theme: DiffSyntaxTheme) async -> [String: [DiffToken]] {
+        guard let grammar = grammar(for: file.file.path) else { return [:] }
         var out: [String: [DiffToken]] = [:]
-        for file in files {
+        // Old side first: a context line is on both sides, and where the two disagree — the same
+        // text inside a comment before and outside it after — the new side is the one being read.
+        for side in [Side.old, .new] {
             if Task.isCancelled { return out }
-            guard let grammar = grammar(for: file.file.path) else { continue }
-            for (_, rows) in Self.sides(of: file) where !rows.isEmpty {
-                merge(&out, snippet: rows, query: grammar.query, language: grammar.language, theme: theme)
+            if let text = side == .new ? new : old {
+                wholeFile(&out, text: text, rows: file.rows, side: side, grammar: grammar, theme: theme)
+            } else {
+                for snippet in Self.snippets(of: file, side: side) where !snippet.isEmpty {
+                    merge(&out, snippet: snippet, query: grammar.query, language: grammar.language, theme: theme)
+                }
             }
-            await Task.yield()   // a 40-file page must not hold the actor for its whole duration
+            await Task.yield()
         }
         return out
     }
 
-    /// The two snippets a hunk contributes: (row id, line text) in source order for each side.
-    private static func sides(of file: DiffFileRows) -> [(String, [(String, String)])] {
-        var newSide: [(String, String)] = []
-        var oldSide: [(String, String)] = []
-        for row in file.rows {
+    private enum Side { case old, new }
+
+    /// Parses one side's whole text and hands each diff row the colours of the file line it shows.
+    private func wholeFile(_ out: inout [String: [DiffToken]], text: String, rows: [DiffRow], side: Side,
+                           grammar: Grammar, theme: DiffSyntaxTheme) {
+        // One entry per file line, keyed by its 1-based number.
+        var lines: [(String, String)] = []
+        var number = 1
+        for line in text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false) {
+            lines.append((String(number), String(Substring(line))))
+            number += 1
+        }
+        var byLine: [String: [DiffToken]] = [:]
+        merge(&byLine, snippet: lines, query: grammar.query, language: grammar.language, theme: theme)
+        guard !byLine.isEmpty else { return }
+        for row in rows {
             guard case .line(let line) = row.kind else { continue }
-            switch line.kind {
-            case .addition: newSide.append((row.id, line.text))
-            case .deletion: oldSide.append((row.id, line.text))
-            case .context: newSide.append((row.id, line.text)); oldSide.append((row.id, line.text))
-            case .noNewline: break
+            let number: Int?
+            switch (line.kind, side) {
+            case (.addition, .new), (.context, .new): number = line.newLineNumber
+            case (.deletion, .old), (.context, .old): number = line.oldLineNumber
+            default: number = nil
+            }
+            if let number, let tokens = byLine[String(number)] { out[row.id] = tokens }
+        }
+    }
+
+    /// One side's lines, hunk by hunk: (row id, line text) in source order.
+    private static func snippets(of file: DiffFileRows, side: Side) -> [[(String, String)]] {
+        var out: [[(String, String)]] = []
+        var current: [(String, String)] = []
+        for row in file.rows {
+            switch row.kind {
+            case .hunk:
+                out.append(current)
+                current = []
+            case .line(let line):
+                switch (line.kind, side) {
+                case (.addition, .new), (.deletion, .old), (.context, _): current.append((row.id, line.text))
+                default: break
+                }
             }
         }
-        return [("new", newSide), ("old", oldSide)]
+        out.append(current)
+        return out
     }
 
     private func merge(_ out: inout [String: [DiffToken]], snippet rows: [(String, String)],
@@ -119,10 +157,15 @@ actor DiffSyntaxHighlighter {
         // One text for the whole side, remembering where each row starts so captures map back.
         var text = ""
         var spans: [(id: String, range: NSRange)] = []
+        // A running offset, not `(text as NSString).length` per line: that walks the text so far each
+        // time, which is quadratic once the snippet is a whole file.
+        var offset = 0
         for (id, line) in rows {
-            let start = (text as NSString).length
-            text += line + "\n"
-            spans.append((id, NSRange(location: start, length: (line as NSString).length)))
+            let length = line.utf16.count
+            text += line
+            text += "\n"
+            spans.append((id, NSRange(location: offset, length: length)))
+            offset += length + 1
         }
         guard !text.isEmpty else { return }
 
@@ -141,7 +184,9 @@ actor DiffSyntaxHighlighter {
 
         // Bucket captures into their lines in one pass. Filtering the whole capture list per line
         // is O(lines x captures) — on an 1,800-line file that is tens of millions of comparisons.
-        captures.sort { $0.0.location < $1.0.location }
+        // Stable on purpose: where two captures start at the same place the later one in query order
+        // must still be applied last, and `sort` alone does not promise to keep them in order.
+        captures = captures.enumerated().sorted { ($0.element.0.location, $0.offset) < ($1.element.0.location, $1.offset) }.map(\.element)
         var buckets = [[(NSRange, DiffSyntaxTheme.RGBA)]](repeating: [], count: spans.count)
         var cursor = 0
         for (index, span) in spans.enumerated() {

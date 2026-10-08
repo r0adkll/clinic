@@ -10,6 +10,12 @@ tags: [adr, git, diff, ui, panel, performance]
 > view stand. What went with the continuous scroll: the in-text file header lines and their
 > disclosure markers, the click-to-collapse hit test, the floating "which file am I in" header, and
 > the "Show more" footer. The body now renders one file and takes a source and nothing else.
+>
+> **Amended 2026-10-06.** Highlighting is applied to the text in place, and only a different file returns the
+> body to the top ([[ADR-186 The Diff Body Changes In Place]]). Characters a text view breaks a line at are
+> shown as stand-ins, so one document line stays one visual line
+> ([[ADR-184 The Diff Parser Reads What Git Writes]]). ⌘F is wired up
+> ([[ADR-188 The Diff Panel Is For Reviewing]]).
 
 ## Context
 User (2026-09-10): *"The Diff view still feels like its not scrolling smoothly. For comparison, when

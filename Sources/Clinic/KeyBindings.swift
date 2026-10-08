@@ -9,6 +9,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
+    /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
+    case nextDiffChange, previousDiffChange, nextDiffFile, previousDiffFile, markDiffFileViewed
     case run, stopRun, chooseRunConfiguration
 
     var id: String { rawValue }
@@ -50,6 +52,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .toggleFileTree: "Show / Hide Browser List"
         case .quickLookImage: "Quick Look Media"
         case .copyGrillRound: "Copy Grill Round as Markdown"
+        case .nextDiffChange: "Next Change in Diff"
+        case .previousDiffChange: "Previous Change in Diff"
+        case .nextDiffFile: "Next File in Diff"
+        case .previousDiffFile: "Previous File in Diff"
+        case .markDiffFileViewed: "Mark Diff File Viewed"
         case .nextPanelTab: "Next Panel Tab"
         case .previousPanelTab: "Previous Panel Tab"
         case .closePanelTab: "Close Panel Tab"
@@ -68,7 +75,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage, .copyGrillRound,
-             .nextPanelTab, .previousPanelTab, .closePanelTab: "Panel"
+             .nextPanelTab, .previousPanelTab, .closePanelTab,
+             .nextDiffChange, .previousDiffChange, .nextDiffFile, .previousDiffFile, .markDiffFileViewed: "Panel"
         case .nextTab, .previousTab: "Tabs"
         case .run, .stopRun, .chooseRunConfiguration: "Run"
         }
@@ -118,6 +126,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         // Not ⌘C: that is Edit ▸ Copy, and a Panel item claiming it would shadow copying in the
         // terminal window-wide. ⌃ keeps it out of the way (ADR-131).
         case .copyGrillRound: "cmd+ctrl+c"
+        // ADR-188. The arrows say direction; ⌃ steps a change and ⌥ a file, the way ⌥ is the larger
+        // step everywhere else on the Mac. Neither pair is a text-movement chord in a terminal.
+        case .nextDiffChange: "cmd+ctrl+down"
+        case .previousDiffChange: "cmd+ctrl+up"
+        case .nextDiffFile: "cmd+opt+down"
+        case .previousDiffFile: "cmd+opt+up"
+        case .markDiffFileViewed: "cmd+ctrl+v"
         case .nextPanelTab: "cmd+ctrl+]"
         case .previousPanelTab: "cmd+ctrl+["
         case .closePanelTab: "cmd+ctrl+w"

@@ -20,6 +20,7 @@ struct DiffPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if model.isBound, model.hasRepo { contextStrip }
             Divider()
             if !model.isBound {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,9 +36,7 @@ struct DiffPanel: View {
         .task(id: BindKey(directory: tab.pwd ?? tab.projectPath, sessionId: tab.sessionId)) {
             await model.bind(directory: tab.pwd ?? tab.projectPath, sessionId: tab.sessionId, snapshots: tabs.snapshots)
         }
-        .onChange(of: tabs.snapshots.revision) {
-            Task { await model.reload() }
-        }
+        .onChange(of: tabs.snapshots.revision) { model.reload() }
     }
 
     private struct BindKey: Hashable { var directory: String; var sessionId: SessionID? }
@@ -45,12 +44,101 @@ struct DiffPanel: View {
     @ViewBuilder
     private var content: some View {
         if let reason = model.emptyReason {
-            ContentUnavailableView("No changes", systemImage: "equal.circle", description: Text(reason))
+            // An empty scope says where the changes are (ADR-188): the counts are already known, and
+            // the alternative is opening each scope in turn to find out.
+            ContentUnavailableView {
+                Label("No changes", systemImage: "equal.circle")
+            } description: {
+                Text(reason)
+            } actions: {
+                ForEach(model.scopesWithChanges, id: \.scope) { other in
+                    Button { model.scope = other.scope } label: {
+                        Label("\(other.scope.title): \(Self.files(other.stat.files))", systemImage: other.scope.symbol)
+                    }
+                    .controlSize(.small)
+                }
+            }
         } else if let error = model.error, model.files.isEmpty {
             ContentUnavailableView("Could not read the diff", systemImage: "exclamationmark.triangle", description: Text(error))
+        } else if model.isLoading, model.files.isEmpty {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            DiffBrowserView(browser: model.browser, showTree: $showTree, treeWidth: $treeWidth)
+            DiffBrowserView(browser: model.browser, showTree: $showTree, treeWidth: $treeWidth, openFile: openInFiles)
         }
+    }
+
+    private static func files(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
+
+    /// A path of the diff, opened in the Files panel beside it.
+    private func openInFiles(_ path: String) {
+        guard let root = model.repo?.root else { return }
+        tabs.showPane(.files, in: tab)
+        tab.panel.pane(.files)?.editor?.open(absolute: (root as NSString).appendingPathComponent(path))
+    }
+
+    // MARK: What is being compared (ADR-187)
+
+    /// One quiet line under the header naming both sides of the diff, and under it whatever the
+    /// reader should know before trusting it: a newer turn held back, a checkout that moved, another
+    /// session writing to the same files, a refresh that failed. Each is a line, not a dialog — the
+    /// diff stays on screen and readable under all of them.
+    @ViewBuilder
+    private var contextStrip: some View {
+        let notices = self.notices
+        if model.comparison != nil || !notices.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if let comparison = model.comparison {
+                    HStack(spacing: 6) {
+                        Text(comparison).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        if model.browser.viewedCount > 0 {
+                            Text("\(model.browser.viewedCount) of \(model.browser.fileCount) viewed").fixedSize()
+                        }
+                    }
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                ForEach(notices) { notice in DiffNoticeRow(notice: notice) }
+            }
+            .padding(.horizontal, PaneMetrics.padding)
+            .padding(.top, 1).padding(.bottom, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+        }
+    }
+
+    private var notices: [DiffNotice] {
+        var out: [DiffNotice] = []
+        if let pending = model.pendingTurn {
+            out.append(DiffNotice(id: "pending", symbol: "arrow.down.circle.fill", tint: .accent,
+                                  text: "Turn #\(pending.index) has changes: \(pending.label)",
+                                  action: "Show") { model.showPendingTurn() })
+        }
+        if let move = model.resolution?.move {
+            let what = model.scope == .session ? "since this session attached" : "during this turn"
+            let moved = move.changedBranch
+                ? "The checkout moved from \(move.fromBranch ?? String(move.fromCommit.prefix(7))) to \(move.toBranch ?? String(move.toCommit.prefix(7))) \(what)."
+                : "The checkout moved to other commits \(what) (\(move.fromCommit.prefix(7)) to \(move.toCommit.prefix(7)))."
+            if model.showsCheckoutMove {
+                out.append(DiffNotice(id: "move", symbol: "arrow.triangle.swap", tint: .secondary,
+                                      text: moved + " Showing everything that differs, including what the move brought.",
+                                      action: "Only its own changes") { model.showsCheckoutMove = false })
+            } else {
+                out.append(DiffNotice(id: "move", symbol: "arrow.triangle.swap", tint: .secondary,
+                                      text: moved + " Showing only what was changed on top of that.",
+                                      action: "Show everything") { model.showsCheckoutMove = true })
+            }
+        }
+        if model.overlappingSessions > 0 {
+            let who = model.overlappingSessions == 1 ? "Another session was" : "\(model.overlappingSessions) other sessions were"
+            out.append(DiffNotice(id: "overlap", symbol: "person.2", tint: .secondary,
+                                  text: "\(who) changing this checkout during this turn. Their changes are in here too."))
+        }
+        if let error = model.error, !model.files.isEmpty {
+            out.append(DiffNotice(id: "error", symbol: "exclamationmark.triangle.fill", tint: .orange,
+                                  text: "Could not refresh, so this may be out of date: \(error)"))
+        }
+        return out
     }
 
     // MARK: Header
@@ -62,6 +150,9 @@ struct DiffPanel: View {
             scopeMenu
             secondaryControl
             Spacer(minLength: 4)
+            // Only while a selection the reader made is on its way. A refresh of what is on screen
+            // shows nothing: the totals blinking into a spinner on every file event read as the
+            // panel being unsure of itself (ADR-183).
             if model.isLoading {
                 ProgressView().controlSize(.small)
             } else if !model.files.isEmpty {
@@ -77,7 +168,8 @@ struct DiffPanel: View {
         Menu {
             Picker("Scope", selection: $model.scope) {
                 ForEach(DiffPanelModel.Scope.allCases) { scope in
-                    Label(scope.title, systemImage: scope.symbol).tag(scope)
+                    // With what each holds (ADR-188), so an empty scope is known before it is opened.
+                    Label(scope.title + scopeCount(scope), systemImage: scope.symbol).tag(scope)
                 }
             }
             .pickerStyle(.inline).labelsHidden()
@@ -86,6 +178,11 @@ struct DiffPanel: View {
         }
         .menuStyle(.borderlessButton).fixedSize()
         .help("What the diff is showing")
+    }
+
+    private func scopeCount(_ scope: DiffPanelModel.Scope) -> String {
+        guard let stat = model.scopeStats[scope] else { return "" }
+        return stat.isEmpty ? "  ·  no changes" : "  ·  \(Self.files(stat.files))"
     }
 
     /// One control per scope: which turn, which side of the index, which commit.
@@ -126,7 +223,8 @@ struct DiffPanel: View {
         return ScrollView {
             PopoverMenu(width: 340) {
                 PopoverMenuRow(title: "Latest changes", subtitle: followingSubtitle, checked: model.selectedTurnId == nil) {
-                    model.selectedTurnId = nil
+                    // Also what takes the panel to a newer turn it was holding back from (ADR-187).
+                    model.showPendingTurn()
                 } icon: { Image(systemName: "arrow.down.to.line") }
                 if !offered.isEmpty { PopoverMenuDivider() }
                 ForEach(offered) { turn in
@@ -166,7 +264,10 @@ struct DiffPanel: View {
         var line = Text("#\(turn.index)")
         if turn.isInFlight { line = line + separator + Text("running") }
         else if turn.isEmpty { line = line + separator + Text("no changes") }
-        else if let stat = model.turnStats[turn.id] {
+        else if let stat = model.turnStats[turn.id], stat.isEmpty {
+            // Its trees differ and none of it is its own work (ADR-185).
+            line = line + separator + Text("only moved the checkout")
+        } else if let stat = model.turnStats[turn.id] {
             let additions = Text("+\(stat.additions)"), deletions = Text("−\(stat.deletions)")
             line = line + separator
                 + (highlighted ? additions : additions.foregroundStyle(.green)) + Text(" ")
@@ -212,5 +313,52 @@ struct DiffPanel: View {
         guard let s = model.status else { return "All commits" }
         let name = s.branch ?? (s.isDetached ? "detached" : "—")
         return s.ahead + s.behind > 0 ? "\(name) ↑\(s.ahead) ↓\(s.behind)" : name
+    }
+}
+
+/// One line under the diff panel's header (ADR-187): something true about the diff on screen that
+/// its lines cannot say, and at most one thing to do about it.
+struct DiffNotice: Identifiable {
+    let id: String
+    var symbol: String
+    var tint: Color
+    var text: String
+    var action: String?
+    var perform: (() -> Void)?
+
+    init(id: String, symbol: String, tint: Color, text: String, action: String? = nil, perform: (() -> Void)? = nil) {
+        self.id = id
+        self.symbol = symbol
+        self.tint = tint
+        self.text = text
+        self.action = action
+        self.perform = perform
+    }
+}
+
+private struct DiffNoticeRow: View {
+    let notice: DiffNotice
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: notice.symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(notice.tint)
+                .frame(width: 13)
+            Text(notice.text)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary.opacity(0.85))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(notice.text)
+            Spacer(minLength: 4)
+            if let action = notice.action, let perform = notice.perform {
+                Button(action, action: perform)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accent)
+                    .fixedSize()
+            }
+        }
     }
 }

@@ -8,14 +8,19 @@ public struct UnifiedDiff: Sendable, Equatable {
 
     public init(files: [UnifiedDiffFile] = []) { self.files = files }
 
+    /// Lines are split on the *scalar* `\n`, never the `Character` (ADR-184): `"\r\n"` is one
+    /// `Character` that does not equal `"\n"`, so splitting a `String` left every line of a CRLF file
+    /// joined to the next and a whole hunk parsed as one line with no additions or deletions.
     public static func parse(_ text: String) -> UnifiedDiff {
         var parser = Parser()
-        var pieces = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var pieces = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)
         if pieces.last?.isEmpty == true { pieces.removeLast() }   // trailing newline, not an empty line
-        for raw in pieces {
-            var line = String(raw)
-            if line.hasSuffix("\r") { line.removeLast() }
-            parser.feed(line)
+        for var raw in pieces {
+            // A CRLF file's lines end in `\r` before the diff's own `\n`. It is the line's ending, not
+            // its text, so it is recorded on the line rather than shown in it.
+            let carriageReturn = raw.last == "\r"
+            if carriageReturn { raw.removeLast() }
+            parser.feed(String(Substring(raw)), carriageReturn: carriageReturn)
         }
         return UnifiedDiff(files: parser.finish())
     }
@@ -43,8 +48,75 @@ public struct UnifiedDiffFile: Sendable, Equatable, Identifiable {
 
     public var path: String { newPath ?? oldPath ?? "" }
     public var id: String { path }
+
+    /// The path this file had before, when it is a rename or a copy.
+    public var renamedFrom: String? {
+        guard !isNew, !isDeleted, let old = oldPath, let new = newPath, old != new else { return nil }
+        return old
+    }
+
+    /// `(old, new)` from the `old mode` / `new mode` header lines, e.g. a file made executable.
+    public var modeChange: (old: String, new: String)? {
+        var old: String?, new: String?
+        for line in headerLines {
+            if line.hasPrefix("old mode ") { old = String(line.dropFirst("old mode ".count)) }
+            if line.hasPrefix("new mode ") { new = String(line.dropFirst("new mode ".count)) }
+        }
+        guard let old, let new else { return nil }
+        return (old, new)
+    }
+
+    /// True when every changed line differs from its counterpart only in its line ending (ADR-184):
+    /// the diff a CRLF ↔ LF conversion produces, which otherwise reads as every line replaced by itself.
+    public var changesOnlyLineEndings: Bool {
+        var sawChange = false
+        for hunk in hunks {
+            let removed = hunk.lines.filter { $0.kind == .deletion }
+            let added = hunk.lines.filter { $0.kind == .addition }
+            guard removed.count == added.count else { return false }
+            for (a, b) in zip(removed, added) {
+                guard a.text == b.text, a.endsWithCarriageReturn != b.endsWithCarriageReturn else { return false }
+                sawChange = true
+            }
+        }
+        return sawChange
+    }
+
+    /// Changes when the file's diff does and not otherwise, cheaply: the `index` line names both blobs.
+    /// A diff with no `index` line falls back to its shape. What a "viewed" mark is kept against (ADR-188).
+    public var contentKey: String {
+        if let index = headerLines.first(where: { $0.hasPrefix("index ") }) { return index }
+        return "\(hunks.count)/\(additions)/\(deletions)/\(hunks.first?.headerText ?? "")"
+    }
     public var additions: Int { hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .addition }.count } }
     public var deletions: Int { hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .deletion }.count } }
+}
+
+/// What a file's diff has to show (ADR-188). Most are text; the rest have no lines at all, and an
+/// empty body says nothing about why.
+public enum DiffFileBody: Sendable, Equatable {
+    case text
+    case binary
+    /// Renamed or copied with its contents untouched.
+    case renamed(from: String)
+    /// Only the file's mode changed, e.g. made executable.
+    case mode(old: String, new: String)
+    /// Every changed line differs only in its line ending.
+    case lineEndings
+    /// Added or deleted with nothing in it.
+    case empty
+}
+
+extension UnifiedDiffFile {
+    public var body: DiffFileBody {
+        if isBinary { return .binary }
+        if hunks.isEmpty {
+            if let from = renamedFrom { return .renamed(from: from) }
+            if let mode = modeChange { return .mode(old: mode.old, new: mode.new) }
+            return .empty
+        }
+        return changesOnlyLineEndings ? .lineEndings : .text
+    }
 }
 
 public struct DiffHunk: Sendable, Equatable, Identifiable {
@@ -80,21 +152,27 @@ public struct DiffLine: Sendable, Equatable, Identifiable {
     public var text: String
     public var oldLineNumber: Int?
     public var newLineNumber: Int?
+    /// The line ended `\r\n` in the file. Kept off `text` so a CRLF file reads like any other.
+    public var endsWithCarriageReturn: Bool
 
-    public init(id: Int, kind: Kind, text: String, oldLineNumber: Int? = nil, newLineNumber: Int? = nil) {
+    public init(id: Int, kind: Kind, text: String, oldLineNumber: Int? = nil, newLineNumber: Int? = nil,
+                endsWithCarriageReturn: Bool = false) {
         self.id = id
         self.kind = kind
         self.text = text
         self.oldLineNumber = oldLineNumber
         self.newLineNumber = newLineNumber
+        self.endsWithCarriageReturn = endsWithCarriageReturn
     }
+
+    private var ending: String { endsWithCarriageReturn ? "\r" : "" }
 
     /// The line as it appears in a patch (with its prefix character).
     var patchText: String {
         switch kind {
-        case .context: return " " + text
-        case .addition: return "+" + text
-        case .deletion: return "-" + text
+        case .context: return " " + text + ending
+        case .addition: return "+" + text + ending
+        case .deletion: return "-" + text + ending
         case .noNewline: return "\\ " + text
         }
     }
@@ -133,7 +211,7 @@ extension UnifiedDiffFile {
                 if selectedLineIds.contains(line.id) {
                     body.append(line.patchText); oldCount += 1
                 } else {
-                    body.append(" " + line.text); oldCount += 1; newCount += 1
+                    body.append(" " + line.text + (line.endsWithCarriageReturn ? "\r" : "")); oldCount += 1; newCount += 1
                 }
                 keptPrevious = true
             case .noNewline:
@@ -165,7 +243,11 @@ private struct Parser {
     private var sawOldHeader = false   // `---` seen for the current file
     private var sawNewHeader = false   // `+++` seen for the current file
 
-    mutating func feed(_ line: String) {
+    /// Whether the line being fed ended `\r\n`; read by `appendLine`.
+    private var carriageReturn = false
+
+    mutating func feed(_ line: String, carriageReturn: Bool = false) {
+        self.carriageReturn = carriageReturn
         if hunk != nil && (oldRemaining > 0 || newRemaining > 0) {
             if consumeHunkLine(line) { return }
         }
@@ -206,9 +288,9 @@ private struct Parser {
         } else if line.hasPrefix("deleted file mode") {
             current?.isDeleted = true
         } else if line.hasPrefix("rename from ") || line.hasPrefix("copy from ") {
-            current?.oldPath = String(line.drop(while: { $0 != " " }).dropFirst().drop(while: { $0 != " " }).dropFirst())
+            current?.oldPath = Self.unquote(String(line.drop(while: { $0 != " " }).dropFirst().drop(while: { $0 != " " }).dropFirst()))
         } else if line.hasPrefix("rename to ") || line.hasPrefix("copy to ") {
-            current?.newPath = String(line.drop(while: { $0 != " " }).dropFirst().drop(while: { $0 != " " }).dropFirst())
+            current?.newPath = Self.unquote(String(line.drop(while: { $0 != " " }).dropFirst().drop(while: { $0 != " " }).dropFirst()))
         } else if line.hasPrefix("Binary files ") || line.hasPrefix("GIT binary patch") {
             current?.isBinary = true
         }
@@ -313,7 +395,8 @@ private struct Parser {
     private mutating func appendLine(kind: DiffLine.Kind, text: String, old: Int?, new: Int?) {
         guard hunk != nil else { return }
         let id = hunk!.lines.count
-        hunk!.lines.append(DiffLine(id: id, kind: kind, text: text, oldLineNumber: old, newLineNumber: new))
+        hunk!.lines.append(DiffLine(id: id, kind: kind, text: text, oldLineNumber: old, newLineNumber: new,
+                                    endsWithCarriageReturn: carriageReturn && kind != .noNewline))
     }
 
     /// Path from a `---`/`+++` header: strips a trailing tab-separated timestamp, quotes, and the a//b/ prefix; nil for /dev/null.
@@ -330,9 +413,12 @@ private struct Parser {
     private static func gitHeaderPaths(_ raw: Substring) -> (String?, String?) {
         let s = String(raw)
         if s.hasPrefix("\"") {
-            // Quoted paths: "a/x y" "b/x y"
-            let parts = s.split(separator: "\" \"", maxSplits: 1).map { unquote(String($0)) }
-            if parts.count == 2 { return (strip(parts[0], "a/"), strip(parts[1], "b/")) }
+            // Quoted paths: "a/x y" "b/x y". The split eats the inner quotes, so each half is put back
+            // into the form `unquote` expects.
+            let parts = s.split(separator: "\" \"", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                return (strip(unquote(parts[0] + "\""), "a/"), strip(unquote("\"" + parts[1]), "b/"))
+            }
         }
         if let r = s.range(of: " b/") {
             return (strip(String(s[..<r.lowerBound]), "a/"), strip(String(s[r.upperBound...]), ""))
@@ -347,16 +433,42 @@ private struct Parser {
         return p.hasPrefix(prefix) ? String(p.dropFirst(prefix.count)) : p
     }
 
-    private static func unquote(_ s: String) -> String {
-        var p = s
-        if p.hasPrefix("\"") { p.removeFirst() }
-        if p.hasSuffix("\"") { p.removeLast() }
-        // Minimal C-style unescaping for the common cases git emits.
-        if p.contains("\\") {
-            p = p.replacingOccurrences(of: "\\\"", with: "\"")
-                .replacingOccurrences(of: "\\t", with: "\t")
-                .replacingOccurrences(of: "\\\\", with: "\\")
+    /// Undoes git's C-style path quoting (ADR-184). Git quotes a path that holds a quote, a backslash,
+    /// a control character or — unless `core.quotepath` is off — any byte above 0x7f, which it writes
+    /// as an octal escape per *byte*, so `é` arrives as `\\303\\251` and has to be decoded as UTF-8.
+    /// A path that is not quoted is returned as it is: it has nothing escaped in it.
+    static func unquote(_ s: String) -> String {
+        guard s.count >= 2, s.hasPrefix("\""), s.hasSuffix("\"") else { return s }
+        let input = Array(s.utf8.dropFirst().dropLast())
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(input.count)
+        var i = 0
+        while i < input.count {
+            let byte = input[i]
+            i += 1
+            guard byte == UInt8(ascii: "\\"), i < input.count else { bytes.append(byte); continue }
+            let escape = input[i]
+            i += 1
+            switch escape {
+            case UInt8(ascii: "a"): bytes.append(0x07)
+            case UInt8(ascii: "b"): bytes.append(0x08)
+            case UInt8(ascii: "t"): bytes.append(0x09)
+            case UInt8(ascii: "n"): bytes.append(0x0A)
+            case UInt8(ascii: "v"): bytes.append(0x0B)
+            case UInt8(ascii: "f"): bytes.append(0x0C)
+            case UInt8(ascii: "r"): bytes.append(0x0D)
+            case UInt8(ascii: "0")...UInt8(ascii: "7"):
+                var value = Int(escape - UInt8(ascii: "0"))
+                var digits = 1
+                while digits < 3, i < input.count, (UInt8(ascii: "0")...UInt8(ascii: "7")).contains(input[i]) {
+                    value = value * 8 + Int(input[i] - UInt8(ascii: "0"))
+                    i += 1
+                    digits += 1
+                }
+                bytes.append(UInt8(truncatingIfNeeded: value))
+            default: bytes.append(escape)   // `\\\\`, `\\"` and anything unrecognised: the character itself
+            }
         }
-        return p
+        return String(decoding: bytes, as: UTF8.self)
     }
 }

@@ -9,6 +9,14 @@ tags: [adr, git, diff, ui, panel, milestone-5]
 > **Amended by [[ADR-170 The Diff Panel Follows The Last Change]] (2026-09-24).** The Turn scope defaults to the
 > newest turn that *changed* something. Branch shows the newest commit on the default branch. Every live snapshot
 > is queued through the store, and alternates follow a worktree's `.git` file.
+>
+> **Amended 2026-10-06.** Every scope now resolves to two trees and one loader serves every refresh
+> ([[ADR-183 The Diff Panel Has One Loader]]). The snapshot also adds files that are tracked and ignored
+> ([[ADR-184 The Diff Parser Reads What Git Writes]]). A turn records `HEAD` at both ends and shows its own
+> work when the checkout moved ([[ADR-185 A Turn Knows Where The Checkout Stood]]). Each side is highlighted
+> whole ([[ADR-186 The Diff Body Changes In Place]]). The header gains a line naming both sides, and *Working
+> tree* is named *Uncommitted* ([[ADR-187 The Diff Panel Says What It Compares]]). Word-level emphasis and a
+> viewed mark leave *Not now* ([[ADR-188 The Diff Panel Is For Reviewing]]).
 
 ## Context
 [[ADR-052 Git Page]] shipped a git client: status → stage → commit, with a diff as the detail view
