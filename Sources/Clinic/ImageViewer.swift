@@ -78,6 +78,9 @@ struct ImageFacts: Equatable, Sendable {
     var frames = 1
     /// One loop of an animation, or a movie's length.
     var duration: TimeInterval?
+    /// The size a vector image was drawn at for the canvas (ADR-189); `pixels` is then its own
+    /// point size, which is the only size the file has.
+    var raster: CGSize?
 
     var dimensions: String { "\(Int(pixels.width)) × \(Int(pixels.height))" }
     var fileSize: String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
@@ -837,7 +840,7 @@ struct ImageDetailView: View {
             if VideoFile.isVideo(path) {
                 VideoCanvas(path: path, model: model, onCommand: onCommand)
             } else if let image {
-                ImageZoomCanvas(image: image, pixels: facts?.pixels ?? image.size, key: path,
+                ImageZoomCanvas(image: image, pixels: facts?.raster ?? facts?.pixels ?? image.size, key: path,
                                 animated: facts?.kind == .animated, model: model,
                                 onStep: { onCommand(.step($0)) }, onCommand: onCommand)
             } else {

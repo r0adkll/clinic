@@ -471,14 +471,21 @@ public actor GitRepository {
 
     /// A file as it stands in a tree, when it is text of a size worth highlighting whole (ADR-186).
     public func text(of path: String, in tree: String, scratch: GitObjectScratch?, limit: Int = 1_000_000) async -> String? {
+        guard let data = await data(of: path, in: tree, scratch: scratch, limit: limit), !data.contains(0) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// A file's bytes as they stand in a tree, whatever they are — an image, for one (ADR-189). nil
+    /// when the tree has no such file or it is larger than `limit`.
+    public func data(of path: String, in tree: String, scratch: GitObjectScratch?, limit: Int = 64_000_000) async -> Data? {
         try? scratch?.prepare()
         let env = scratch?.environment(repoRoot: root) ?? [:]
         let object = "\(tree):\(path)"
         let size = await GitProcess.run(["cat-file", "-s", object], in: root, environment: env)
         guard size.status == 0, let bytes = Int(size.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)), bytes <= limit else { return nil }
         let blob = await GitProcess.run(["cat-file", "blob", object], in: root, environment: env)
-        guard blob.status == 0, !blob.stdout.contains(0) else { return nil }
-        return String(data: blob.stdout, encoding: .utf8)
+        guard blob.status == 0 else { return nil }
+        return blob.stdout
     }
 
     /// `--numstat` totals for a tree pair. Cheap next to a patch, which is what makes per-turn

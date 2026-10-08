@@ -418,6 +418,12 @@ final class DiffPanelModel {
                 case .old: await store.text(of: file.oldPath ?? file.path, in: pair.base, repoRoot: pair.repoRoot)
                 }
             },
+            data: { file, side in
+                switch side {
+                case .new: await store.data(of: file.newPath ?? file.path, in: pair.head, repoRoot: pair.repoRoot)
+                case .old: await store.data(of: file.oldPath ?? file.path, in: pair.base, repoRoot: pair.repoRoot)
+                }
+            },
             whole: { file in try? await store.file(file, of: pair, context: 100_000) })
     }
 

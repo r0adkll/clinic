@@ -133,6 +133,24 @@ import Testing
         #expect(await store.text(of: "a.txt", in: all.pair.base, repoRoot: dir.path) == G.lines(40))
     }
 
+    @Test func aBinaryFileCanBeReadOnEachSide() async throws {
+        let (repo, dir, store, _) = try SnapshotTests.makeStore()
+        // Two short PNG-like blobs: a signature, then bytes that are not text and include a NUL.
+        let before = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02])
+        let after = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0xFD])
+        try before.write(to: dir.appendingPathComponent("icon.png"))
+        try G.sh(dir, ["add", "icon.png"])
+        try await repo.commit(message: "initial")
+        try after.write(to: dir.appendingPathComponent("icon.png"))
+        let all = try #require(try await store.resolve(.uncommitted(.all), repoRoot: dir.path))
+        let file = try #require(try await store.diff(all.pair).files.first)
+        #expect(file.isBinary)
+        #expect(await store.data(of: "icon.png", in: all.pair.head, repoRoot: dir.path) == after)
+        #expect(await store.data(of: "icon.png", in: all.pair.base, repoRoot: dir.path) == before)
+        #expect(await store.text(of: "icon.png", in: all.pair.head, repoRoot: dir.path) == nil, "bytes with a NUL are not text")
+        #expect(await store.data(of: "missing.png", in: all.pair.head, repoRoot: dir.path) == nil)
+    }
+
     // MARK: A checkout that moves (ADR-185)
 
     /// `main` with one commit and a `feature` branch three files ahead, all committed an hour ago.

@@ -49,6 +49,19 @@ final class EditorModel {
     var error: String?
     var showHidden = false { didSet { Task { await reloadTree() } } }
     var externalChangePending = false
+    /// The open file as a picture (ADR-189), when it is one; its text is still loaded when it has
+    /// any, so an SVG can be edited as well as seen.
+    private(set) var media: MediaLoad?
+    /// The open file, when it is a picture — known the moment it opens, before it is decoded.
+    private var mediaPath: String?
+    /// The open picture is also text — an SVG — and the reader asked for the text.
+    var showsMediaSource = false
+    /// True when the picture on screen has a source the reader could switch to.
+    var hasMediaSource: Bool { mediaPath != nil && mediaText }
+    private var mediaText = false
+    private var mediaLoad: Task<Void, Never>?
+    /// The viewer shows the picture: a picture's source only when asked for it.
+    var showsMedia: Bool { mediaPath != nil && !showsMediaSource }
     private var watcher: FSEventsWatcher?
     private var watchTask: Task<Void, Never>?
     private var fileModified: Date?
@@ -152,12 +165,18 @@ final class EditorModel {
         if isDirty, let current = openPath, current != path, !confirmDiscard() { return }
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
-            guard data.count < 8 * 1024 * 1024 else { error = "File is larger than 8 MB"; return }
-            guard let s = String(data: data, encoding: .utf8) else { error = "Not a UTF-8 text file"; return }
-            text = s; savedText = s
+            let isMedia = MediaFile.isMedia(path)
+            guard data.count < 8 * 1024 * 1024 || isMedia else { error = "File is larger than 8 MB"; return }
+            // A picture need not be text; one that is (an SVG) keeps its text for the source view.
+            let s = data.count < 8 * 1024 * 1024 && !data.contains(0) ? String(data: data, encoding: .utf8) : nil
+            guard s != nil || isMedia else { error = "Not a UTF-8 text file"; return }
+            text = s ?? ""; savedText = text
+            if path != openPath { showsMediaSource = false }
             openPath = path
             reveal(path)
-            language = FileLanguage.detect(path: path, text: s)
+            language = FileLanguage.detect(path: path, text: s ?? "")
+            mediaText = isMedia && s != nil
+            loadMedia(path)
             fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
             externalChangePending = false
             error = nil
@@ -170,7 +189,7 @@ final class EditorModel {
     }
 
     func save() {
-        guard let path = openPath else { return }
+        guard let path = openPath, mediaPath == nil || mediaText else { return }
         do {
             try text.write(toFile: path, atomically: true, encoding: .utf8)
             savedText = text
@@ -190,11 +209,30 @@ final class EditorModel {
     }
 
     func reloadFromDisk() {
-        guard let path = openPath, let s = try? String(contentsOfFile: path, encoding: .utf8) else { return }
-        text = s; savedText = s
+        guard let path = openPath else { return }
+        if let s = try? String(contentsOfFile: path, encoding: .utf8) {
+            text = s; savedText = s
+        } else if mediaPath == nil { return }
         fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
         externalChangePending = false
+        loadMedia(path)
         loadGeneration += 1
+    }
+
+    /// Reads the picture, when the file is one (ADR-189). Decoded off the main actor — a 20-megapixel
+    /// screenshot is real work — and a video's facts arrive when AVFoundation has them.
+    private func loadMedia(_ path: String) {
+        mediaLoad?.cancel()
+        guard MediaFile.isMedia(path) else { media = nil; mediaPath = nil; return }
+        if mediaPath != path { media = nil }
+        mediaPath = path
+        mediaLoad = Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) { ImageFile.open(path) }.value
+            guard !Task.isCancelled, let self, self.openPath == path else { return }
+            self.media = loaded
+            guard loaded.isVideo, let facts = await VideoFile.facts(path), !Task.isCancelled, self.openPath == path else { return }
+            self.media?.facts = facts
+        }
     }
 
     private func confirmDiscard() -> Bool {
@@ -374,7 +412,13 @@ struct FileEditorView: View {
             header
             Divider()
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).padding(6) }
-            if model.openPath != nil {
+            if let path = model.openPath, model.showsMedia {
+                if let media = model.media {
+                    MediaFileView(path: path, media: media).id(model.loadGeneration)
+                } else {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if model.openPath != nil {
                 CodeView(model: model).id(model.loadGeneration)
             } else {
                 // Without a filling frame the VStack shrinks to its ideal height and the whole pane —
@@ -405,12 +449,16 @@ struct FileEditorView: View {
                 Text(rel).font(.system(size: PaneMetrics.label, design: .monospaced))
                     .lineLimit(1).truncationMode(.head).help(rel)
                 if model.isDirty { Circle().fill(Color.accent).frame(width: 7, height: 7).help("Unsaved changes") }
-                Text(model.language.tsName).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+                Text(model.showsMedia ? MediaFile.label(rel) : model.language.tsName)
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
             } else {
                 Text("No file open").font(.system(size: PaneMetrics.label)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             if let path = model.openPath {
+                if model.hasMediaSource {
+                    MediaSourceToggle(showsSource: $model.showsMediaSource)
+                }
                 if model.isDirty {
                     Button("Revert") { model.revert() }
                     Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command)

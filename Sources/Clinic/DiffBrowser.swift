@@ -8,6 +8,8 @@ struct DiffContentSource: Sendable {
     enum Side: Sendable { case old, new }
     /// The file's text on one side, or nil when it is not text worth parsing whole.
     var text: @Sendable (UnifiedDiffFile, Side) async -> String?
+    /// The file's bytes on one side, whatever they are — a picture's, for the media viewer (ADR-189).
+    var data: @Sendable (UnifiedDiffFile, Side) async -> Data?
     /// The file's diff with the whole file as context.
     var whole: @Sendable (UnifiedDiffFile) async -> UnifiedDiffFile?
 }
@@ -49,6 +51,31 @@ final class DiffBrowser {
     var showsWholeFile = false { didSet { if showsWholeFile != oldValue, let file = selectedFile { render(file, newFile: false) } } }
     /// Whether the diff on screen can be read whole; false for a pull request's.
     var canShowWholeFile: Bool { source != nil }
+    /// Whether a picture in the diff can be shown as one (ADR-189): its sides are read from the
+    /// trees, so a pull request's diff, which is only text, cannot.
+    var canShowMedia: Bool { source != nil }
+    /// A picture that is also text — an SVG — shown as its source diff rather than drawn (ADR-189).
+    var showsMediaSource = false
+
+    /// The file on screen is a picture the viewer can draw, and the reader has not asked for its text.
+    var showsMedia: Bool {
+        guard canShowMedia, let file = selectedFile, MediaFile.isMedia(file.path) else { return false }
+        switch file.body {
+        case .binary: return true
+        case .text, .lineEndings: return !showsMediaSource
+        case .renamed, .mode, .empty: return false
+        }
+    }
+
+    /// A picture whose diff also has a text form, so the file bar can offer the switch.
+    var hasMediaSource: Bool {
+        guard canShowMedia, let file = selectedFile, MediaFile.isMedia(file.path) else { return false }
+        return file.body == .text || file.body == .lineEndings
+    }
+
+    func data(of file: UnifiedDiffFile, side: DiffContentSource.Side) async -> Data? {
+        await source?.data(file, side)
+    }
 
     private var source: DiffContentSource?
     private let highlighter = DiffSyntaxHighlighter()
@@ -349,9 +376,14 @@ struct DiffBrowserView: View {
                 Spacer(minLength: 6)
                 // The counts are the first thing to go when the column is narrow: the tree row
                 // beside it already says how much changed, and the buttons cannot be said elsewhere.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 4) { counts(file); controls(file) }
+                // A binary file has no lines to count; "+0 −0" over a picture says the wrong thing.
+                if file.isBinary {
                     controls(file)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 4) { counts(file); controls(file) }
+                        controls(file)
+                    }
                 }
             } else {
                 Text(browser.isEmpty ? "No changes" : "Select a file")
@@ -374,6 +406,9 @@ struct DiffBrowserView: View {
 
     private func controls(_ file: UnifiedDiffFile) -> some View {
         HStack(spacing: 0) {
+            if browser.hasMediaSource {
+                MediaSourceToggle(showsSource: $browser.showsMediaSource)
+            }
             PaneIconButton(symbol: "chevron.up", help: "Previous change" + bindings.hint(.previousDiffChange)) { browser.goToChange(-1) }
             PaneIconButton(symbol: "chevron.down", help: "Next change" + bindings.hint(.nextDiffChange)) { browser.goToChange(1) }
             let viewed = browser.selected.map(browser.isViewed) ?? false
@@ -468,26 +503,31 @@ struct DiffBrowserView: View {
     @ViewBuilder
     private var viewer: some View {
         if let file = browser.selectedFile {
-            switch file.body {
-            case .text:
-                DiffTextBody(source: browser.text)
-            case .binary:
-                ContentUnavailableView("Binary file", systemImage: "doc.badge.gearshape",
-                                       description: Text(file.isNew ? "Added. Its contents are not text, so there is nothing to compare line by line."
-                                                         : file.isDeleted ? "Deleted. Its contents were not text."
-                                                         : "Changed. Its contents are not text, so there is nothing to compare line by line."))
-            case .renamed(let from):
-                ContentUnavailableView("Renamed, contents unchanged", systemImage: "arrow.right.doc.on.clipboard",
-                                       description: Text("From \(from)"))
-            case .mode(let old, let new):
-                ContentUnavailableView("Permissions changed", systemImage: "lock.open",
-                                       description: Text(Self.describe(mode: old, new) + "\nIts contents are unchanged."))
-            case .lineEndings:
-                ContentUnavailableView("Only line endings changed", systemImage: "return",
-                                       description: Text("Every changed line has the same text as before and a different line ending (LF and CRLF)."))
-            case .empty:
-                ContentUnavailableView(file.isNew ? "Empty file added" : file.isDeleted ? "Empty file deleted" : "No line changes",
-                                       systemImage: "doc", description: Text(file.path))
+            if browser.showsMedia {
+                // A picture, drawn (ADR-189): both sides when it changed, one when it arrived or left.
+                DiffMediaView(browser: browser, file: file)
+            } else {
+                switch file.body {
+                case .text:
+                    DiffTextBody(source: browser.text)
+                case .binary:
+                    ContentUnavailableView("Binary file", systemImage: "doc.badge.gearshape",
+                                           description: Text(file.isNew ? "Added. Its contents are not text, so there is nothing to compare line by line."
+                                                             : file.isDeleted ? "Deleted. Its contents were not text."
+                                                             : "Changed. Its contents are not text, so there is nothing to compare line by line."))
+                case .renamed(let from):
+                    ContentUnavailableView("Renamed, contents unchanged", systemImage: "arrow.right.doc.on.clipboard",
+                                           description: Text("From \(from)"))
+                case .mode(let old, let new):
+                    ContentUnavailableView("Permissions changed", systemImage: "lock.open",
+                                           description: Text(Self.describe(mode: old, new) + "\nIts contents are unchanged."))
+                case .lineEndings:
+                    ContentUnavailableView("Only line endings changed", systemImage: "return",
+                                           description: Text("Every changed line has the same text as before and a different line ending (LF and CRLF)."))
+                case .empty:
+                    ContentUnavailableView(file.isNew ? "Empty file added" : file.isDeleted ? "Empty file deleted" : "No line changes",
+                                           systemImage: "doc", description: Text(file.path))
+                }
             }
         } else {
             ContentUnavailableView("Select a file", systemImage: "sidebar.left")
@@ -565,6 +605,9 @@ struct DiffFileStat: View {
                     Text("A").font(.system(size: 11, weight: .bold)).foregroundStyle(.green)
                 } else if file.isDeleted {
                     Text("D").font(.system(size: 11, weight: .bold)).foregroundStyle(.red)
+                } else if file.isBinary {
+                    // Changed, with no lines to count (ADR-189): a picture, usually.
+                    Text("M").font(.system(size: 11, weight: .bold)).foregroundStyle(.orange)
                 } else {
                     Text("\(file.additions + file.deletions)")
                         .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)

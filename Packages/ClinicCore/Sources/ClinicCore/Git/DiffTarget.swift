@@ -257,6 +257,11 @@ extension SnapshotStore {
         await GitRepository(root: repoRoot).text(of: path, in: tree, scratch: scratch(for: repoRoot))
     }
 
+    /// A file's bytes as they stand in one of a pair's trees, for showing an image on each side (ADR-189).
+    public func data(of path: String, in tree: String, repoRoot: String) async -> Data? {
+        await GitRepository(root: repoRoot).data(of: path, in: tree, scratch: scratch(for: repoRoot))
+    }
+
     // MARK: Other sessions
 
     /// How many other sessions were changing this checkout while `turn` ran (ADR-185). A turn is two

@@ -4799,3 +4799,32 @@ built against the new browser and not opened. The overlap notice on screen: its 
 `-ClinicEnterAfter` closed the session. The synthetic hooks replaced it and are cheaper.
 
 Not committed: the working tree holds the change for review.
+
+## 2026-10-08 — The file viewers draw pictures (ADR-189)
+
+User: *"The various file viewers (Files tab, diff tab, etc) don't render media (such as png and images as
+well as SVGs)"*. The Files pane refused a PNG as *Not a UTF-8 text file* and showed an SVG as XML; the Diff
+panel said a binary file had changed and nothing more.
+
+**Core.** `GitRepository.data(of:in:scratch:)` reads a blob's bytes (`text` now sits on it);
+`SnapshotStore.data`. One new test reads a PNG on both sides of a working-tree pair.
+
+**App.** `MediaPreview.swift`: `MediaFile` decides by `UTType` (image, PDF, movie); `ImageFile.open`
+decodes a file for the Files pane and rasterises a vector image to at least 1024 pixels on its long edge
+(`ImageFacts.raster`); `MediaFileView` is the Media pane's `ImageDetailView` over the open file;
+`DiffMediaCache` writes each side's blob to `~/Library/Caches/<bundle id>/DiffMedia/<sha256>.<ext>` so the
+players can read it; `DiffMediaView` shows Before and After, stacked under 640 pt. `EditorModel` keeps an
+SVG's text so it can still be edited, behind a source toggle shared with the Diff panel's file bar. A binary
+file's bar drops `+0 −0` and its tree row reads *M*. A pull request's diff has no trees, so it keeps
+ADR-188's words.
+
+**Verified.** `swift test --package-path Packages/ClinicCore` (DiffTargetTests, 18 pass). Clinic Dev against
+a scratch repository under `~/Library/Caches/clinic-media-repo`, launched with `-ClinicOpenEditorOnLaunch`
+/ `-ClinicOpenFileOnLaunch` / `-ClinicOpenSecondFileAfterLaunch` and `-ClinicOpenDiffPanelOnLaunch
+-ClinicDiffScope workingTree -ClinicDiffSelectFile`, read from screenshots: the PNG and the SVG in the Files
+pane with facts and the SVG's source toggle; Before/After for a changed PNG and a changed SVG; one side for
+an added PNG; *M* on the changed binary's row. The blob cache held five files afterwards, one per distinct
+blob. Not exercised: pressing the source toggle, a video side, the side-by-side layout, a file window.
+
+**Found on the way.** `-ClinicDiffScope` takes the enum's raw value (`workingTree`), not the picker's word.
+
