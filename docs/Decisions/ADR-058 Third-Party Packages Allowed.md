@@ -16,6 +16,7 @@ Vetted third-party packages are allowed when they replace substantial work. Bar:
 |---|---|---|---|
 | CodeEditApp/CodeEditSourceEditor (+ CodeEditTextView, CodeEditLanguages, SwiftTreeSitter) | 0.15.2 | MIT | tree-sitter source editor for the editor panel |
 | swiftlang/swift-cmark (cmark-gfm, cmark-gfm-extensions) | 0.9.0 | BSD-2-Clause | GitHub-flavoured Markdown to HTML for the Files pane's preview ([[ADR-191 The Files Pane Renders Markdown]]) |
+| mermaid (`dist/mermaid.min.js`, vendored in `Sources/Clinic/Vendor/Mermaid`, not a Swift package) | 12.0.0 | MIT | diagrams in the Markdown preview ([[ADR-193 The Preview Highlights Code, Finds Text And Draws Diagrams]]) |
 
 Build note: CodeEditSourceEditor uses the SwiftLint build plugin; `xcodebuild` runs pass `-skipPackagePluginValidation -skipMacroValidation` (Makefile, CI, release script).
 

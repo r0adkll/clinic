@@ -11,17 +11,17 @@ enum GitHubHTMLDocument {
     /// no height handler to post to, and nothing to size.
     ///
     /// A local document (the Files pane's Markdown preview, ADR-191) names the URL scheme its pictures
-    /// are served under, which the CSP then lets images and media load from; `script` is its own, run
-    /// under the same nonce.
+    /// are served under, which the CSP then lets images and media load from, and the one Clinic's own
+    /// bundled scripts come from; `script` is its own, run under the same nonce.
     static func page(body: String, dark: Bool, reportsHeight: Bool = true, extraCSS: String = "",
-                     localScheme: String? = nil, script: String = "") -> String {
+                     localScheme: String? = nil, appScheme: String? = nil, script: String = "") -> String {
         let nonce = UUID().uuidString
         return """
         <!doctype html>
         <html><head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="Content-Security-Policy" content="\(csp(nonce: nonce, localScheme: localScheme))">
+        <meta http-equiv="Content-Security-Policy" content="\(csp(nonce: nonce, localScheme: localScheme, appScheme: appScheme))">
         <style>\(css(dark: dark))\(extraCSS)</style>
         </head><body>\(body)
         \(reportsHeight ? "<script nonce=\"\(nonce)\">\(heightScript)</script>" : "")
@@ -39,11 +39,13 @@ enum GitHubHTMLDocument {
 
     /// Images (and the media a comment may embed) load; everything else is refused. Scripts are
     /// limited to the nonce below, so even if a comment smuggled in a `<script>` it would not run.
-    /// `localScheme` is where a document read from disk gets the pictures that sit beside it.
-    static func csp(nonce: String, localScheme: String? = nil) -> String {
+    /// `localScheme` is where a document read from disk gets the pictures that sit beside it;
+    /// `appScheme` serves scripts from Clinic's own bundle, and nothing else may.
+    static func csp(nonce: String, localScheme: String? = nil, appScheme: String? = nil) -> String {
         let local = localScheme.map { " \($0):" } ?? ""
+        let app = appScheme.map { " \($0):" } ?? ""
         return "default-src 'none'; img-src https: data: blob:\(local); media-src https: data:\(local); "
-            + "style-src 'unsafe-inline'; script-src 'nonce-\(nonce)'; frame-src 'none'; connect-src 'none'"
+            + "style-src 'unsafe-inline'; script-src 'nonce-\(nonce)'\(app); frame-src 'none'; connect-src 'none'"
     }
 
     /// Reports document height to the host so SwiftUI can size the view. A `ResizeObserver` covers

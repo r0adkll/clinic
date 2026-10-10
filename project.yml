@@ -41,6 +41,11 @@ targets:
       - path: Sources/Clinic
         excludes:
           - LaunchAgents
+          - Vendor
+      # Mermaid for the Markdown preview (ADR-191): the script only, as a resource; its licence and
+      # provenance stay in the source tree.
+      - path: Sources/Clinic/Vendor/Mermaid/mermaid.min.js
+        buildPhase: resources
       # SMAppService.agent() reads its plist from Contents/Library/LaunchAgents, and only a *bundled*
       # plist can be registered — which is why the wake interval is a fixed 300 s rather than a
       # computed StartCalendarInterval (ADR-095).

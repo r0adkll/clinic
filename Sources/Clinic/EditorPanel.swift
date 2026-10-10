@@ -76,6 +76,11 @@ final class EditorModel {
     var showsMedia: Bool { mediaPath != nil && !showsMediaSource }
     private var watcher: FSEventsWatcher?
     private var watchTask: Task<Void, Never>?
+    /// The open file's folder, watched while the file lies outside `root` — opened from a terminal link,
+    /// say (ADR-192) — so it reloads on change like any file in the tree. Nil while the file is inside.
+    private var outsideWatcher: FSEventsWatcher?
+    private var outsideWatchTask: Task<Void, Never>?
+    private var outsideFolder: String?
     private var fileModified: Date?
     var recentlyOpened: [String] = []
     private(set) var tree: [FileTreeNode] = []
@@ -101,6 +106,11 @@ final class EditorModel {
     /// Where a link asked the file to open (ADR-192): the code view puts its cursor there and the
     /// Markdown preview scrolls to it. Belongs to the open that set it; any other load clears it.
     private(set) var jump: (line: Int, column: Int)?
+
+    /// Bumped by the header's find button to open the Markdown preview's find bar (ADR-191).
+    var previewFindRequest = 0
+    /// What that find bar opens searching for; only `-ClinicPreviewFindOnLaunch` sets it.
+    var previewFindSeed: String?
 
     /// The open file is Markdown, shown as text — the preview's case (ADR-191).
     var isMarkdown: Bool { openPath != nil && mediaPath == nil && language.id == .markdown }
@@ -158,6 +168,7 @@ final class EditorModel {
         index = FileIndex(root: newRoot)
         watchTask?.cancel(); watcher?.stop()
         watch()
+        watchOutside()
         Task { await reloadTree() }
     }
 
@@ -175,7 +186,39 @@ final class EditorModel {
         }
     }
 
-    func stop() { watchTask?.cancel(); watcher?.stop() }
+    /// Watches the folder of an open file that the root's watcher cannot see. The folder rather than
+    /// the file: editors and agents save by writing a new file and renaming it over the old one, and a
+    /// watch on the file itself would be left holding the one that was replaced.
+    private func watchOutside() {
+        let folder = openPath.flatMap { $0.hasPrefix(root + "/") ? nil : ($0 as NSString).deletingLastPathComponent }
+        guard folder != outsideFolder else { return }
+        outsideWatchTask?.cancel(); outsideWatcher?.stop()
+        outsideWatchTask = nil; outsideWatcher = nil; outsideFolder = folder
+        guard let folder else { return }
+        let w = FSEventsWatcher(paths: [folder])
+        outsideWatcher = w
+        w.start()
+        outsideWatchTask = Task { [weak self] in
+            for await paths in w.changes {
+                guard let self, let open = self.openPath else { return }
+                // FSEvents reports real paths, so `/tmp/plan.md` changes as `/private/tmp/plan.md` — and
+                // `standardizingPath`, which every opened path went through, drops that `/private`, as
+                // `resolvingSymlinksInPath` would. Compare without it on both sides.
+                let file = Self.withoutPrivate(open)
+                if paths.contains(where: { Self.withoutPrivate($0) == file }) { self.externalChanged() }
+            }
+        }
+    }
+
+    /// `/private/tmp`, `/private/var` and `/private/etc` are `/tmp`, `/var` and `/etc`.
+    private static func withoutPrivate(_ path: String) -> String {
+        path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path
+    }
+
+    func stop() {
+        watchTask?.cancel(); watcher?.stop()
+        outsideWatchTask?.cancel(); outsideWatcher?.stop()
+    }
 
     func open(relative: String) { open(absolute: (root as NSString).appendingPathComponent(relative)) }
 
@@ -199,6 +242,7 @@ final class EditorModel {
             externalChangePending = false
             error = nil
             jump = line.map { ($0, column ?? 1) }
+            watchOutside()
             recentlyOpened.removeAll { $0 == path }
             recentlyOpened.insert(path, at: 0)
             if recentlyOpened.count > 20 { recentlyOpened.removeLast() }
@@ -501,6 +545,11 @@ struct FileEditorView: View {
                 if model.isMarkdown {
                     MarkdownModePicker(mode: Binding(get: { EditorPrefs.shared.markdownMode },
                                                      set: { EditorPrefs.shared.markdownMode = $0 }))
+                    if EditorPrefs.shared.markdownMode != .source {
+                        PaneIconButton(symbol: "text.magnifyingglass", help: "Find in the preview (⌘F in the preview)") {
+                            model.previewFindRequest += 1
+                        }
+                    }
                 }
                 if model.isDirty {
                     Button("Revert") { model.revert() }

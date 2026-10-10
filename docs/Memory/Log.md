@@ -4898,3 +4898,26 @@ an on-disk insert showing in place; the new `-ClinicOpenLinkAfterLaunch` seam op
 narrow Split with the editor on line 60 and the preview following. Not exercised: clicks inside the preview,
 a real ⌘-click on a cell, the menu chord, the setting off, light appearance, file windows.
 
+## 2026-10-10 — The preview highlights, finds and draws; run links and outside files follow (ADR-193, ADR-194)
+
+User asked what blocked the limitations left by ADR-191 and ADR-192, then: *"let's pack it into the same
+PR."* (There was no PR: the first part had landed on `main` as `b1d9f18`.)
+
+**Built.** `MarkdownCodeHighlighter` (cmark AST walk, tree-sitter grammars and queries from CodeEditLanguages
+in a query cache of its own, `CaptureBucket` classes coloured from `EditorThemes.current`). `PreviewFinder`,
+`PreviewWebView` (⌘F/⌘G only with focus inside) and `PreviewFindBar`, plus a header find button. mermaid
+12.0.0 vendored in `Sources/Clinic/Vendor/Mermaid` and served by `AppAssetScheme` (`clinic-app:`, which is
+also in `script-src`), drawn in the page script with a per-source cache. `RunStore` hands links to
+`openInFiles(_:from:cwd:)` with the run's working directory. `EditorModel.watchOutside()` watches an
+outside file's folder.
+
+**Found while verifying.** The seeded find did nothing until the bar searched on appearing. The outside
+watcher never fired: `standardizingPath` and `resolvingSymlinksInPath` both drop `/private`, and FSEvents
+reports it. Logging showed `/tmp/…` against `/private/tmp/…`. A run starting during one smoke was a
+mis-click by the user, not the change.
+
+**Verified.** `make test` (654 pass). Clinic Dev against a Markdown file in the scratchpad: highlighted
+Swift, Bash and TypeScript; a plain unknown fence; a drawn flowchart and a broken one with its error; the
+seeded find selecting its match; a section appended on disk appearing in place. Not exercised: typing in
+the find bar, ⌘F/⌘G in the page, a link in a run's pane, light appearance.
+

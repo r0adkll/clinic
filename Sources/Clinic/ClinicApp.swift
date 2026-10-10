@@ -360,6 +360,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task {
                     try? await Task.sleep(for: .seconds(3))
                     if let tab = tabs.selectedTab, !tabs.openInFiles(url, from: tab) { NSWorkspace.shared.open(url) }
+                    // `-ClinicPreviewFindOnLaunch <text>` (ADR-191): then the preview's find bar, searching.
+                    if let find = UserDefaults.standard.string(forKey: "ClinicPreviewFindOnLaunch"),
+                       let editor = tabs.selectedTab?.panel.pane(.files)?.editor {
+                        try? await Task.sleep(for: .seconds(2))
+                        editor.previewFindSeed = find
+                        editor.previewFindRequest += 1
+                    }
                 }
             }
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {

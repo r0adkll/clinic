@@ -565,7 +565,14 @@ extension RunStore: GhosttySurfaceDelegate {
 
     func surface(_ surface: GhosttySurfaceView, didReceive action: GhosttyAction) -> Bool {
         switch action {
-        case .openURL(let url, _): NSWorkspace.shared.open(url); return true
+        case .openURL(let url, _):
+            // A build's errors are the links most worth following into the Files pane: the tab that
+            // shows the run, reading relative paths from where the run ran (ADR-192).
+            if let run = run(for: surface), let tabs, let tab = tabs.tabs.first(where: { $0.id == run.hostTabId }),
+               tabs.openInFiles(url, from: tab, cwd: RunCheckout.workingDirectory(for: run.config, checkout: run.key.checkout)) {
+                return true
+            }
+            NSWorkspace.shared.open(url); return true
         // A run does not open tabs, rename itself or ring for attention; its end is what notifies.
         case .newTab, .newWindow, .newSplit, .ringBell, .setTitle, .pwd, .progressReport, .commandFinished, .mouseShape, .colorScheme: return true
         case .quit: return false

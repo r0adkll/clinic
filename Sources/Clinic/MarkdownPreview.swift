@@ -88,17 +88,24 @@ struct MarkdownPreview: View {
     var sync: MarkdownScrollSync?
     @Environment(\.colorScheme) private var colorScheme
     @State private var html: String?
+    @State private var finder = PreviewFinder()
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             Color(nsColor: .textBackgroundColor)
             if let html, let path = model.openPath {
                 MarkdownWebView(html: html, path: path, root: model.root, dark: colorScheme == .dark,
-                                sync: sync, jumpLine: model.jump?.line,
+                                sync: sync, jumpLine: model.jump?.line, finder: finder,
                                 openFile: { model.open(absolute: $0) },
                                 openWikiLink: { target in Task { await model.openWikiLink(target) } })
             }
+            if finder.isShown { PreviewFindBar(finder: finder).padding(8) }
         }
+        .onChange(of: model.previewFindRequest) {
+            finder.show()
+            if let seed = model.previewFindSeed { model.previewFindSeed = nil; finder.query = seed }
+        }
+        .onChange(of: model.openPath) { finder.close() }
         .task(id: model.text) {
             // The first render is immediate; one while typing waits for a pause.
             if html != nil { try? await Task.sleep(for: .milliseconds(150)) }
@@ -118,26 +125,30 @@ private struct MarkdownWebView: NSViewRepresentable {
     let dark: Bool
     let sync: MarkdownScrollSync?
     let jumpLine: Int?
+    let finder: PreviewFinder
     let openFile: (String) -> Void
     let openWikiLink: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> PreviewWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.setURLSchemeHandler(context.coordinator.files, forURLScheme: LocalFileScheme.name)
-        let view = WKWebView(frame: .zero, configuration: config)
+        config.setURLSchemeHandler(AppAssetScheme(), forURLScheme: AppAssetScheme.name)
+        let view = PreviewWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         update(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) { update(view, context: context) }
+    func updateNSView(_ view: PreviewWebView, context: Context) { update(view, context: context) }
 
-    private func update(_ view: WKWebView, context: Context) {
+    private func update(_ view: PreviewWebView, context: Context) {
         let c = context.coordinator
+        finder.webView = view
+        view.finder = finder
         c.openFile = openFile
         c.openWikiLink = openWikiLink
         sync?.onLine = { [weak c, weak view] line in
@@ -178,9 +189,11 @@ private struct MarkdownWebView: NSViewRepresentable {
                 // resolve where they would on GitHub.
                 let base = LocalFileScheme.url(directory: directory)
                 baseURL = base
-                let page = GitHubHTMLDocument.page(body: "<article id=\"clinic-md\">\(html)</article>", dark: dark,
-                                                   reportsHeight: false, extraCSS: Self.css(dark: dark),
-                                                   localScheme: LocalFileScheme.name, script: Self.script)
+                let page = GitHubHTMLDocument.page(body: "<article id=\"clinic-md\" data-dark=\"\(dark)\">\(html)</article>", dark: dark,
+                                                   reportsHeight: false,
+                                                   extraCSS: Self.css(dark: dark) + CaptureBucket.css(for: EditorThemes.current),
+                                                   localScheme: LocalFileScheme.name, appScheme: AppAssetScheme.name,
+                                                   script: Self.script)
                 view.loadHTMLString(page, baseURL: base)
                 return
             }
@@ -260,6 +273,10 @@ private struct MarkdownWebView: NSViewRepresentable {
             pre.front-matter { color: \(muted); font-size: 12px; }
             a.wiki-link { border-bottom: 1px dotted currentColor; }
             a.wiki-link:hover { text-decoration: none; border-bottom-style: solid; }
+            .mermaid-diagram { margin-bottom: 14px; text-align: center; overflow-x: auto; }
+            .mermaid-diagram svg { max-width: 100%; height: auto; }
+            .mermaid-diagram.mermaid-error { text-align: left; }
+            .mermaid-error > p { color: #f85149; font-size: 12px; margin: 0 0 6px; }
             section.footnotes { font-size: .9em; color: \(muted); border-top: 1px solid var(--borderColor-default); margin-top: 24px; padding-top: 8px; }
             """
         }
@@ -333,7 +350,48 @@ private struct MarkdownWebView: NSViewRepresentable {
             var f = e > s ? Math.min(1, Math.max(0, (line - s) / (e - s))) : 0;
             window.scrollTo(0, Math.max(0, y0 + (y1 - y0) * f - 12));
           };
-          window.clinicRender = function (html) { root.innerHTML = html; decorate(); };
+          // Mermaid (ADR-191): Clinic's bundled copy, fetched only by a page that has a diagram, and each
+          // diagram drawn once per source so typing elsewhere does not redraw it.
+          var dark = root.getAttribute('data-dark') === 'true', waiting = null, drawn = Object.create(null), serial = 0;
+          function withMermaid(then) {
+            if (window.mermaid) return then();
+            if (waiting) { waiting.push(then); return; }
+            waiting = [then];
+            var s = document.createElement('script');
+            s.src = 'clinic-app:///mermaid.min.js';
+            s.onload = function () {
+              window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true,
+                                          theme: dark ? 'dark' : 'default' });
+              var queue = waiting; waiting = []; queue.forEach(function (f) { f(); });
+            };
+            document.head.appendChild(s);
+          }
+          function diagrams() {
+            var blocks = Array.prototype.slice.call(root.querySelectorAll('pre > code.language-mermaid'));
+            if (!blocks.length) return;
+            withMermaid(function () {
+              blocks.forEach(function (code) {
+                var pre = code.parentNode;
+                if (!root.contains(pre)) return;
+                var source = code.textContent, box = document.createElement('div');
+                box.className = 'mermaid-diagram';
+                if (pre.hasAttribute('data-sourcepos')) box.setAttribute('data-sourcepos', pre.getAttribute('data-sourcepos'));
+                pre.parentNode.replaceChild(box, pre);
+                if (drawn[source]) { box.innerHTML = drawn[source]; return; }
+                box.appendChild(pre);
+                window.mermaid.render('clinic-mermaid-' + (++serial), source).then(function (result) {
+                  drawn[source] = result.svg;
+                  box.innerHTML = result.svg;
+                }, function (error) {
+                  var note = document.createElement('p');
+                  note.textContent = 'Mermaid: ' + ((error && error.message) || error);
+                  box.classList.add('mermaid-error');
+                  box.insertBefore(note, box.firstChild);
+                });
+              });
+            });
+          }
+          window.clinicRender = function (html) { root.innerHTML = html; decorate(); diagrams(); };
           document.addEventListener('click', function (event) {
             var a = event.target.closest && event.target.closest('a[href^="#"]');
             if (!a) return;
@@ -343,6 +401,7 @@ private struct MarkdownWebView: NSViewRepresentable {
             if (target) target.scrollIntoView({ block: 'start' });
           });
           decorate();
+          diagrams();
         })();
         """
     }
@@ -380,3 +439,127 @@ final class LocalFileScheme: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
 }
+
+/// Serves Clinic's own bundled scripts to the preview — Mermaid, today — under a scheme of their own,
+/// the only one the page's CSP lets a script come from besides the page's nonce (ADR-191). Only the
+/// names listed here are served.
+final class AppAssetScheme: NSObject, WKURLSchemeHandler {
+    static let name = "clinic-app"
+    private static let assets = ["mermaid.min.js": "text/javascript"]
+
+    func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
+        guard let url = task.request.url, let type = Self.assets[url.lastPathComponent],
+              let file = Bundle.main.url(forResource: url.lastPathComponent, withExtension: nil),
+              let data = try? Data(contentsOf: file) else {
+            return task.didFailWithError(URLError(.fileDoesNotExist))
+        }
+        task.didReceive(URLResponse(url: url, mimeType: type, expectedContentLength: data.count, textEncodingName: "utf-8"))
+        task.didReceive(data)
+        task.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
+}
+
+// MARK: - Find (ADR-191)
+
+/// Find in the rendered page. WebKit on the Mac has no find bar of its own, only `find(_:configuration:)`,
+/// which selects and scrolls to one match at a time; this is the state of the bar Clinic draws over it.
+@MainActor
+@Observable
+final class PreviewFinder {
+    var isShown = false
+    var query = ""
+    /// The last search found nothing.
+    private(set) var missing = false
+    /// Bumped to put the keyboard in the field, again if the bar is already open.
+    private(set) var focusRequest = 0
+    @ObservationIgnored weak var webView: WKWebView?
+
+    func show() { isShown = true; focusRequest += 1 }
+
+    func close() {
+        guard isShown else { return }
+        isShown = false
+        missing = false
+        if let webView { webView.window?.makeFirstResponder(webView) }
+    }
+
+    /// From the top, as the query changes: the match a shorter query selected may be the one a longer
+    /// query wants, and a search from the selection would start past it.
+    func restart() {
+        guard let webView else { return }
+        guard !query.isEmpty else { missing = false; return }
+        webView.evaluateJavaScript("window.getSelection().removeAllRanges()") { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.step(forward: true) }
+        }
+    }
+
+    func step(forward: Bool) {
+        guard let webView, !query.isEmpty else { return }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = !forward
+        configuration.caseSensitive = false
+        configuration.wraps = true
+        webView.find(query, configuration: configuration) { [weak self] result in
+            self?.missing = !result.matchFound
+        }
+    }
+}
+
+/// The page's web view, which takes ⌘F, ⌘G and ⇧⌘G while it has the keyboard. Key equivalents reach
+/// every view in the window, so it answers only when the focus is inside it: in Split, ⌘F in the
+/// editor stays the editor's find.
+final class PreviewWebView: WKWebView {
+    weak var finder: PreviewFinder?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let finder, let responder = window?.firstResponder as? NSView, responder.isDescendant(of: self) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        switch (event.charactersIgnoringModifiers?.lowercased(), flags) {
+        case ("f", [.command]): finder.show(); return true
+        case ("g", [.command]) where finder.isShown: finder.step(forward: true); return true
+        case ("g", [.command, .shift]) where finder.isShown: finder.step(forward: false); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
+    }
+}
+
+/// The bar: a field, whether it found anything, previous and next, and close. Return finds the next
+/// match, Escape closes.
+private struct PreviewFindBar: View {
+    @Bindable var finder: PreviewFinder
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
+            TextField("Find in preview", text: $finder.query)
+                .textFieldStyle(.plain)
+                .font(.system(size: PaneMetrics.label))
+                .frame(width: 170)
+                .focused($focused)
+                .onSubmit { finder.step(forward: true) }
+                .onKeyPress(.escape) { finder.close(); return .handled }
+            if finder.missing {
+                Text("Not found").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+            }
+            PaneIconButton(symbol: "chevron.up", help: "Previous match (⇧⌘G)") { finder.step(forward: false) }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+            PaneIconButton(symbol: "chevron.down", help: "Next match (⌘G)") { finder.step(forward: true) }
+                .keyboardShortcut("g", modifiers: .command)
+            PaneIconButton(symbol: "xmark", help: "Close (Esc)") { finder.close() }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 2)
+        .frame(height: 32)
+        .background(.bar, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        .onChange(of: finder.query, initial: true) { finder.restart() }
+        .onChange(of: finder.focusRequest, initial: true) { focused = true }
+    }
+}
+

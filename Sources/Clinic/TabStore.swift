@@ -1518,10 +1518,11 @@ extension TabStore {
     /// Opens a ⌘-clicked file link in the tab's Files pane instead of the file's default app: the
     /// file Claude Code just named is read beside the session that named it. A folder, a file the pane
     /// cannot show and anything not on disk still go to the system; so does everything, with the
-    /// setting off.
-    func openInFiles(_ url: URL, from tab: Tab) -> Bool {
+    /// setting off. A relative path is read from `cwd`, the directory the text was printed in: the
+    /// shell's for a session or shell, the run's own for a run's output.
+    func openInFiles(_ url: URL, from tab: Tab, cwd: String? = nil) -> Bool {
         guard UserDefaults.standard.object(forKey: Self.fileLinksInFilesKey) as? Bool ?? true,
-              let link = FileLink.resolve(url, cwd: tab.pwd ?? tab.projectPath, isFile: Self.isRegularFile),
+              let link = FileLink.resolve(url, cwd: cwd ?? tab.pwd ?? tab.projectPath, isFile: Self.isRegularFile),
               MediaFile.isMedia(link.path) || Self.isText(link.path) else { return false }
         showPane(.files, in: tab)
         guard let editor = tab.panel.pane(.files)?.editor else { return false }
