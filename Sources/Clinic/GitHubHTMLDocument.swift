@@ -9,17 +9,23 @@ import Foundation
 enum GitHubHTMLDocument {
     /// `reportsHeight` is off for a view that scrolls itself (the Tasks thread, ADR-112): there is
     /// no height handler to post to, and nothing to size.
-    static func page(body: String, dark: Bool, reportsHeight: Bool = true, extraCSS: String = "") -> String {
+    ///
+    /// A local document (the Files pane's Markdown preview, ADR-191) names the URL scheme its pictures
+    /// are served under, which the CSP then lets images and media load from; `script` is its own, run
+    /// under the same nonce.
+    static func page(body: String, dark: Bool, reportsHeight: Bool = true, extraCSS: String = "",
+                     localScheme: String? = nil, script: String = "") -> String {
         let nonce = UUID().uuidString
         return """
         <!doctype html>
         <html><head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="Content-Security-Policy" content="\(csp(nonce: nonce))">
+        <meta http-equiv="Content-Security-Policy" content="\(csp(nonce: nonce, localScheme: localScheme))">
         <style>\(css(dark: dark))\(extraCSS)</style>
         </head><body>\(body)
         \(reportsHeight ? "<script nonce=\"\(nonce)\">\(heightScript)</script>" : "")
+        \(script.isEmpty ? "" : "<script nonce=\"\(nonce)\">\(script)</script>")
         </body></html>
         """
     }
@@ -33,9 +39,11 @@ enum GitHubHTMLDocument {
 
     /// Images (and the media a comment may embed) load; everything else is refused. Scripts are
     /// limited to the nonce below, so even if a comment smuggled in a `<script>` it would not run.
-    static func csp(nonce: String) -> String {
-        "default-src 'none'; img-src https: data: blob:; media-src https: data:; "
-        + "style-src 'unsafe-inline'; script-src 'nonce-\(nonce)'; frame-src 'none'; connect-src 'none'"
+    /// `localScheme` is where a document read from disk gets the pictures that sit beside it.
+    static func csp(nonce: String, localScheme: String? = nil) -> String {
+        let local = localScheme.map { " \($0):" } ?? ""
+        return "default-src 'none'; img-src https: data: blob:\(local); media-src https: data:\(local); "
+            + "style-src 'unsafe-inline'; script-src 'nonce-\(nonce)'; frame-src 'none'; connect-src 'none'"
     }
 
     /// Reports document height to the host so SwiftUI can size the view. A `ResizeObserver` covers
@@ -98,7 +106,9 @@ enum GitHubHTMLDocument {
         img { max-width: 100%; height: auto; border-radius: 6px; }
         hr { height: 1px; border: 0; background: \(border); margin: 16px 0; }
         table { border-collapse: collapse; display: block; width: max-content; max-width: 100%; overflow: auto; }
-        th, td { border: 1px solid \(border); padding: 5px 12px; text-align: left; vertical-align: top; }
+        th, td { border: 1px solid \(border); padding: 5px 12px; vertical-align: top; }
+        /* A column's own alignment (`|--:|`) arrives as `align`; only the rest default to the left. */
+        th:not([align]), td:not([align]) { text-align: left; }
         th { font-weight: 600; background: \(subtle); }
         tr:nth-child(2n) td { background: \(dark ? "#0f1419" : "#f6f8fa"); }
         /* GitHub's `> [!NOTE]` blocks. */

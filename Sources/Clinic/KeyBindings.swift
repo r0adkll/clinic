@@ -8,7 +8,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
     case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
-    case togglePanelVisibility, zoomPanel, toggleFileTree, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
+    case togglePanelVisibility, zoomPanel, toggleFileTree, cycleMarkdownView, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
     case nextDiffChange, previousDiffChange, nextDiffFile, previousDiffFile, markDiffFileViewed
     case run, stopRun, chooseRunConfiguration
@@ -50,6 +50,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .togglePanelVisibility: "Show / Hide Panel"
         case .zoomPanel: "Zoom Panel"
         case .toggleFileTree: "Show / Hide Browser List"
+        case .cycleMarkdownView: "Cycle Markdown View"
         case .quickLookImage: "Quick Look Media"
         case .copyGrillRound: "Copy Grill Round as Markdown"
         case .nextDiffChange: "Next Change in Diff"
@@ -74,7 +75,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
-             .togglePanelVisibility, .zoomPanel, .toggleFileTree, .quickLookImage, .copyGrillRound,
+             .togglePanelVisibility, .zoomPanel, .toggleFileTree, .cycleMarkdownView, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab,
              .nextDiffChange, .previousDiffChange, .nextDiffFile, .previousDiffFile, .markDiffFileViewed: "Panel"
         case .nextTab, .previousTab: "Tabs"
@@ -120,6 +121,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .togglePanelVisibility: "cmd+opt+j"
         case .zoomPanel: "cmd+opt+shift+j"
         case .toggleFileTree: "cmd+ctrl+e"
+        // ADR-191. P for preview, with ⌃ like the tree toggle beside it; ⌘⇧V, the usual chord, is
+        // Ghostty's paste-from-selection.
+        case .cycleMarkdownView: "cmd+ctrl+p"
         // Finder's own equivalent for the panel space opens, and the one path to it that works
         // without clicking into the pane first (ADR-107).
         case .quickLookImage: "cmd+y"

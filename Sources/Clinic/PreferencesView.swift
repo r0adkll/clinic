@@ -402,6 +402,7 @@ private struct SessionsPane: View {
     @AppStorage(WorktreeExitAnswer.preferenceKey) private var worktreeExit = "keep"
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
     @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
+    @AppStorage(TabStore.fileLinksInFilesKey) private var fileLinksInFiles = true
 
     var body: some View {
         Form {
@@ -439,6 +440,16 @@ private struct SessionsPane: View {
                      + "after the close sheet says what the worktree holds. Remove is the CLI's own: the directory, its "
                      + "branch and any uncommitted work go for good. A clean worktree of an unnamed session is removed by "
                      + "Claude Code itself. Archiving offers to trash a kept worktree instead; Undo Archive brings it back.")
+            }
+
+            Section {
+                Toggle("Open file links in the Files pane", isOn: $fileLinksInFiles)
+            } header: {
+                Text("Terminal")
+            } footer: {
+                Text("⌘-click a file Claude Code names, or a path printed in a shell, and it opens in the session's "
+                     + "Files pane, at its line when the link names one. Off, files open in their default app. "
+                     + "Folders, and files the pane cannot show, always do.")
             }
 
             Section {

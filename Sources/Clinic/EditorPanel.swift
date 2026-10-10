@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
-import CodeEditSourceEditor
+@preconcurrency import CodeEditSourceEditor
 import CodeEditLanguages
+import CodeEditTextView
 import ClinicCore
 
 /// Layout choices the Files panes and file windows share (ADR-081). Held in one observable object so
@@ -13,15 +14,26 @@ final class EditorPrefs {
     static let shared = EditorPrefs()
     static let showTreeKey = "ClinicEditorShowTree"
     static let treeWidthKey = "ClinicEditorTreeWidth"
+    static let markdownModeKey = "ClinicEditorMarkdownMode"
 
     var showTree: Bool { didSet { UserDefaults.standard.set(showTree, forKey: Self.showTreeKey) } }
     /// The tree column's width, as the user last dragged it.
     var treeWidth: CGFloat { didSet { UserDefaults.standard.set(Double(treeWidth), forKey: Self.treeWidthKey) } }
+    /// How a Markdown file opens (ADR-191). Rendered unless the reader said otherwise: in a session the
+    /// Markdown in front of you is mostly a plan, a README or notes an agent wrote, there to be read.
+    var markdownMode: MarkdownMode { didSet { UserDefaults.standard.set(markdownMode.rawValue, forKey: Self.markdownModeKey) } }
 
     private init() {
         showTree = UserDefaults.standard.object(forKey: Self.showTreeKey) as? Bool ?? true
         let stored = UserDefaults.standard.double(forKey: Self.treeWidthKey)
         treeWidth = stored > 0 ? CGFloat(stored) : 180
+        markdownMode = UserDefaults.standard.string(forKey: Self.markdownModeKey).flatMap(MarkdownMode.init(rawValue:)) ?? .preview
+    }
+
+    /// ⌘⌃P: Source, then Split, then Preview, and round again.
+    func cycleMarkdownMode() {
+        let all = MarkdownMode.allCases
+        markdownMode = all[((all.firstIndex(of: markdownMode) ?? 0) + 1) % all.count]
     }
 
     static let minTreeWidth: CGFloat = 160
@@ -86,6 +98,12 @@ final class EditorModel {
     /// reads its text binding when its controller is made — `updateNSViewController` never pushes text
     /// back — so the code view's identity is this counter, and a load rebuilds it (ADR-081).
     private(set) var loadGeneration = 0
+    /// Where a link asked the file to open (ADR-192): the code view puts its cursor there and the
+    /// Markdown preview scrolls to it. Belongs to the open that set it; any other load clears it.
+    private(set) var jump: (line: Int, column: Int)?
+
+    /// The open file is Markdown, shown as text — the preview's case (ADR-191).
+    var isMarkdown: Bool { openPath != nil && mediaPath == nil && language.id == .markdown }
 
     init(root: String, tree buildsTree: Bool = true) {
         self.root = root
@@ -161,7 +179,7 @@ final class EditorModel {
 
     func open(relative: String) { open(absolute: (root as NSString).appendingPathComponent(relative)) }
 
-    func open(absolute path: String) {
+    func open(absolute path: String, line: Int? = nil, column: Int? = nil) {
         if isDirty, let current = openPath, current != path, !confirmDiscard() { return }
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -180,6 +198,7 @@ final class EditorModel {
             fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
             externalChangePending = false
             error = nil
+            jump = line.map { ($0, column ?? 1) }
             recentlyOpened.removeAll { $0 == path }
             recentlyOpened.insert(path, at: 0)
             if recentlyOpened.count > 20 { recentlyOpened.removeLast() }
@@ -199,7 +218,22 @@ final class EditorModel {
         } catch { self.error = "\(error)" }
     }
 
-    func revert() { text = savedText; loadGeneration += 1 }
+    func revert() { text = savedText; jump = nil; loadGeneration += 1 }
+
+    /// Forgets the line a link opened the file at, so a view built later — the editor appearing when
+    /// the Markdown view changes — starts where the reader is rather than jumping back.
+    func clearJump() { jump = nil }
+
+    /// Opens what an Obsidian `[[wiki link]]` in the preview names (ADR-191), found by name anywhere
+    /// in the tree, as Obsidian finds it.
+    func openWikiLink(_ target: String) async {
+        let files = await index.files()
+        guard let found = MarkdownDocument.resolveWikiLink(target, from: relativeOpenPath ?? "", in: files) else {
+            error = "No file here is named “\(target)”"
+            return
+        }
+        open(relative: found)
+    }
 
     private func externalChanged() {
         guard let path = openPath else { return }
@@ -216,6 +250,7 @@ final class EditorModel {
         fileModified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
         externalChangePending = false
         loadMedia(path)
+        jump = nil
         loadGeneration += 1
     }
 
@@ -393,6 +428,7 @@ struct FileRowMenu: View {
 
     var body: some View {
         Button("Open in New Window") { FileWindowController.show(path: path, root: root) }
+        Button("Open with Default App") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
     }
@@ -418,6 +454,8 @@ struct FileEditorView: View {
                 } else {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            } else if model.isMarkdown {
+                MarkdownEditorView(model: model)
             } else if model.openPath != nil {
                 CodeView(model: model).id(model.loadGeneration)
             } else {
@@ -427,6 +465,7 @@ struct FileEditorView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .onChange(of: EditorPrefs.shared.markdownMode) { model.clearJump() }
         .sheet(isPresented: $quickOpen) { QuickOpenSheet(model: model) }
         .alert("File changed on disk", isPresented: $model.externalChangePending) {
             Button("Reload") { model.reloadFromDisk() }
@@ -459,6 +498,10 @@ struct FileEditorView: View {
                 if model.hasMediaSource {
                     MediaSourceToggle(showsSource: $model.showsMediaSource)
                 }
+                if model.isMarkdown {
+                    MarkdownModePicker(mode: Binding(get: { EditorPrefs.shared.markdownMode },
+                                                     set: { EditorPrefs.shared.markdownMode = $0 }))
+                }
                 if model.isDirty {
                     Button("Revert") { model.revert() }
                     Button("Save") { model.save() }.keyboardShortcut("s", modifiers: .command)
@@ -482,12 +525,22 @@ struct FileEditorView: View {
 /// file rebuilds it — `SourceEditor` reads its text binding only when its controller is made, and
 /// would otherwise go on showing the buffer it was born with (ADR-081). Rebuilding also resets the
 /// cursor, scroll and undo stack, which belonged to the file that just went away.
-private struct CodeView: View {
+struct CodeView: View {
     @Bindable var model: EditorModel
+    /// Set beside a Markdown preview: the editor's scroll position is sent to it (ADR-191).
+    var sync: MarkdownScrollSync?
     @State private var editorState = SourceEditorState()
     /// Held for the life of this view: a fresh provider on every body would make the editor drop and
     /// redo all of its highlighting each update.
     @State private var markdown = MarkdownHighlighter()
+    @State private var bridge: CodeViewBridge
+
+    init(model: EditorModel, sync: MarkdownScrollSync? = nil) {
+        self.model = model
+        self.sync = sync
+        // The jump goes in with the bridge, which places it once the editor is laid out in a window.
+        _bridge = State(initialValue: CodeViewBridge(jump: model.jump))
+    }
 
     var body: some View {
         SourceEditor(
@@ -499,8 +552,85 @@ private struct CodeView: View {
                 peripherals: .init(showGutter: true, showMinimap: false, showReformattingGuide: false, showFoldingRibbon: false)
             ),
             state: $editorState,
-            highlightProviders: model.language.id == .markdown ? [markdown] : nil
+            highlightProviders: model.language.id == .markdown ? [markdown] : nil,
+            coordinators: [bridge]
         )
+        .onChange(of: sync == nil, initial: true) { bridge.onTopLine = sync.map { s in { s.sourceScrolled(to: $0) } } }
+    }
+}
+
+/// What the Files pane needs from the text controller that `SourceEditor`'s bindings do not give:
+/// a cursor placed *and scrolled to* when a link names a line (ADR-192) — setting the state's cursor
+/// places it but never scrolls — and the line at the top of the view, for the Markdown preview to
+/// follow (ADR-191).
+@MainActor
+final class CodeViewBridge: @preconcurrency TextViewCoordinator {
+    private var jump: (line: Int, column: Int)?
+    var onTopLine: ((Double) -> Void)? { didSet { scrolled() } }
+    private weak var controller: TextViewController?
+    private var observer: NSObjectProtocol?
+
+    init(jump: (line: Int, column: Int)?) { self.jump = jump }
+
+    /// The controller is made before its text is set and long before it is in a window, and inside
+    /// SwiftUI its `viewDidAppear` cannot be relied on to arrive. So the bridge waits — a few frames at
+    /// most — for a laid-out view in a window, then places the jump and starts watching the scroll.
+    func prepareCoordinator(controller: TextViewController) {
+        self.controller = controller
+        Task { [weak self] in
+            for _ in 0..<40 {
+                try? await Task.sleep(for: .milliseconds(25))
+                guard let self, let controller = self.controller else { return }
+                if controller.view.window != nil, controller.textView.frame.height > 0 { self.attach(controller); return }
+            }
+        }
+    }
+
+    private func attach(_ controller: TextViewController) {
+        if let jump {
+            self.jump = nil
+            controller.setCursorPositions([CursorPosition(line: jump.line, column: jump.column)])
+            reveal(controller)
+        }
+        guard observer == nil, let clip = controller.scrollView?.contentView else { return }
+        clip.postsBoundsChangedNotifications = true
+        observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip,
+                                                          queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrolled() }
+        }
+        scrolled()
+    }
+
+    /// Puts the cursor's line a third of the way down the view, where the eye lands. The text view's
+    /// own `scrollSelectionToVisible` measures the selection's drawn rect, which an empty selection
+    /// does not have, and so never moves.
+    private func reveal(_ controller: TextViewController) {
+        guard let offset = controller.cursorPositions.first?.range.location, offset != NSNotFound,
+              let rect = controller.textView.layoutManager.rectForOffset(offset),
+              let clip = controller.scrollView?.contentView else { return }
+        let wanted = NSRect(x: clip.bounds.minX, y: rect.minY - clip.bounds.height / 3, width: clip.bounds.width, height: clip.bounds.height)
+        clip.scroll(to: clip.constrainBoundsRect(wanted).origin)
+        controller.scrollView.reflectScrolledClipView(clip)
+        // What `SourceEditor` itself does after moving the clip view, whose gutter is out of reach
+        // here: without it the gutter keeps drawing the numbers of the lines it last measured, above
+        // the view (ADR-192).
+        NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: controller.textView)
+        func redraw(_ view: NSView) { view.needsDisplay = true; view.subviews.forEach(redraw) }
+        redraw(controller.view)
+    }
+
+    /// The source line at the top of the view, with how far down it the view has scrolled.
+    private func scrolled() {
+        guard let onTopLine, let textView = controller?.textView else { return }
+        let y = textView.visibleRect.minY
+        guard let line = textView.layoutManager.textLineForPosition(y) else { return }
+        let into = line.height > 0 ? min(1, max(0, (y - line.yPos) / line.height)) : 0
+        onTopLine(Double(line.index + 1) + into)
+    }
+
+    func destroy() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
     }
 }
 

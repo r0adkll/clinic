@@ -29,6 +29,10 @@ packages:
   CodeEditSourceEditor:
     url: https://github.com/CodeEditApp/CodeEditSourceEditor
     exactVersion: "0.15.2"
+  # GitHub's own Markdown engine, for the Files pane's preview (ADR-191).
+  swift-cmark:
+    url: https://github.com/swiftlang/swift-cmark
+    exactVersion: "0.9.0"
 targets:
   Clinic:
     type: application
@@ -49,6 +53,10 @@ targets:
       - package: ClinicCore
       - package: GhosttyBridge
       - package: CodeEditSourceEditor
+      - package: swift-cmark
+        product: cmark-gfm
+      - package: swift-cmark
+        product: cmark-gfm-extensions
       - target: clinic-hook
         embed: true
         codeSign: true

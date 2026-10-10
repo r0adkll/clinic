@@ -1075,6 +1075,8 @@ final class TabStore {
     /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
     var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
     var isImagesPaneFront: Bool { selectedTab?.panel.isFront(.attachments) ?? false }
+    /// A Files pane is on screen showing a Markdown file, so the view can be cycled (ADR-191).
+    var isMarkdownFront: Bool { isFilesPaneFront && selectedTab?.panel.pane(.files)?.editor?.isMarkdown == true }
     /// The diff the reader is looking at: the Diff panel's, or a pull request pane's (ADR-188).
     var frontDiffBrowser: DiffBrowser? {
         guard let panel = selectedTab?.panel, panel.isVisible, let pane = panel.selected else { return nil }
@@ -1508,13 +1510,55 @@ final class TabStore {
     }
 }
 
+// MARK: Terminal file links (ADR-192)
+
+extension TabStore {
+    static let fileLinksInFilesKey = "ClinicOpenFileLinksInFiles"
+
+    /// Opens a ⌘-clicked file link in the tab's Files pane instead of the file's default app: the
+    /// file Claude Code just named is read beside the session that named it. A folder, a file the pane
+    /// cannot show and anything not on disk still go to the system; so does everything, with the
+    /// setting off.
+    func openInFiles(_ url: URL, from tab: Tab) -> Bool {
+        guard UserDefaults.standard.object(forKey: Self.fileLinksInFilesKey) as? Bool ?? true,
+              let link = FileLink.resolve(url, cwd: tab.pwd ?? tab.projectPath, isFile: Self.isRegularFile),
+              MediaFile.isMedia(link.path) || Self.isText(link.path) else { return false }
+        showPane(.files, in: tab)
+        guard let editor = tab.panel.pane(.files)?.editor else { return false }
+        editor.open(absolute: link.path, line: link.line, column: link.column)
+        Self.log.info("opened a terminal file link in the Files pane")
+        return true
+    }
+
+    private nonisolated static func isRegularFile(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    /// What the pane would open as text: under its 8 MB limit, with no NUL in the first 8 KB, and UTF-8
+    /// there. A zip, a database or a compiled binary goes to the app that can open it.
+    private static func isText(_ path: String) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        guard size < 8 * 1024 * 1024 else { return false }
+        try? handle.seek(toOffset: 0)
+        let head = (try? handle.read(upToCount: 8192)) ?? Data()
+        if head.contains(0) { return false }
+        // A multi-byte character cut at the 8 KB boundary is not a reason to refuse the file.
+        return (0...3).contains { String(data: head.dropLast($0), encoding: .utf8) != nil }
+    }
+}
+
 extension TabStore: GhosttySurfaceDelegate {
     func surface(_ surface: GhosttySurfaceView, didReceive action: GhosttyAction) -> Bool {
         let tab = tab(forSurface: surface)
         let isPanel = tab?.panelSurface === surface
         switch action {
         case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
-        case .openURL(let url, _): NSWorkspace.shared.open(url); return true
+        case .openURL(let url, _):
+            if let tab, openInFiles(url, from: tab) { return true }
+            NSWorkspace.shared.open(url); return true
         case .ringBell:
             if let tab, !isFrontAndSelected(tab) {
                 notify(tab, sessionId: tab.sessionId, title: tab.title, body: "Rang the bell", kind: .bell)

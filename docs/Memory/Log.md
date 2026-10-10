@@ -4861,3 +4861,40 @@ pressing keep* and the worktree and `worktree-wt190` stayed; with `ClinicWorktre
 to the Dev defaults, *pressing remove* and both were gone. So the dialog is matched off a real Ghostty
 surface and a bare digit answers it there too. Not exercised: the close sheet and its popup (an `NSAlert`,
 read from the code), archive awaiting the close, the quit path.
+
+## 2026-10-10 — The Files pane renders Markdown, and terminal file links open there (ADR-191, ADR-192)
+
+User: a toggle to see Markdown rendered (source only, side by side, rendered only) *or* an Obsidian-like
+WYSIWYG editor; and ⌘-clicked files in the CLI opening in the Files tab rather than the default app.
+
+**Choice.** The three views, not WYSIWYG: CodeEditSourceEditor's highlight providers only colour text and
+cannot hide syntax or size lines, and a web rich-text editor would rewrite the Markdown it saves. Recorded
+in ADR-191 as declined, open to a separate decision. Preview is the default, remembered globally.
+
+**Probe.** The CLI binary (2.1.296) builds file hyperlinks with `pathToFileURL(...).href`, so the links are
+OSC 8 `file:///…` with no line. Ghostty's own path detection can add relative paths and `:line`.
+
+**Core.** `Editor/FileLink.swift` (URL → path and line, relative to the shell, `:line:column`, the
+`README.md:12`-is-a-scheme case) and `Editor/MarkdownDocument.swift` (front matter split with its lines
+kept blank; wiki-link resolution). `FileLinkTests`, `MarkdownDocumentTests`: ten tests.
+
+**App.** swift-cmark 0.9.0 added to `project.yml` and ADR-058's table. `MarkdownRenderer` (cmark-gfm with
+table, strikethrough, autolink, tagfilter, tasklist, footnotes, source positions, unsafe HTML behind the
+CSP). `MarkdownPreview.swift`: the mode picker, `MarkdownEditorView` (`AnyLayout`, side by side at 640 pt),
+the web view (content swapped in place by `callAsyncJavaScript`; heading slugs, alerts, wiki links, anchors
+and the line-follow in the page script), `LocalFileScheme` for pictures. `EditorPanel`: `markdownMode`,
+`jump`, `openWikiLink`, `CodeViewBridge`, *Open with Default App*. `TabStore.openInFiles` before
+`NSWorkspace.open`; Settings → Sessions → Terminal; Panel → Cycle Markdown View (⌘⌃P).
+
+**Found while verifying.** Local pictures drew broken under `loadHTMLString` with a `file:` base, so the
+scheme handler. The jump never ran from `controllerDidAppear` inside SwiftUI, so the bridge polls after
+`prepareCoordinator`. The cursor then landed without scrolling, because `scrollSelectionToVisible` needs a
+drawn selection rect, so the bridge scrolls the clip view itself. That left the gutter drawing stale
+numbers over the header until the bridge redrew the editor's views and the split clipped its editor.
+
+**Verified.** `make test` (654 pass). Clinic Dev: README with local pictures; a GFM test file in wide Split
+and in Preview (table alignment, tasks, alert, `<details>`, inert `<script>`, wiki links, front matter);
+an on-disk insert showing in place; the new `-ClinicOpenLinkAfterLaunch` seam opening ADR-081 at `#L60` in
+narrow Split with the editor on line 60 and the preview following. Not exercised: clicks inside the preview,
+a real ⌘-click on a cell, the menu chord, the setting off, light appearance, file windows.
+

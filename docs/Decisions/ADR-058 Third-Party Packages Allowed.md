@@ -15,6 +15,7 @@ Vetted third-party packages are allowed when they replace substantial work. Bar:
 | Package | Version | Licence | Purpose |
 |---|---|---|---|
 | CodeEditApp/CodeEditSourceEditor (+ CodeEditTextView, CodeEditLanguages, SwiftTreeSitter) | 0.15.2 | MIT | tree-sitter source editor for the editor panel |
+| swiftlang/swift-cmark (cmark-gfm, cmark-gfm-extensions) | 0.9.0 | BSD-2-Clause | GitHub-flavoured Markdown to HTML for the Files pane's preview ([[ADR-191 The Files Pane Renders Markdown]]) |
 
 Build note: CodeEditSourceEditor uses the SwiftLint build plugin; `xcodebuild` runs pass `-skipPackagePluginValidation -skipMacroValidation` (Makefile, CI, release script).
 

@@ -354,6 +354,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try? await Task.sleep(for: .seconds(1)); tabs.togglePanelVisibility()
                 }
             }
+            // `-ClinicOpenLinkAfterLaunch <url>` (ADR-192): the launch tab handles a terminal link as if it
+            // had been ⌘-clicked, the click a smoke run cannot make on a cell.
+            if let link = UserDefaults.standard.string(forKey: "ClinicOpenLinkAfterLaunch"), let url = URL(string: link) {
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    if let tab = tabs.selectedTab, !tabs.openInFiles(url, from: tab) { NSWorkspace.shared.open(url) }
+                }
+            }
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
                 if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
@@ -796,6 +804,9 @@ struct ClinicCommands: Commands {
             Toggle(tabs.isImagesPaneFront ? "Show Media List" : "Show File Tree",
                    isOn: Binding(get: { tabs.browserListShown }, set: { _ in tabs.toggleBrowserList() }))
                 .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.canToggleBrowserList)
+            // ADR-191: one item that cycles, so the chord is one chord; the header shows all three.
+            Button("Cycle Markdown View (\(EditorPrefs.shared.markdownMode.title))") { EditorPrefs.shared.cycleMarkdownMode() }
+                .keyboardShortcut(key(.cycleMarkdownView)).disabled(!tabs.isMarkdownFront)
             Button("Quick Look") { tabs.quickLookFrontImage() }
                 .keyboardShortcut(key(.quickLookImage)).disabled(!tabs.isImagesPaneFront)
             Button("Copy Grill Round as Markdown") { tabs.copyFrontGrillRound() }
