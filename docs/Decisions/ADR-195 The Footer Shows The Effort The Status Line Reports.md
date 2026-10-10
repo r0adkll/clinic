@@ -38,5 +38,6 @@ changes, so a typed `/effort` reaches it too. The session card read it, and the 
   `modelSettings.<model>.effortLevel` into `~/.claude/settings.json`, as `/model` does
   ([[ADR-064 Model and Effort Switching]]). A footer switch is never local to the session. The
   verification run wrote `claude-sonnet-5-5: low` into the user's settings this way.
-- Not changed: the model chip still reads `Tab.model`, which says *Model* until the transcript names one,
-  though the status line has the model from the start.
+- Not changed here: the model chip still read `Tab.model`, which says *Model* until the transcript names one,
+  though the status line has the model from the start. Fixed in
+  [[ADR-196 The Footer Names The Model The Status Line Reports]].

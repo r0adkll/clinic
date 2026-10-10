@@ -4942,3 +4942,14 @@ and the chip read *Low*.
 entry was most likely new. Removing it was refused by the auto-mode classifier and left to the user.
 Next time, verify an effort switch with `CLINIC_DEV_CLAUDE_CONFIG_DIR` set. The run also left a short
 transcript (`a96ffd2b…`) under the clinic project.
+
+## 2026-10-10 — The footer's model chip reads the status line too (ADR-196)
+
+User accepted the offer to give the model chip the same fix.
+
+**Built.** `ModelMenu` names the model from the status line's `display_name` and copies or pre-fills its
+`id`, falling back to `Tab.model`. `Tab.model` and what a child inherits are unchanged.
+
+**Verified.** `make test` (654 pass). Clinic Dev built and launched a session, but its window then left the
+window list and the accessibility tree, and screen capture failed even for a plain rect. The chip was not
+read. No `/model` was sent, so the user's settings were not touched.

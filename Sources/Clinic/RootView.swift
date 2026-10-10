@@ -233,11 +233,14 @@ struct TabFooter: View {
     }
 }
 
-/// Footer model chip: a menu that types `/model` when the session is idle (ADR-064).
+/// Footer model chip: a menu that types `/model` when the session is idle (ADR-064), named by the status
+/// line, which knows the model before the transcript does and follows a typed `/model` (ADR-196).
 struct ModelMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
     private let aliases = ["default"] + ModelAlias.all
+    private var modelId: String? { tab.statusLine?.modelId ?? tab.model }
+    private var name: String? { tab.statusLine?.modelDisplayName ?? tab.model.map(TabFooter.shortModel) }
 
     var body: some View {
         Menu {
@@ -245,12 +248,12 @@ struct ModelMenu: View {
                 Button(ModelAlias.title(a)) { tabs.switchModel(tab, to: a) }
             }
             Button("Custom…") { customModel() }
-            if let m = tab.model {
+            if let m = modelId {
                 Divider()
                 Button("Copy Model ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(m, forType: .string) }
             }
         } label: {
-            Label(tab.model.map(TabFooter.shortModel) ?? "Model", systemImage: "cpu").font(.callout)
+            Label(name ?? "Model", systemImage: "cpu").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)
@@ -259,7 +262,7 @@ struct ModelMenu: View {
 
     private func customModel() {
         let alert = NSAlert(); alert.messageText = "Model id"; alert.informativeText = "Sent as /model <id>."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24)); field.stringValue = tab.model ?? ""
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24)); field.stringValue = modelId ?? ""
         alert.accessoryView = field; alert.addButton(withTitle: "Switch"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty { tabs.switchModel(tab, to: field.stringValue) }
     }
