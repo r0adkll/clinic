@@ -265,7 +265,7 @@ struct ModelMenu: View {
     }
 }
 
-/// Footer effort chip: types `/effort` (ADR-064).
+/// Footer effort chip: types `/effort` (ADR-064) and shows the level the status line reports (ADR-195).
 struct EffortMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
@@ -275,7 +275,7 @@ struct EffortMenu: View {
         Menu {
             ForEach(levels, id: \.self) { l in Button(l == "xhigh" ? "Extra high" : l.capitalized) { tabs.switchEffort(tab, to: l) } }
         } label: {
-            Label(tab.effort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
+            Label(tab.liveEffort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)

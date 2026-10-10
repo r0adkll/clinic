@@ -4921,3 +4921,24 @@ Swift, Bash and TypeScript; a plain unknown fence; a drawn flowchart and a broke
 seeded find selecting its match; a section appended on disk appearing in place. Not exercised: typing in
 the find bar, ⌘F/⌘G in the page, a link in a run's pane, light appearance.
 
+
+## 2026-10-10 — The footer's effort chip reads the status line (ADR-195)
+
+User: *"Looks like the model's effort never really renders in our footer bar"*
+
+**Cause.** `EffortMenu` read only `Tab.effort`, which is set by a launch with `--effort` or by the chip
+itself. A session on the CLI's default said *Effort* forever. The status line has carried the resolved
+level all along (`effort.level` in 2.1.296, present whenever the model takes effort), and only the card
+read it.
+
+**Built.** `Tab.liveEffort` (status line, else `Tab.effort`), read by the footer chip and the card.
+
+**Verified.** Clinic Dev, a session in this repo with no prompt: Sonnet 5.5's chip read *Medium*.
+*Low* picked through the accessibility API typed `/effort low`, the banner said *with low effort*,
+and the chip read *Low*.
+
+**Side effect.** The CLI saves `/effort` as the default: the run wrote `modelSettings.claude-sonnet-5-5.effortLevel:
+"low"` into `~/.claude/settings.json`. No earlier `/effort` on Sonnet appears in any transcript, so the
+entry was most likely new. Removing it was refused by the auto-mode classifier and left to the user.
+Next time, verify an effort switch with `CLINIC_DEV_CLAUDE_CONFIG_DIR` set. The run also left a short
+transcript (`a96ffd2b…`) under the clinic project.

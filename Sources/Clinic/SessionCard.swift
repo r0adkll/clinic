@@ -300,7 +300,7 @@ struct SessionCard: View {
         // The status line is the CLI's own account (ADR-157); the transcript stands in where there is none.
         let report = tab?.statusLine
         let model = report?.modelDisplayName ?? activity?.modelName ?? (activity?.model ?? summary.model).map(ModelName.display)
-        let facts = live ? [model, report?.effort ?? tab?.effort].compactMap { $0 } : []
+        let facts = live ? [model, tab?.liveEffort].compactMap { $0 } : []
         let percent = live ? report?.contextUsedPercentage : nil
         let tokens = live && percent == nil ? activity?.contextTokens : nil
         let path = showPath ? (summary.lastCwd ?? summary.cwd).map(TabFooter.abbreviate) : nil

@@ -108,6 +108,9 @@ final class Tab: Identifiable {
     /// A typed line becomes Claude's next prompt: idle, including idle long enough for `idle_prompt`.
     var isAtPrompt: Bool { SessionStateMachine.acceptsPrompt(state, waitingOn: waitingOn) }
     var isRunningClaude: Bool { (state != nil && state != .exited && !childExited) || (isAttached && !childExited) }
+    /// The level the CLI is using: the status line's, which names the default too and follows a typed
+    /// `/effort`, else the one Clinic launched with or sent (ADR-195).
+    var liveEffort: String? { statusLine?.effort ?? effort }
 }
 
 /// Owns the libghostty runtime and every open tab (ADR-019, ADR-041, ADR-043).

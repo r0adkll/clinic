@@ -1,5 +1,5 @@
 ---
-status: superseded in part by ADR-155 (the list of aliases)
+status: superseded in part by ADR-155 (the list of aliases) and ADR-195 (where the effort chip reads its level)
 date: 2026-09-07
 tags: [adr, ui, sessions, milestone-4]
 ---
