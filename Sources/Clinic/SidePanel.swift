@@ -9,8 +9,9 @@ import GhosttyBridge
 @MainActor
 @Observable
 final class PanelPane: Identifiable {
-    /// Panel tab identity. Two panes of the same kind never coexist, so a quick action re-focuses the
-    /// pane it already opened; PRs are distinguished by their ref, so each PR gets its own tab.
+    /// What a panel tab shows. Most kinds are one pane per tab, so a quick action re-focuses the pane
+    /// it already opened; PRs and runs are distinguished by their ref or key, so each gets its own tab.
+    /// A kind that `allowsSeveral` can be opened again beside itself, each pane its own identity (ADR-198).
     enum Kind: Hashable {
         case terminal, diff, files, attachments
         /// A round of the agent's questions, answered as a form (ADR-131).
@@ -18,6 +19,11 @@ final class PanelPane: Identifiable {
         case pr(PullRequestRef)
         /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
         case run(RunKey)
+
+        /// Whether a tab may hold more than one pane of this kind (ADR-198). The quick action still
+        /// fronts the one used last; *New …* adds another. Only shells for now — Files is the next
+        /// candidate, and needs nothing here but its case added.
+        var allowsSeveral: Bool { self == .terminal }
 
         var symbol: String {
             switch self {
@@ -80,6 +86,11 @@ final class PanelPane: Identifiable {
 
     let id = UUID()
     let kind: Kind
+    /// Which of its kind this pane is, from 1, for a kind that `allowsSeveral`: the lowest number no
+    /// open pane of the kind holds, so closing *Terminal 2* frees the name for the next one (ADR-198).
+    var ordinal = 1
+    /// The title the pane's shell last reported (OSC 0/2), which names its chip (ADR-198).
+    var shellTitle: String?
     var diff: DiffPanelModel?
     /// A pull request pane's changed files. Held here rather than in the view, so the commands that
     /// read a diff (ADR-188) reach it the way they reach the Diff panel's.
@@ -108,7 +119,14 @@ final class PanelPane: Identifiable {
 @Observable
 final class SidePanel {
     private(set) var panes: [PanelPane] = []
-    var selectedId: UUID? { didSet { syncWatchers() } }
+    var selectedId: UUID? {
+        didSet {
+            if let selectedId { recency.removeAll { $0 == selectedId }; recency.append(selectedId) }
+            syncWatchers()
+        }
+    }
+    /// Pane ids, least recently fronted first: which of several same-kind panes a quick action means (ADR-198).
+    private var recency: [UUID] = []
     /// Hiding the panel un-zooms it, so the two controls can never leave a tab with no way back (ADR-081).
     var isVisible = false { didSet { if !isVisible { isZoomed = false }; syncWatchers() } }
     /// The panel fills the tab, with the agent surface hidden behind it (ADR-081).
@@ -117,7 +135,22 @@ final class SidePanel {
     var selected: PanelPane? { panes.first { $0.id == selectedId } }
     var isEmpty: Bool { panes.isEmpty }
 
-    func pane(_ kind: PanelPane.Kind) -> PanelPane? { panes.first { $0.kind == kind } }
+    /// The pane of this kind a quick action means: the only one, or of several, the one fronted last (ADR-198).
+    func pane(_ kind: PanelPane.Kind) -> PanelPane? { mostRecent(of: panes(kind)) }
+    /// Of these panes, the one fronted last; one never fronted counts as older than any that was.
+    func mostRecent(of candidates: [PanelPane]) -> PanelPane? {
+        candidates.max { (recency.lastIndex(of: $0.id) ?? -1) < (recency.lastIndex(of: $1.id) ?? -1) }
+    }
+    func panes(_ kind: PanelPane.Kind) -> [PanelPane] { panes.filter { $0.kind == kind } }
+    /// The lowest number no open pane of this kind holds (ADR-198).
+    func nextOrdinal(for kind: PanelPane.Kind) -> Int {
+        let taken = Set(panes(kind).map(\.ordinal))
+        return (1...).first { !taken.contains($0) }!
+    }
+    /// Each shell pane is drawn only while it is the one on screen, in a tab on screen (ADR-019, ADR-198).
+    func occludeShells(tabHidden: Bool) {
+        for pane in panes(.terminal) { pane.terminal?.isOccluded = tabHidden || !isVisible || pane.id != selectedId }
+    }
     /// The pane is open, the panel is showing, and this pane is the one on screen.
     func isFront(_ kind: PanelPane.Kind) -> Bool { isVisible && selected?.kind == kind }
     func isOpen(_ kind: PanelPane.Kind) -> Bool { pane(kind) != nil }
@@ -138,6 +171,7 @@ final class SidePanel {
     func close(_ pane: PanelPane) {
         guard let index = panes.firstIndex(where: { $0.id == pane.id }) else { return }
         panes.remove(at: index)
+        recency.removeAll { $0 == pane.id }
         pane.tearDown()
         if selectedId == pane.id {
             selectedId = panes[safe: index]?.id ?? panes.last?.id
@@ -151,12 +185,14 @@ final class SidePanel {
     func closeAll(except keep: PanelPane? = nil) {
         for pane in panes where pane.id != keep?.id { pane.tearDown() }
         panes = keep.map { [$0] } ?? []
+        recency = keep.map { [$0.id] } ?? []
         selectedId = keep?.id
     }
 
     func tearDown() {
         for pane in panes { pane.tearDown() }
         panes = []
+        recency = []
         selectedId = nil
         isVisible = false
         isZoomed = false
@@ -256,8 +292,9 @@ struct SidePanelTabBar: View {
             if !available.isEmpty {
                 Section("Add") {
                     ForEach(available, id: \.self) { kind in
-                        Button { tabs.showPane(kind, in: tab) } label: {
-                            Label { Text(tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
+                        // A kind already open here that allows several adds another, named as such (ADR-198).
+                        Button { tabs.addPane(kind, in: tab) } label: {
+                            Label { Text(tab.panel.isOpen(kind) ? "New " + kind.defaultTitle : tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
                         }
                     }
                 }
@@ -266,7 +303,7 @@ struct SidePanelTabBar: View {
                 Section("Open") {
                     ForEach(tab.panel.panes) { pane in
                         Button { tabs.selectPane(pane, in: tab) } label: {
-                            Label { Text(tabs.paneTitle(pane.kind, in: tab)) } icon: { pane.kind.icon }
+                            Label { Text(tabs.paneTitle(pane, in: tab)) } icon: { pane.kind.icon }
                         }
                     }
                 }
@@ -288,7 +325,7 @@ struct SidePanelTabChip: View {
     var compact = false
     @State private var hovering = false
 
-    private var title: String { tabs.paneTitle(pane.kind, in: tab) }
+    private var title: String { tabs.paneTitle(pane, in: tab) }
 
     private var fill: Color {
         if selected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }

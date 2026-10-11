@@ -4974,3 +4974,19 @@ to claim while hidden.
 accessibility (`AXIsProcessTrusted() == false`), and synthetic input was ruled out with the user at the machine.
 Clinic Dev was launched with one session, then stopped; its `state.json` was restored and the run's `mcp/` file
 and scratch directories were removed. Manual steps are in the ADR. The user then tried it in Clinic Dev and confirmed it worked.
+
+## 2026-10-11 — Several terminals in the panel (ADR-198)
+
+User: *"1-per panel on session's right-side panels can be too limiting … my main case is wanting to spool up
+multiple terminal panels in a session."* They chose terminals only (Files anticipated), a new shell when
+`run_in_terminal` finds the shell busy, and no splits, since larger panel and session work is planned.
+
+**Built.** `PanelPane.Kind.allowsSeveral` (terminal only), `ordinal`, `shellTitle`; `SidePanel` remembers the
+order in which panes were fronted, so `pane(kind)` is the most recent; `occludeShells`. `TabStore.addPane` /
+`newTerminal` (⌘⇧J, Panel ▸ New Terminal, `+` ▸ New Terminal), `paneTitle(_ pane:)`, `idleShell` for
+`run_in_terminal`. `Tab.panelSurface` replaced by `panelSurfaces` / `shellPane(for:)`; shell exit closes its
+own pane. The session card shows a row per busy shell. Seam: `-ClinicSeveralTerminalsOnLaunch YES`.
+
+**Verified.** `make test` (654 pass), Clinic Dev build clean, and the seam run in Clinic Dev logged fronting,
+occlusion, name reuse, title collisions and idle/busy routing as intended (table in the ADR). The strip was
+not looked at: screen capture is declined and the process is not trusted for accessibility.

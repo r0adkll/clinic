@@ -159,10 +159,11 @@ final class MCPToolService {
         case "run_in_terminal":
             let command = (args["command"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !command.isEmpty else { return MCPToolSpec.textResult("command is required", isError: true) }
-            tabs?.showPane(.terminal, in: tab)
-            guard let panel = tab.panelSurface else { return MCPToolSpec.textResult("Could not open the shell panel.", isError: true) }
-            panel.sendLine(command)
-            return MCPToolSpec.textResult("Command typed into the user's shell panel: \(command)")
+            guard let tabs, let pane = tabs.idleShell(in: tab), let shell = pane.terminal else {
+                return MCPToolSpec.textResult("Could not open a shell pane.", isError: true)
+            }
+            shell.sendLine(command)
+            return MCPToolSpec.textResult("Command typed into the user's shell pane \"\(tabs.paneTitle(pane, in: tab))\": \(command)")
 
         case "attach_pr":
             guard let urlString = args["url"] as? String, let url = URL(string: urlString), let ref = PullRequestRef(url: url) else {

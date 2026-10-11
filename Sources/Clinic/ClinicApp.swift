@@ -1,6 +1,7 @@
 import SwiftUI
 import ClinicCore
 import QuickLookUI
+import OSLog
 import GhosttyBridge
 
 @main
@@ -519,6 +520,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let pane { try? await Task.sleep(for: .seconds(1)); tabs.showPane(pane, in: tabs.selectedTab) }
             }
         }
+        // `-ClinicSeveralTerminalsOnLaunch YES` (ADR-198): a shell tab, then ⌘J, ⌘⇧J twice, picks and closes,
+        // logging which shell each lands on and which are drawn, so several shells are checkable without a screen.
+        if UserDefaults.standard.bool(forKey: "ClinicSeveralTerminalsOnLaunch") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                tabs.newShell(in: NSHomeDirectory())
+                try? await Task.sleep(for: .seconds(1))
+                guard let tab = tabs.selectedTab else { return }
+                let log = Logger(subsystem: "com.r0adkll.clinic", category: "smoke")
+                @MainActor func report(_ step: String) {
+                    let shells = tab.panel.panes(.terminal).map { pane in
+                        "\(tabs.paneTitle(pane, in: tab))\(pane.id == tab.panel.selectedId ? "*" : "")\(pane.terminal?.isOccluded == true ? " (occluded)" : "")"
+                    }
+                    log.info("smoke terminals \(step, privacy: .public): \(shells.joined(separator: ", "), privacy: .public)")
+                }
+                tabs.togglePanel(tab); report("⌘J")
+                tabs.newTerminal(tab); report("⌘⇧J")
+                tabs.newTerminal(tab); report("⌘⇧J")
+                if let first = tab.panel.panes(.terminal).first { tabs.selectPane(first, in: tab); report("select first") }
+                tabs.showPane(.diff, in: tab); report("⌘⇧G")
+                tabs.togglePanel(tab); report("⌘J")
+                if let second = tab.panel.panes(.terminal).dropFirst().first { tabs.closePane(second, in: tab); report("close second") }
+                tabs.newTerminal(tab); report("⌘⇧J")
+                try? await Task.sleep(for: .seconds(3))
+                report("after titles")
+                // `run_in_terminal`'s choice: the front shell while it idles, another once it is busy.
+                if let pane = tabs.idleShell(in: tab) { pane.terminal?.sendLine("sleep 20"); report("run sleep in \(tabs.paneTitle(pane, in: tab))") }
+                try? await Task.sleep(for: .seconds(2))
+                if let pane = tabs.idleShell(in: tab) { report("next command goes to \(tabs.paneTitle(pane, in: tab))") }
+                for pane in tab.panel.panes(.terminal).dropLast() { tabs.closePane(pane, in: tab) }
+                try? await Task.sleep(for: .seconds(1))
+                if let pane = tabs.idleShell(in: tab) { pane.terminal?.sendLine("sleep 20"); report("busy last: \(tabs.paneTitle(pane, in: tab))") }
+                try? await Task.sleep(for: .seconds(2))
+                if let pane = tabs.idleShell(in: tab) { report("every shell busy → \(tabs.paneTitle(pane, in: tab))") }
+            }
+        }
         // `-ClinicWindowContentSize <w>x<h>` (ADR-159): the primary window's content size in points, centred,
         // so a screenshot comes out the same size on every Mac and every run.
         if let raw = UserDefaults.standard.string(forKey: "ClinicWindowContentSize"),
@@ -712,7 +749,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishTermination() {
         FileWindowController.closeAll()
         ImageWindowController.closeAll()
-        for tab in tabs.tabs { tab.surface.free(); tab.panelSurface?.free() }
+        for tab in tabs.tabs { tab.surface.free(); tab.panelSurfaces.forEach { $0.free() } }
         tabs.runs.tearDown()
         hooks.stop()
         mcp.stop()
@@ -835,6 +872,7 @@ struct ClinicCommands: Commands {
                 .keyboardShortcut(key(.markDiffFileViewed)).disabled(tabs.frontDiffBrowser == nil)
             Divider()
             Button("Terminal") { tabs.togglePanel() }.keyboardShortcut(key(.togglePanel)).disabled(tabs.selectedTab == nil)
+            Button("New Terminal") { tabs.newTerminal() }.keyboardShortcut(key(.newTerminal)).disabled(tabs.selectedTab == nil)
             Button("Diff") { tabs.toggleDiffPanel() }.keyboardShortcut(key(.toggleDiffPage)).disabled(tabs.selectedTab == nil)
             Button("Files") { tabs.toggleEditor() }.keyboardShortcut(key(.toggleEditor)).disabled(tabs.selectedTab == nil)
             Button("Media") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)

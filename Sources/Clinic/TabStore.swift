@@ -75,8 +75,10 @@ final class Tab: Identifiable {
     var statusLine: StatusLineReport?
     /// Right-hand panel: a strip of panes — terminal, git, PRs, files, images — with one on screen (ADR-079).
     let panel = SidePanel()
-    /// The panel's shell pane surface, when one is open (ADR-079 replaces the below-terminal panel of ADR-046).
-    var panelSurface: GhosttySurfaceView? { panel.pane(.terminal)?.terminal }
+    /// The panel's shell panes' surfaces — one per Terminal pane, of which there may be several (ADR-198).
+    var panelSurfaces: [GhosttySurfaceView] { panel.panes(.terminal).compactMap(\.terminal) }
+    /// The Terminal pane hosting this surface, if it is one of the panel's shells.
+    func shellPane(for surface: GhosttySurfaceView) -> PanelPane? { panel.panes(.terminal).first { $0.terminal === surface } }
 
     /// The store the tab's title comes from (ADR-031). Held strongly: `SessionStore` never refers back.
     @ObservationIgnored private let sessions: SessionStore
@@ -737,7 +739,7 @@ final class TabStore {
         for t in tabs(in: window) {
             let hidden = (t.id != window.selectedTabId)
             t.surface.isOccluded = hidden || t.panel.isZoomed
-            t.panelSurface?.isOccluded = hidden || !t.panel.isFront(.terminal)
+            t.panel.occludeShells(tabHidden: hidden)
         }
         if let tab = selectedTab(in: window) { runs.claim(for: tab) }
         runs.syncOcclusion()
@@ -1139,6 +1141,32 @@ final class TabStore {
         closePane(pane, in: tab)
     }
 
+    /// The `+` menu's *Add*: a kind that allows several gets another pane even when one is open; any
+    /// other kind is opened or fronted as the quick action would (ADR-198).
+    func addPane(_ kind: PanelPane.Kind, in tab: Tab) {
+        guard kind.allowsSeveral, tab.panel.isOpen(kind) else { showPane(kind, in: tab); return }
+        guard let pane = makePane(kind, in: tab) else { return }
+        tab.panel.append(pane)
+        tab.panel.isVisible = true
+        focusPanel(tab)
+    }
+
+    /// ⌘⇧J: another shell in the panel, beside any already open (ADR-198).
+    func newTerminal(_ tab: Tab? = nil) {
+        guard let tab = tab ?? selectedTab else { return }
+        addPane(.terminal, in: tab)
+    }
+
+    /// The shell `run_in_terminal` types into (ADR-198): the most recently used one at its prompt, or
+    /// a new one when every shell has a job in the foreground — a command typed into a running dev
+    /// server goes to the server, not to a shell. Fronted, as the tool always has.
+    func idleShell(in tab: Tab) -> PanelPane? {
+        let idle = tab.panel.mostRecent(of: tab.panel.panes(.terminal).filter { $0.terminal?.foregroundJobName == nil })
+        if let idle { selectPane(idle, in: tab); return idle }
+        if tab.panel.isOpen(.terminal) { addPane(.terminal, in: tab) } else { showPane(.terminal, in: tab) }
+        return tab.panel.selected.flatMap { $0.kind == .terminal ? $0 : nil }
+    }
+
     /// Pane kinds the panel's "+" menu can still add for this tab.
     func availablePanes(for tab: Tab) -> [PanelPane.Kind] {
         var kinds: [PanelPane.Kind] = [.terminal, .diff, .files]
@@ -1147,7 +1175,7 @@ final class TabStore {
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
         }
-        return kinds.filter { !tab.panel.isOpen($0) }
+        return kinds.filter { $0.allowsSeveral || !tab.panel.isOpen($0) }
     }
 
     /// Chip and menu label for a pane: live facts (branch, image count) win over the kind's default.
@@ -1169,9 +1197,21 @@ final class TabStore {
         }
     }
 
+    /// A pane's chip and menu label. A shell is named by the title it reports, or *Terminal 2*. Two
+    /// shells reporting the same title — both idle in one folder, which fish calls `~` — fall back to
+    /// their numbers, since a title they share names neither (ADR-198).
+    func paneTitle(_ pane: PanelPane, in tab: Tab) -> String {
+        guard pane.kind.allowsSeveral else { return paneTitle(pane.kind, in: tab) }
+        let numbered = pane.ordinal == 1 ? pane.kind.defaultTitle : "\(pane.kind.defaultTitle) \(pane.ordinal)"
+        guard let reported = pane.shellTitle else { return numbered }
+        let shared = tab.panel.panes(pane.kind).contains { $0.id != pane.id && $0.shellTitle == reported }
+        return shared ? numbered : reported
+    }
+
     /// Builds a pane's long-lived content; nil when it cannot exist (no runtime, no session).
     private func makePane(_ kind: PanelPane.Kind, in tab: Tab) -> PanelPane? {
         let pane = PanelPane(kind: kind)
+        if kind.allowsSeveral { pane.ordinal = tab.panel.nextOrdinal(for: kind) }
         switch kind {
         case .terminal:
             guard let runtime else { return nil }
@@ -1209,7 +1249,7 @@ final class TabStore {
     /// A zoomed panel hides the agent surface, so it stops rendering and must not keep the keyboard.
     private func focusPanel(_ tab: Tab) {
         let unselected = window(of: tab).selectedTabId != tab.id
-        tab.panelSurface?.isOccluded = unselected || !tab.panel.isFront(.terminal)
+        tab.panel.occludeShells(tabHidden: unselected)
         tab.surface.isOccluded = unselected || tab.panel.isZoomed
         runs.claim(for: tab)
         runs.syncOcclusion()
@@ -1218,7 +1258,7 @@ final class TabStore {
                   run.hostTabId == tab.id else { return nil }
             return run.surface
         }()
-        let target: GhosttySurfaceView? = if tab.panel.isFront(.terminal) { tab.panelSurface }
+        let target: GhosttySurfaceView? = if tab.panel.isFront(.terminal) { tab.panel.selected?.terminal }
                                           else if let frontRun { frontRun }
                                           else if tab.panel.isZoomed { nil }
                                           else { tab.surface }
@@ -1275,7 +1315,7 @@ final class TabStore {
     }
 
     func tab(forSurface surface: GhosttySurfaceView) -> Tab? {
-        tabs.first { $0.surface === surface || $0.panelSurface === surface }
+        tabs.first { $0.surface === surface || $0.shellPane(for: surface) != nil }
     }
 
     var runningCount: Int { tabs.filter(\.isRunningClaude).count }
@@ -1572,7 +1612,8 @@ extension TabStore {
 extension TabStore: GhosttySurfaceDelegate {
     func surface(_ surface: GhosttySurfaceView, didReceive action: GhosttyAction) -> Bool {
         let tab = tab(forSurface: surface)
-        let isPanel = tab?.panelSurface === surface
+        let shellPane = tab?.shellPane(for: surface)
+        let isPanel = shellPane != nil
         switch action {
         case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
         case .openURL(let url, _):
@@ -1584,6 +1625,8 @@ extension TabStore: GhosttySurfaceDelegate {
             } else { NSSound.beep() }
             return true
         case .setTitle(let t):
+            // A panel shell's title names its chip, never the tab (ADR-046, ADR-198).
+            if let shellPane { shellPane.shellTitle = t.isEmpty ? nil : t }
             if let tab, !isPanel {
                 if tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t } else { titleReported(tab, title: t) }
             }
@@ -1610,17 +1653,14 @@ extension TabStore: GhosttySurfaceDelegate {
 
     func surfaceRequestedClose(_ surface: GhosttySurfaceView, processAlive: Bool) {
         guard let tab = tab(forSurface: surface) else { return }
-        if tab.panelSurface === surface { closePanel(tab) } else { close(tab, confirm: processAlive) }
-    }
-
-    private func closePanel(_ tab: Tab) {
-        if let pane = tab.panel.pane(.terminal) { tab.panel.close(pane) }
-        DispatchQueue.main.async { tab.surface.window?.makeFirstResponder(tab.surface) }
+        // A panel shell's pane goes, and the keyboard follows whatever is in front now — another
+        // shell, or the session (ADR-198).
+        if let pane = tab.shellPane(for: surface) { closePane(pane, in: tab) } else { close(tab, confirm: processAlive) }
     }
 
     func surfaceChildExited(_ surface: GhosttySurfaceView, exitCode: Int32?) {
         guard let tab = tab(forSurface: surface) else { return }
-        if tab.panelSurface === surface { closePanel(tab); return }
+        if let pane = tab.shellPane(for: surface) { closePane(pane, in: tab); return }
         if tab.detaching { close(tab, confirm: false); Task { await backgroundAgents?.refresh() }; return }
         tab.childExited = true
         tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil

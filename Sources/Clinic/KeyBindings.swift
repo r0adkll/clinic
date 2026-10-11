@@ -7,7 +7,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
-    case togglePanel, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
+    case togglePanel, newTerminal, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, cycleMarkdownView, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
     case nextDiffChange, previousDiffChange, nextDiffFile, previousDiffFile, markDiffFileViewed
@@ -42,6 +42,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "Notifications"
         case .caffeine: "Turn Caffeine On or Off"
         case .togglePanel: "Terminal Panel Tab"
+        case .newTerminal: "New Terminal Panel Tab"
         case .toggleDiffPage: "Diff Panel Tab"
         case .toggleEditor: "Files Panel Tab"
         case .toggleAttachments: "Media Panel Tab"
@@ -74,7 +75,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
         case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
-        case .togglePanel, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
+        case .togglePanel, .newTerminal, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .cycleMarkdownView, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab,
              .nextDiffChange, .previousDiffChange, .nextDiffFile, .previousDiffFile, .markDiffFileViewed: "Panel"
@@ -112,6 +113,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "cmd+shift+b"
         case .caffeine: nil
         case .togglePanel: "cmd+j"
+        // ADR-198. ⌘J fronts the shell used last; ⇧ adds another beside it.
+        case .newTerminal: "cmd+shift+j"
         case .toggleDiffPage: "cmd+shift+g"
         case .toggleEditor: "cmd+shift+e"
         case .toggleAttachments: "cmd+shift+i"

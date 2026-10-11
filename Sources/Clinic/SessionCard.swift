@@ -153,12 +153,13 @@ struct SessionCardContent {
                 action: { tabs.reveal(sessionId: id, pullRequest: ref) }))
         }
 
-        // A panel terminal with a job in the foreground (ADR-079).
-        if let tab, let surface = tab.panel.pane(.terminal)?.terminal, let job = surface.foregroundJobName {
+        // Each panel terminal with a job in the foreground (ADR-079, ADR-198).
+        for pane in tab?.panel.panes(.terminal) ?? [] {
+            guard let tab, let job = pane.terminal?.foregroundJobName else { continue }
             rows.append(SessionCardChild(
-                id: "terminal-\(tab.id)", icon: .symbol("terminal"), label: job, detail: "Terminal",
-                status: .running(since: nil), help: "Show the terminal pane",
-                action: { tabs.select(tab); tabs.showPane(.terminal, in: tab) }))
+                id: "terminal-\(pane.id)", icon: .symbol("terminal"), label: job, detail: tabs.paneTitle(pane, in: tab),
+                status: .running(since: nil), help: "Show this terminal pane",
+                action: { tabs.select(tab); tabs.selectPane(pane, in: tab) }))
         }
 
         // Sessions this one started are rows of their own under it (ADR-181), not children of the card.
@@ -576,7 +577,7 @@ struct SessionCardSlot: View {
     var body: some View {
         // A terminal's foreground job changes without an event to observe, so a card with a terminal
         // pane looks again every few seconds.
-        if tab?.panel.pane(.terminal)?.terminal != nil {
+        if !(tab?.panelSurfaces.isEmpty ?? true) {
             TimelineView(.periodic(from: .now, by: 3)) { _ in slot }
         } else {
             slot
