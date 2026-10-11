@@ -4953,3 +4953,24 @@ User accepted the offer to give the model chip the same fix.
 **Verified.** `make test` (654 pass). Clinic Dev built and launched a session, but its window then left the
 window list and the accessibility tree, and screen capture failed even for a plain rect. The chip was not
 read. No `/model` was sent, so the user's settings were not touched.
+
+## 2026-10-11 — Background tabs stop taking the keyboard and ⌘⏎ (ADR-197)
+
+User: *"If one session starts a grilling session and I hit cmd+enter in another session it commits the grill
+session with defaults denying me choice … if an internal notification comes in while in a new chat or other
+window it takes my focus away which is jarring."*
+
+**Cause.** Hidden tabs keep their panes mounted, and three things in them acted as if on screen: the Grill's
+Send bound ⌘⏎ window-wide (so the New Session screen's ⌘⏎ could send another tab's round, unanswered questions
+going out as *"skipped, you decide"*); `TabStore.focusPanel`, reached by every agent-opened pane (`ask_round`,
+`show_image`), made a background tab's hidden terminal first responder; and the arriving round's `GrillKeyView`
+claimed first responder from a hidden view. The notification card itself takes no focus.
+
+**Built.** `TabStore.isOnScreen(tab)`. `focusPanel` moves the keyboard only for that tab; the Grill's ⌘⏎ is bound
+only then; `grillKeyboardRequests` is a set and a request waits until its tab is on screen; `GrillKeyView` refuses
+to claim while hidden.
+
+**Verified.** `make build` and the Clinic Dev build are clean. Not driven live: this session is not trusted for
+accessibility (`AXIsProcessTrusted() == false`), and synthetic input was ruled out with the user at the machine.
+Clinic Dev was launched with one session, then stopped; its `state.json` was restored and the run's `mcp/` file
+and scratch directories were removed. Manual steps are in the ADR. The user then tried it in Clinic Dev and confirmed it worked.

@@ -260,21 +260,32 @@ struct GrillPane: View {
         .onChange(of: model.mode) { _, mode in
             if mode == .navigate, !model.sending { model.wantsKeyboard = true }
         }
-        // The reader opened this pane themselves, so it may have the keyboard (ADR-132). A round
-        // arriving never sets the flag, so it can still never eat a half-typed sentence.
-        // Only when the request names *this* tab.
-        .onChange(of: tabs.grillKeyboardRequest) { _, wanted in if wanted == tab.id { takeKeyboard() } }
-        .onAppear { if tabs.grillKeyboardRequest == tab.id { takeKeyboard() } }
+        // Opening the pane gives it the keyboard — by the reader, or by a round arriving (ADR-139) —
+        // but only once this tab is on screen. A round in a background tab waits for the reader to go
+        // there rather than pulling the keyboard out of the tab they are in (ADR-197).
+        .onChange(of: tabs.grillKeyboardRequests.contains(tab.id)) { _, wanted in if wanted { takeKeyboard() } }
+        .onChange(of: onScreen) { _, shown in if shown { takeKeyboard() } }
+        .onAppear { takeKeyboard() }
     }
 
+    /// Whether this pane's tab is what its window shows. A hidden tab's pane is still mounted, so
+    /// without this it would take the keyboard and answer ⌘⏎ for whatever tab is in front (ADR-197).
+    private var onScreen: Bool { tabs.isOnScreen(tab) }
+
     private func takeKeyboard() {
-        // Next runloop turn: the flag is read during a view update, and clearing it there would mutate
-        // observed state mid-body.
+        // Next runloop turn: the request is read during a view update, and clearing it there would
+        // mutate observed state mid-body. Checked again there, because the reader may have moved.
         DispatchQueue.main.async {
+            guard tabs.grillKeyboardRequests.contains(tab.id), tabs.isOnScreen(tab) else { return }
             model.wantsKeyboard = true
-            tabs.grillKeyboardRequest = nil
+            tabs.grillKeyboardRequests.remove(tab.id)
         }
     }
+
+    /// ⌘⏎ sends from anywhere in this tab (ADR-132) — and nowhere else. Every tab's pane stays mounted,
+    /// so an unconditional shortcut let a hidden tab's round take the ⌘⏎ meant for the New Session
+    /// screen or another tab, and send itself with whatever was on it (ADR-197).
+    private var sendShortcut: KeyboardShortcut? { onScreen ? KeyboardShortcut(.return, modifiers: .command) : nil }
 
     @ViewBuilder
     private func body(for round: GrillRound) -> some View {
@@ -497,13 +508,13 @@ struct GrillPane: View {
                             Text(answered == total ? "Send \(total) answer\(total == 1 ? "" : "s")" : "Send \(answered) of \(total)")
                         }
                     }
-                    .keyboardShortcut(.return, modifiers: .command)
+                    .keyboardShortcut(sendShortcut)
                     .buttonStyle(.borderedProminent)
                     .disabled(model.sending)
                 } else {
                     // Present but invisible, so ⌘⏎ works from a question too without a second button.
                     Button("Send") { send(round) }
-                        .keyboardShortcut(.return, modifiers: .command)
+                        .keyboardShortcut(sendShortcut)
                         .hidden()
                         .frame(width: 0)
                 }

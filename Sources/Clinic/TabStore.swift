@@ -223,6 +223,14 @@ final class TabStore {
         NSApp.isActive && activeWindowId == tab.windowId && window(of: tab).selectedTabId == tab.id
     }
 
+    /// Whether a tab is what its window is showing: selected, with no screen (a draft, Tasks…) over it.
+    /// A tab's content view stays mounted while hidden (ADR-019), so its panes keep working — but only
+    /// the tab on screen may move the window's keyboard or answer a window-wide shortcut (ADR-197).
+    func isOnScreen(_ tab: Tab) -> Bool {
+        let w = window(of: tab)
+        return w.selectedTabId == tab.id && !w.isShowingScreen
+    }
+
     let sessions: SessionStore
     let hooks: HookService
     let notifications: NotificationService
@@ -1214,6 +1222,10 @@ final class TabStore {
                                           else if let frontRun { frontRun }
                                           else if tab.panel.isZoomed { nil }
                                           else { tab.surface }
+        // A pane opened in a tab nobody is looking at — by an agent's `ask_round` or `show_image` —
+        // must not move the keyboard: the window has one, and it belongs to whatever is on screen.
+        // Doing so put the reader's typing into a hidden terminal (ADR-197).
+        guard isOnScreen(tab) else { return }
         let window = tab.surface.window
         DispatchQueue.main.async { window?.makeFirstResponder(target) }
     }
@@ -1229,18 +1241,21 @@ final class TabStore {
 
     /// ⌘⇧I: the attachments pane.
     func toggleAttachments(_ tab: Tab? = nil) { showPane(.attachments, in: tab) }
-    /// Set whenever the Grill pane is opened — by the reader, or by a round arriving (ADR-139, which
-    /// reversed ADR-131's "never on arrival"). A round is the agent stopping and waiting, so the pane
-    /// takes the keyboard rather than making the reader reach for it every round. The pane clears it.
-    /// The tab whose Grill pane should take the keyboard. Named rather than a bare flag: a single
-    /// app-wide one made a round arriving in one window pull focus in *every* window with a Grill pane
-    /// open, out of a terminal someone was typing into.
-    var grillKeyboardRequest: Tab.ID?
+    /// Tabs whose Grill pane should take the keyboard — added whenever the pane is opened, by the
+    /// reader or by a round arriving (ADR-139, which reversed ADR-131's "never on arrival"). A round is
+    /// the agent stopping and waiting, so the pane takes the keyboard rather than making the reader
+    /// reach for it every round. Named per tab rather than a bare flag: a single app-wide one made a
+    /// round arriving in one window pull focus in *every* window with a Grill pane open.
+    ///
+    /// The pane removes its tab once it has the keyboard, which it takes only while its tab is on
+    /// screen. A round arriving in a background tab therefore waits here until the reader goes to it,
+    /// instead of pulling the keyboard out of the tab they are in (ADR-197).
+    var grillKeyboardRequests: Set<Tab.ID> = []
 
     func toggleGrill(_ tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab else { return }
         showPane(.grill, in: tab)
-        grillKeyboardRequest = tab.id
+        grillKeyboardRequests.insert(tab.id)
     }
 
     /// Whether a Grill pane is the one on screen — the menu's Grill verbs are enabled only then, the

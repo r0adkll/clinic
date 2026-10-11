@@ -137,6 +137,7 @@ final class MCPToolService {
             // Opens the pane **and takes the keyboard**, by the same path the reader's own ⌘⇧K takes
             // (ADR-139, over ADR-131). A round is the agent stopping and waiting, not showing something
             // in passing, so there is one way the pane opens and one thing that happens when it does.
+            // In a tab the reader is not looking at, the keyboard waits until they go there (ADR-197).
             tabs?.toggleGrill(tab)
             let count = round.questions.count
             let noun = count == 1 ? "question" : "questions"

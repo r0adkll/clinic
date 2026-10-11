@@ -181,7 +181,9 @@ struct GrillKeyboard: NSViewRepresentable {
         // done since.
         model.wantsKeyboard = false
         DispatchQueue.main.async {
-            guard model.mode == .navigate, !model.wantsKeyboard,
+            // Never from a hidden tab: its pane is still mounted in the window, and claiming there
+            // takes the keyboard out of the tab the reader is in (ADR-197).
+            guard model.mode == .navigate, !model.wantsKeyboard, !view.isHiddenOrHasHiddenAncestor,
                   let window = view.window, window.firstResponder !== view else { return }
             window.makeFirstResponder(view)
         }
