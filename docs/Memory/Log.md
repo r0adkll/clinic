@@ -5219,3 +5219,6 @@ Actions…*.
 **Verified.** `make test` 714 pass. In Clinic Dev: header buttons shown with a seeded hover (seam removed), the
 Settings section, and the cap through AX. The Clinic Dev preference keys the run wrote were deleted. The
 actions' clicks are left to a manual check.
+
+**Follow-up.** User checked the actions' clicks and the Run and Move to Group menus by hand: *"Okay, that all
+checked out"*.
