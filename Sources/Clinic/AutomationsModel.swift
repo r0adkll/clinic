@@ -40,7 +40,9 @@ final class AutomationsModel {
     /// rather than from the launch.
     private var waitingSince: [UUID: Date] = [:]
 
-    var router: ((SessionID?, String, String, NotificationStore.Entry.Kind) -> Void)?
+    var router: ((SessionID?, String, String, NotificationStore.Entry.Kind, SoundWitness?) -> Void)?
+    /// Set by the app: a run's session takes its automation's pack once it is known (ADR-204).
+    weak var soundPacks: SoundPackStore?
 
     struct PendingRemoval: Identifiable {
         let id = UUID()
@@ -253,15 +255,17 @@ final class AutomationsModel {
         guard automation.notifyOn.shouldNotify(run.outcome) else { return }
         let body: String
         let kind: NotificationStore.Entry.Kind
+        let witness: SoundWitness?
         switch run.outcome {
-        case .finished: body = "Automation finished"; kind = .finished
-        case .failed: body = "Automation failed"; kind = .error
-        case .stalled: body = "Automation stopped after waiting for you"; kind = .error
-        case .launchFailed(let message): body = "Automation could not start — \(message.prefix(120))"; kind = .error
-        case .skipped(let reason): body = reason.title; kind = .finished
+        case .finished: body = "Automation finished"; kind = .finished; witness = .automationFinished
+        case .failed: body = "Automation failed"; kind = .error; witness = .automationFailed
+        case .stalled: body = "Automation stopped after waiting for you"; kind = .error; witness = .automationFailed
+        case .launchFailed(let message): body = "Automation could not start — \(message.prefix(120))"; kind = .error; witness = .automationFailed
+        // A run that never happened has nothing to say out loud.
+        case .skipped(let reason): body = reason.title; kind = .finished; witness = nil
         case .running: return
         }
-        router?(run.sessionId, automation.name, body, kind)
+        router?(run.sessionId, automation.name, body, kind, witness)
     }
 
     // MARK: - Hook binding
@@ -274,6 +278,9 @@ final class AutomationsModel {
         Task {
             guard let run = await runStore.run(matchingSessionId: event.sessionId), run.sessionId == nil else { return }
             await runStore.update(runId: run.id) { $0.sessionId = event.sessionId }
+            if let pack = automations.first(where: { $0.id == run.automationId })?.soundPack {
+                soundPacks?.setPack(pack, forSession: event.sessionId)
+            }
             await refreshRuns()
         }
     }

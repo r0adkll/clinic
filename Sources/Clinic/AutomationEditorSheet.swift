@@ -15,6 +15,7 @@ import ClinicCore
 struct AutomationEditorSheet: View {
     @Environment(AutomationsModel.self) private var model
     @Environment(SessionStore.self) private var sessions
+    @Environment(SoundPackStore.self) private var soundPacks
     @Environment(\.dismiss) private var dismiss
     @State var draft: AutomationDraft
     @State private var pickingTarget = false
@@ -339,6 +340,19 @@ struct AutomationEditorSheet: View {
                 }
                 .labelsHidden().controlSize(.large)
             }
+            // Its runs' voice (ADR-204), where there is more than one to choose from.
+            if soundPacks.settings.enabled && soundPacks.installed.count >= 2 {
+                GridRow {
+                    Text("Voice").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                    Picker("", selection: $draft.soundPack) {
+                        Text("Automatic (\(soundPacks.automaticDescription(project: draft.target.soundProject, parent: nil)))").tag(String?.none)
+                        Divider()
+                        ForEach(soundPacks.installed) { pack in Text(pack.manifest.displayName).tag(Optional(pack.id)) }
+                    }
+                    .labelsHidden().controlSize(.large)
+                    .help("The pack this automation's runs speak with when they finish or fail, so you can tell which one it was")
+                }
+            }
             GridRow {
                 Text("Give up after").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
                 Stepper("\(draft.stallMinutes) min waiting", value: $draft.stallMinutes, in: 1...240, step: 5)
@@ -424,5 +438,13 @@ private struct TargetRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+extension Automation.Target {
+    /// The project whose pack Automatic falls back to; a chat automation has none (ADR-204).
+    var soundProject: String {
+        if case .project(let path) = self { return path }
+        return ""
     }
 }

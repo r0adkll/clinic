@@ -5090,3 +5090,15 @@ Peon has no `task.progress` lines; with Ana it played.
 
 **Verified.** `make test` 690 pass. Clinic Dev with synthetic hooks and status lines, a fake peon-ping in an
 isolated Claude config, and AX and captures for the banner and the import (details in the ADR). Cleaned up after.
+
+## 2026-10-15 — Automations have a voice (ADR-204)
+
+User: *"Let's do Automations now"*, ADR-202's follow-up.
+
+**Built.** `Automation.soundPack`; a Voice row in the editor's Behaviour grid; `AutomationsModel` records the
+pack on the run's session when it binds at SessionStart; the outcome notification carries
+`automationFinished`/`automationFailed`. Automatic's wording with no pack became "no pack" (not "silent"), since
+the notification sound still plays.
+
+**Verified.** `make test` 691 pass. The editor captured in Clinic Dev with the Voice row. No real scheduled run
+was driven (details in the ADR).

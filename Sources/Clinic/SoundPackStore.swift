@@ -340,7 +340,8 @@ final class SoundPackStore {
         }
         if settings.rotation.contains(where: { installedPack($0) != nil }) { return "a pack from the rotation" }
         if let pack = settings.defaultPack.flatMap(installedPack) { return "\(pack.manifest.displayName), the default" }
-        return "silent"
+        // Not "silent": with no pack, the notification sound still plays (ADR-097).
+        return "no pack"
     }
 
     /// The pack Automatic would give, when that is knowable before the session draws.

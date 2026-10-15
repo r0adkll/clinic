@@ -7,6 +7,8 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
     case sessionStarted, promptSubmitted, rapidPrompts, turnFinished, turnFailed, rateLimited, permissionNeeded, inputNeeded, sessionEnded
     // Clinic's own
     case runSucceeded, runFailed, checksPassed, checksFailed, childReported, agentAsked
+    // Clinic's scheduled sessions (ADR-204)
+    case automationFinished, automationFailed
     // Clinic's own, read off the status line and the clock (ADR-203)
     case contextFilling, planNearlySpent, turnLong
 
@@ -17,8 +19,8 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
         case .sessionStarted: .sessionStart
         case .promptSubmitted: .taskAcknowledge
         case .rapidPrompts: .userSpam
-        case .turnFinished, .runSucceeded, .checksPassed, .childReported: .taskComplete
-        case .turnFailed, .runFailed, .checksFailed: .taskError
+        case .turnFinished, .runSucceeded, .checksPassed, .childReported, .automationFinished: .taskComplete
+        case .turnFailed, .runFailed, .checksFailed, .automationFailed: .taskError
         case .permissionNeeded, .inputNeeded, .agentAsked: .inputRequired
         case .sessionEnded: .sessionEnd
         case .rateLimited, .contextFilling, .planNearlySpent: .resourceLimit
@@ -55,6 +57,8 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
         case .checksFailed: "A watched pull request's checks fail"
         case .childReported: "A child session reports back"
         case .agentAsked: "An agent asks for you or posts a Grill round"
+        case .automationFinished: "A scheduled automation finishes"
+        case .automationFailed: "A scheduled automation fails, or gives up waiting"
         case .contextFilling: "A session's context passes 90%"
         case .planNearlySpent: "The plan's five-hour window passes 90%"
         case .turnLong: "A turn is still running after ten minutes"

@@ -24,6 +24,8 @@ struct AutomationDraft: Identifiable {
     var autoPrune: Bool
     var templateId: String?
     var isEnabled: Bool
+    /// Nil is Automatic (ADR-204).
+    var soundPack: String?
 
     // Schedule, held as the picker's parts plus the raw field so a half-typed expression survives.
     var preset: PresetKind
@@ -129,6 +131,7 @@ struct AutomationDraft: Identifiable {
         autoPrune = automation.autoPrune
         templateId = automation.templateId
         isEnabled = automation.isEnabled
+        soundPack = automation.soundPack
         apply(automation.schedule)
     }
 
@@ -163,6 +166,7 @@ struct AutomationDraft: Identifiable {
         a.autoPrune = autoPrune
         a.templateId = templateId
         a.isEnabled = isEnabled
+        a.soundPack = soundPack
         return a
     }
 }

@@ -202,9 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ids.formUnion(tabs.tabs.filter { $0.state == .working }.compactMap(\.sessionId))
             return ids.count + agents.filter { $0.sessionId == nil }.count
         }
-        automations.router = { [weak self] sid, title, body, kind in
-            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind)
+        automations.router = { [weak self] sid, title, body, kind, witness in
+            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind, witness: witness)
         }
+        automations.soundPacks = soundPacks
         tabs.automations = automations
         tabs.soundPacks = soundPacks
         soundPacks.sessions = sessions

@@ -31,6 +31,8 @@ public struct Automation: Codable, Sendable, Hashable, Identifiable {
     /// The scheduled time this last fired *for* — not the wall clock at launch — so catch-up can tell
     /// which fires were missed without drifting.
     public var lastFiredAt: Date?
+    /// The sound pack its runs speak with (ADR-204). Nil is Automatic: the project's, or the default.
+    public var soundPack: String?
 
     public enum Target: Codable, Sendable, Hashable {
         /// Runs in a project directory.

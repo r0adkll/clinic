@@ -86,3 +86,19 @@ private func pack(_ r: SoundPackAssignments.Resolution) -> String? {
     x.pruneDraws(keeping: [SessionID("s1")])
     #expect(x.drawn.keys.map(\.rawValue) == ["s1"])
 }
+
+@Test func anAutomationCarriesItsVoice() throws {
+    var automation = Automation(name: "Nightly", prompt: "Check", target: .project(path: "/clinic"),
+                                schedule: try CronSchedule("0 9 * * *"))
+    // Saved before automations had a voice: it decodes as Automatic.
+    var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(automation)) as? [String: Any])
+    json["soundPack"] = nil
+    let old = try JSONDecoder().decode(Automation.self, from: JSONSerialization.data(withJSONObject: json))
+    #expect(old.soundPack == nil)
+    automation.soundPack = "glados"
+    let round = try JSONDecoder().decode(Automation.self, from: JSONEncoder().encode(automation))
+    #expect(round.soundPack == "glados")
+    #expect(SoundWitness.automationFinished.category == .taskComplete)
+    #expect(SoundWitness.automationFailed.category == .taskError)
+    #expect(!SoundWitness.automationFinished.isHook && !SoundWitness.automationFinished.isOptIn)
+}
