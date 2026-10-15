@@ -11,10 +11,56 @@ enum ProjectGroupDrag {
     }
 }
 
+/// What a folded project or group, or a chip, says about the open sessions it hides (ADR-210). It counts
+/// what the Dock badge counts: a session waiting on you (orange), and one that finished a turn you have
+/// not looked at (blue). The finished-and-unread case is the common one; counting only waiting sessions
+/// left a folded group blank exactly when a turn had ended for you.
+struct HiddenAttention: Equatable {
+    var waiting = 0
+    var unread = 0
+
+    var isEmpty: Bool { waiting + unread == 0 }
+    /// Orange outranks blue, as on a session's own glyph.
+    var color: Color { waiting > 0 ? .orange : .blue }
+    /// "2 need you" while anything waits; otherwise "1 new".
+    var summary: String {
+        if waiting > 0 { let n = waiting + unread; return n == 1 ? "1 needs you" : "\(n) need you" }
+        return "\(unread) new"
+    }
+    var spoken: String {
+        if waiting > 0 { return "\(waiting) waiting on you" + (unread > 0 ? ", \(unread) unread" : "") }
+        return "\(unread) unread"
+    }
+}
+
 extension TabStore {
-    /// Open sessions in these projects that are waiting on the reader (ADR-210).
-    func waitingCount(in paths: Set<String>) -> Int {
-        tabs.filter { paths.contains($0.projectPath) && ($0.state == .waitingForInput || $0.state == .waitingForPermission) }.count
+    /// Sessions in these projects that want the reader (ADR-210), each counted once, under the project
+    /// its row is listed in. Waiting: an open tab at a prompt, an unanswered Grill round (open or not, as
+    /// its card shows), or a detached agent asking. Unread: an open tab that finished unseen and is not
+    /// working again, the way its glyph shows the arc rather than the blue dot.
+    func attention(in paths: Set<String>) -> HiddenAttention {
+        var a = HiddenAttention()
+        var counted: Set<SessionID> = []
+        func listed(_ id: SessionID) -> Bool { sessions.sidebarProjectPath(of: id).map(paths.contains) ?? false }
+        for tab in tabs {
+            guard let id = tab.sessionId, sessions.sidebarProjectPath(of: id).map(paths.contains) ?? paths.contains(tab.projectPath) else { continue }
+            switch tab.state {
+            case .waitingForInput, .waitingForPermission: a.waiting += 1; counted.insert(id)
+            case .working, .launching: break
+            default:
+                if !sessions.openGrillRounds(for: id).isEmpty { a.waiting += 1; counted.insert(id) }
+                else if tab.unread { a.unread += 1; counted.insert(id) }
+            }
+        }
+        for id in sessions.state.grillRounds.keys where !counted.contains(id) && tab(for: id) == nil
+            && !sessions.isArchived(id) && !sessions.openGrillRounds(for: id).isEmpty && listed(id) {
+            a.waiting += 1; counted.insert(id)
+        }
+        for agent in backgroundAgents?.background ?? [] where agent.isRunning && agent.needsAttention {
+            guard let id = agent.sessionId, !counted.contains(id), tab(for: id) == nil, listed(id) else { continue }
+            a.waiting += 1; counted.insert(id)
+        }
+        return a
     }
 }
 
@@ -72,13 +118,13 @@ struct GroupScopeChips: View {
     var body: some View {
         let scope = window.activeGroupScope(in: sessions)
         FlowLayout(spacing: 6) {
-            GroupChip(title: "All", selected: scope == nil, waiting: 0, help: "Every project") {
+            GroupChip(title: "All", selected: scope == nil, attention: HiddenAttention(), help: "Every project") {
                 window.groupScope = nil
             }
             ForEach(sessions.groups) { group in
                 // A chip's dot is for what you cannot see: the scoped group's sessions are already listed.
                 GroupChip(title: group.name, selected: scope == group.id,
-                          waiting: scope == group.id ? 0 : tabs.waitingCount(in: group.members),
+                          attention: scope == group.id ? HiddenAttention() : tabs.attention(in: group.members),
                           help: "Show only \(group.name)", group: group) {
                     window.groupScope = group.id
                 }
@@ -94,7 +140,7 @@ private struct GroupChip: View {
     @Environment(SessionStore.self) private var sessions
     let title: String
     let selected: Bool
-    let waiting: Int
+    let attention: HiddenAttention
     let help: String
     var group: ProjectGroup? = nil
     let action: () -> Void
@@ -105,7 +151,7 @@ private struct GroupChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(title).lineLimit(1)
-                if waiting > 0 { Circle().fill(.orange).frame(width: 6, height: 6) }
+                if !attention.isEmpty { Circle().fill(attention.color).frame(width: 6, height: 6) }
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(selected ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.primary))
@@ -117,7 +163,7 @@ private struct GroupChip: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
-        .accessibilityLabel(waiting > 0 ? "\(title), \(waiting) waiting on you" : title)
+        .accessibilityLabel(attention.isEmpty ? title : "\(title), \(attention.spoken)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu { if let group { GroupMenu(group: group) } }
         .dropDestination(for: String.self) { items, _ in
@@ -147,7 +193,7 @@ struct ProjectGroupHeader: View {
     private static let maxTiles = 6
 
     var body: some View {
-        let waiting = collapsed ? tabs.waitingCount(in: Set(paths)) : 0
+        let attention = collapsed ? tabs.attention(in: Set(paths)) : HiddenAttention()
         HStack(spacing: 6) {
             Text(group.name.uppercased())
                 .font(.system(size: 11, weight: .bold)).tracking(0.5)
@@ -164,12 +210,12 @@ struct ProjectGroupHeader: View {
                 .accessibilityHidden(true)
             }
             Spacer(minLength: 4)
-            if waiting > 0 {
+            if !attention.isEmpty {
                 HStack(spacing: 4) {
-                    Circle().fill(.orange).frame(width: 7, height: 7)
-                    Text(waiting == 1 ? "1 needs you" : "\(waiting) need you")
+                    Circle().fill(attention.color).frame(width: 7, height: 7)
+                    Text(attention.summary)
                 }
-                .font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                .font(.caption2.weight(.medium)).foregroundStyle(attention.color)
             }
             Menu { GroupMenu(group: group) } label: { Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -203,7 +249,7 @@ struct ProjectGroupHeader: View {
         } isTargeted: { dropTargeted = $0 }
         .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accent).frame(height: 2) } }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(group.name) group, \(paths.count) projects" + (waiting > 0 ? ", \(waiting) waiting on you" : ""))
+        .accessibilityLabel("\(group.name) group, \(paths.count) projects" + (attention.isEmpty ? "" : ", \(attention.spoken)"))
         .accessibilityAddTraits(.isHeader)
         .accessibilityAction(named: collapsed ? "Expand \(group.name)" : "Collapse \(group.name)") {
             sessions.setCollapsed(group: group.id, !collapsed)

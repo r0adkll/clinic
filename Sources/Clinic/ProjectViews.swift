@@ -21,10 +21,11 @@ struct ProjectHeader: View {
                 .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
-            // A folded project still says when a session in it waits on you (ADR-210).
-            if collapsed, tabs.waitingCount(in: [project.path]) > 0 {
-                Circle().fill(.orange).frame(width: 7, height: 7).help("A session here needs you")
-                    .accessibilityLabel("Needs you")
+            // A folded project still says when a session in it waits on you or finished unseen (ADR-210).
+            if collapsed, case let attention = tabs.attention(in: [project.path]), !attention.isEmpty {
+                Circle().fill(attention.color).frame(width: 7, height: 7)
+                    .help(attention.waiting > 0 ? "A session here needs you" : "A session here finished while you were away")
+                    .accessibilityLabel(attention.spoken)
             }
             if let draft = composer.draft(for: project.path) { DraftMark(project: project, draft: draft) }
             Spacer(minLength: 4)

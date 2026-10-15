@@ -5197,3 +5197,10 @@ waiting for the scan, and by keying the list on the scope.
 **Verified.** `make test` 708 pass. Clinic Dev with seeded groups, checked by AX frames, chip presses and
 screenshots; its state and preferences were restored afterwards. Needs-you dots, scope switching on selection,
 drag and drop, and the name prompt are left to a manual check.
+
+**Follow-up: the dots.** User: *"I'm not seeing the "needs you" dots"*. The count took only open tabs in a
+waiting state. Reproduced with a session in a folded group, driven by synthetic hooks: a permission prompt
+showed, but a turn that ended unseen (idle and unread, the common case) left it blank. `HiddenAttention` now
+counts waiting (a tab at a prompt, an open Grill round with or without a tab, a detached agent asking) and
+unread, once per session under its listed project. Orange "N need you" or blue "N new". All three cases were
+checked in Clinic Dev, which was restored afterwards. `make test` 708 pass.

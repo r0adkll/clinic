@@ -31,9 +31,21 @@ Two rounds of questions, every recommendation accepted:
 - **The All scope is A.** Chats, then ungrouped projects with no header, then each group under a caption: its
   name in small caps, its project count, and a chevron. Clicking the caption folds it. With no groups the
   sidebar is exactly what it was.
-- **A folded group shows its members' tiles** (up to six, then *+N*) and *N needs you* when open sessions in
-  it are waiting. A folded *project* now shows an orange dot for the same reason, so folding never hides a
-  session that needs you.
+- **A folded group shows its members' tiles** (up to six, then *+N*) and what its hidden sessions want. A folded
+  *project* shows a dot for the same reason, so folding never hides a session that needs you. See *What counts*
+  below.
+- **What counts** (amended the same day). The first build counted only open tabs in a waiting state. User:
+  *"I'm not seeing the "needs you" dots"*. Reproduced in Clinic Dev with synthetic hooks. A permission prompt
+  did show, but a turn that ended while Clinic was in the background left the folded group blank. That case
+  is idle and **unread**, the blue dot, and it is the common one. The count now matches the Dock badge plus
+  what a session's glyph and card show in orange:
+  - **waiting** (orange): an open tab at a prompt or a permission request; an unanswered Grill round, with or
+    without a tab (a card's flame row); or a detached background agent that needs attention.
+  - **unread** (blue): an open tab that finished a turn unseen and is not working again.
+
+  Each session counts once, under the project its row is listed in. Orange outranks blue. A group's caption
+  says *N need you* (all of them, while anything waits) or *N new*. A chip and a folded project show one dot
+  in the same colour.
 - **The chips are C.** Once a group exists, a row of chips under the Projects toolbar reads *All*, then each
   group. A group's chip shows Chats plus that group, without its caption, and ignores the group's fold. A chip
   gets an orange dot when a session in it waits, except the selected one, whose sessions are already listed.
@@ -86,5 +98,8 @@ in memory and on disk, and an id made inside it would differ between the two.
 and screenshots with two seeded groups: the All scope with Apps expanded and Tools folded showing its tiles;
 launching scoped to Apps; pressing the *All* and *Tools* chips; the scope written to `ClinicGroupScope`; and
 unfolding Tools through its accessibility action. Clinic Dev's `state.json` and preferences were restored
-afterwards. **Not verified:** the needs-you dots and the scope change on selecting a session outside the scope
-(both need a live waiting session), drag and drop, and the menus' name prompt. Try those by hand.
+afterwards. The attention count was then verified with a real session in a folded group, driven by synthetic hooks. A
+permission prompt read *1 waiting on you* (orange chip dot). A turn ended unseen read *1 new* in blue on the
+caption, with a blue chip dot. A folded project holding a session with an open Grill round and no tab showed an
+orange dot. **Not verified:** the scope change on selecting a session outside the scope, drag and drop, and the
+menus' name prompt. Try those by hand.
