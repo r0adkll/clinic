@@ -49,5 +49,5 @@ had just added, was a level down in the menu.
 state seeded by a temporary launch argument (removed before committing), showed *+ ⧉ ⤓ ⋯* on `proj` and *+ ⋯* on
 Chats. The Settings section showed the three defaults on. Turning on two more through AX stored
 `newSession,openShell,run,gitPull,group`, and the other six switches disabled at the cap. The keys the run wrote
-to Clinic Dev's preferences were deleted afterwards. **Not verified:** each action's click, and the Run and
-Group menus opening from the header. Try those by hand.
+to Clinic Dev's preferences were deleted afterwards. The user then checked each action's click, and the Run and
+Group menus opening from the header, by hand (2026-10-15).
