@@ -102,3 +102,18 @@ private func pack(_ r: SoundPackAssignments.Resolution) -> String? {
     #expect(SoundWitness.automationFailed.category == .taskError)
     #expect(!SoundWitness.automationFinished.isHook && !SoundWitness.automationFinished.isOptIn)
 }
+
+@Test func aMomentWithNoSessionSpeaksWithItsProject() {
+    var x = SoundPackAssignments()
+    func run(_ rotation: [String] = []) -> SoundPackAssignments.Resolution {
+        x.resolve(nil, project: "/clinic", parent: { parents[$0] }, projectOf: { projects[$0] },
+                  rotation: rotation, defaultPack: "peon", installed: installed)
+    }
+    // A run or a PR check: its project's pack, else the default.
+    #expect(run() == .choice(.init(pack: "peon", source: .defaultPack)))
+    x.byProject["/clinic"] = "glados"
+    #expect(run() == .choice(.init(pack: "glados", source: .project("/clinic"))))
+    // With no session there is nothing to draw for, so the rotation is passed over.
+    x.byProject = [:]
+    #expect(run(["kerrigan"]) == .choice(.init(pack: "peon", source: .defaultPack)))
+}

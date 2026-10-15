@@ -5114,3 +5114,21 @@ Before I noticed, I had written a Campfire → GLaDOS project pack into Clinic D
 `ClinicSoundPacks` (default Peon, volume 0.12) into its preferences; the user was told.
 
 **Checked by the user** later the same day in their Clinic Dev: *"It works!"*
+
+## 2026-10-15 — Runs and checks speak with their project's pack (ADR-206)
+
+User: *"Let's do 1, I've verified #2 manually, for 3 let's add a focus status permission/setting. 4) Let's keep it
+out of the session list."* So the menus, the composer pill's menu and the card's caption are checked by hand
+(ADR-201, ADR-202), and nothing is added to the session list.
+
+**Built.** A moment with no session names its project: runs, PR checks and automations now speak with the
+project's pack, else the default (no rotation draw without a session). An automation that never started uses its
+own pack first.
+
+**Verified.** `make test` 692 pass; `make build` passes. Not driven in the app: the user's Clinic Dev was open.
+
+**Focus, found on the way.** A trial build with `com.apple.developer.focus-status` fails: "No profiles for
+'com.r0adkll.clinic' were found". Clinic builds without provisioning profiles today, so the entitlement needs the
+capability on the App IDs and profiles for Debug, Dev and Developer ID. The trial was reverted; the choice went to
+the user.
+

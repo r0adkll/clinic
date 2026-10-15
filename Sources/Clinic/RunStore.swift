@@ -436,9 +436,10 @@ final class RunStore {
         case .failed(let code, _): body = run.problem ?? ("Failed" + (code.map { " (exit \($0))" } ?? "")); kind = .error; witness = .runFailed
         default: return
         }
-        // A run on screen is not news, but its pack still speaks unless told not to (ADR-199).
-        if isOnScreen(run) { tabs.voice(witness, tab: nil, sessionId: nil, onScreen: true); return }
-        tabs.notify(nil, sessionId: nil, title: run.name, body: body, kind: kind, witness: witness)
+        // A run on screen is not news, but its pack still speaks unless told not to (ADR-199). It speaks
+        // with its project's pack (ADR-206).
+        if isOnScreen(run) { tabs.voice(witness, tab: nil, sessionId: nil, project: run.projectPath, onScreen: true); return }
+        tabs.notify(nil, sessionId: nil, title: run.name, body: body, kind: kind, witness: witness, project: run.projectPath)
     }
 
     private func isOnScreen(_ run: Run) -> Bool {

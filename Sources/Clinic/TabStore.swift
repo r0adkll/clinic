@@ -281,14 +281,17 @@ final class TabStore {
     ///
     /// `witness` is what caused it, for the session's sound pack (ADR-199): a pack line, when there is
     /// one, plays even for the tab on screen, and takes the place of the notification's own sound.
+    /// A moment with no session says which `project` it belongs to, and may carry a `pack` of its own,
+    /// so it speaks with that project's voice rather than the default (ADR-206).
     func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind,
-                url: URL? = nil, pullRequest: PullRequestRef? = nil, witness: SoundWitness? = nil) {
+                url: URL? = nil, pullRequest: PullRequestRef? = nil, witness: SoundWitness? = nil,
+                project: String? = nil, pack: String? = nil) {
         let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url,
                                    pullRequest: pullRequest)
         // What Clinic said and about which session: the history is in memory only, so this is the record.
         Self.log.info("attention for \(sessionId?.rawValue ?? "-", privacy: .public): \(body, privacy: .public)")
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
-        let spoken = witness.map { voice($0, tab: tab, sessionId: sessionId) } ?? .none
+        let spoken = witness.map { voice($0, tab: tab, sessionId: sessionId, project: project, pack: pack) } ?? .none
         let shown = spoken.caption.flatMap { history.setCaption($0, on: entry.id) } ?? entry
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
@@ -310,10 +313,12 @@ final class TabStore {
     /// Plays the line a pack has for this moment (ADR-199). True when a pack voice covers it, so no
     /// other sound should. A muted session is never voiced, as it is never notified (ADR-066).
     @discardableResult
-    func voice(_ witness: SoundWitness, tab: Tab?, sessionId: SessionID?, onScreen: Bool? = nil) -> SoundPackStore.Spoken {
+    func voice(_ witness: SoundWitness, tab: Tab?, sessionId: SessionID?, project: String? = nil, pack: String? = nil,
+               onScreen: Bool? = nil) -> SoundPackStore.Spoken {
         guard let soundPacks else { return .none }
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return .none }
-        return soundPacks.voice(witness, session: sessionId, onScreen: onScreen ?? tab.map(isFrontAndSelected) ?? false)
+        return soundPacks.voice(witness, session: sessionId, project: project, pack: pack,
+                                onScreen: onScreen ?? tab.map(isFrontAndSelected) ?? false)
     }
 
     var selectedTab: Tab? { selectedTab(in: activeWindow) }

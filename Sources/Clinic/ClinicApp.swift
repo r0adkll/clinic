@@ -149,20 +149,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return refs.map { ref in
                     PRStore.OpenPR(ref: ref, directory: directory,
                                    isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab),
-                                   sessionId: tab.sessionId)
+                                   sessionId: tab.sessionId, project: tab.projectPath.isEmpty ? nil : tab.projectPath)
                 }
             }
         }
         prs.sessions = sessions
         // A watched pull request's verdict reaches the reader the way an agent's does (ADR-128):
         // through TabStore, so it obeys the session's mute and the front-tab rule.
-        prs.router = { [weak self] sid, title, body, kind, ref in
+        prs.router = { [weak self] sid, project, title, body, kind, ref in
             let witness: SoundWitness? = switch kind {
             case .checks(let passed): passed ? .checksPassed : .checksFailed
             default: nil
             }
             self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body,
-                              kind: kind, pullRequest: ref, witness: witness)
+                              kind: kind, pullRequest: ref, witness: witness, project: project)
         }
         prs.start()
         tabs.prs = prs
@@ -202,8 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ids.formUnion(tabs.tabs.filter { $0.state == .working }.compactMap(\.sessionId))
             return ids.count + agents.filter { $0.sessionId == nil }.count
         }
-        automations.router = { [weak self] sid, title, body, kind, witness in
-            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind, witness: witness)
+        automations.router = { [weak self] route, title, body, kind, witness in
+            let sid = route.session
+            self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind,
+                              witness: witness, project: route.project, pack: route.pack)
         }
         automations.soundPacks = soundPacks
         tabs.automations = automations

@@ -297,11 +297,14 @@ final class SoundPackStore {
     /// The pack a session speaks with and why: its own, its family's, its project's, its draw from the
     /// rotation, or the default. A session that has to draw does so here, once, and keeps it; a view
     /// asking only to show the answer passes `draw: false` and gets nil instead.
-    func choice(for session: SessionID?, draw: Bool = true) -> SoundPackAssignments.Choice? {
+    ///
+    /// `project` is for a moment with no session, such as a run or a PR check (ADR-206): it speaks with
+    /// that project's pack, else the default. With no session there is nothing to draw for.
+    func choice(for session: SessionID?, project: String? = nil, draw: Bool = true) -> SoundPackAssignments.Choice? {
         let assignments = sessions?.state.soundPacks ?? SoundPackAssignments()
         let installedNames = Set(installed.map(\.id))
         func resolve(_ a: SoundPackAssignments) -> SoundPackAssignments.Resolution {
-            a.resolve(session, project: session.flatMap(projectPath(of:)), parent: { [sessions] in sessions?.parent(of: $0)?.id },
+            a.resolve(session, project: session.flatMap(projectPath(of:)) ?? project, parent: { [sessions] in sessions?.parent(of: $0)?.id },
                       projectOf: { self.projectPath(of: $0) }, rotation: settings.rotation, defaultPack: settings.defaultPack,
                       installed: installedNames)
         }
@@ -325,8 +328,8 @@ final class SoundPackStore {
         }
     }
 
-    func pack(for session: SessionID?) -> InstalledSoundPack? {
-        choice(for: session).flatMap { installedPack($0.pack) }
+    func pack(for session: SessionID?, project: String? = nil) -> InstalledSoundPack? {
+        choice(for: session, project: project).flatMap { installedPack($0.pack) }
     }
 
     /// What a session about to start in `project` would speak with if left Automatic, in words
@@ -417,8 +420,11 @@ final class SoundPackStore {
 
     /// Plays the line a witness calls for, if the pack has one and the user has not switched it off.
     /// `covered` means a pack voice has the moment, so whatever would have sounded before stays quiet.
-    func voice(_ witness: SoundWitness, session: SessionID?, onScreen: Bool) -> Spoken {
-        let pack = pack(for: session)
+    /// A moment with no session names its `project`, and may name a `pack` of its own, as an automation
+    /// whose run never started does (ADR-206).
+    func voice(_ witness: SoundWitness, session: SessionID?, project: String? = nil, pack own: String? = nil,
+               onScreen: Bool) -> Spoken {
+        let pack = session == nil ? own.flatMap(installedPack) ?? pack(for: nil, project: project) : pack(for: session)
         let decision = router.decide(witness, session: session?.rawValue, manifest: pack?.manifest, settings: settings,
                                      onScreen: onScreen, playing: player.playingCategory)
         switch decision {

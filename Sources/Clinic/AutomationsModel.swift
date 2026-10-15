@@ -40,7 +40,11 @@ final class AutomationsModel {
     /// rather than from the launch.
     private var waitingSince: [UUID: Date] = [:]
 
-    var router: ((SessionID?, String, String, NotificationStore.Entry.Kind, SoundWitness?) -> Void)?
+    var router: ((Route, String, String, NotificationStore.Entry.Kind, SoundWitness?) -> Void)?
+
+    /// Who an outcome is about: the run's session, else its project and its own pack, so a run that
+    /// never started still speaks with its voice (ADR-206).
+    struct Route { var session: SessionID?; var project: String?; var pack: String? }
     /// Set by the app: a run's session takes its automation's pack once it is known (ADR-204).
     weak var soundPacks: SoundPackStore?
 
@@ -265,7 +269,8 @@ final class AutomationsModel {
         case .skipped(let reason): body = reason.title; kind = .finished; witness = nil
         case .running: return
         }
-        router?(run.sessionId, automation.name, body, kind, witness)
+        let project: String? = if case .project(let path) = automation.target { path } else { nil }
+        router?(Route(session: run.sessionId, project: project, pack: automation.soundPack), automation.name, body, kind, witness)
     }
 
     // MARK: - Hook binding

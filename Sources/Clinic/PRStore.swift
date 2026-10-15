@@ -27,6 +27,8 @@ final class PRStore {
         /// Whose session this pull request belongs to. A watch notification is addressed from it, so it
         /// obeys that session's mute and reveals it when clicked (ADR-033, ADR-128).
         let sessionId: SessionID?
+        /// The tab's project, whose pack voices a verdict when no session owns the pane (ADR-206).
+        let project: String?
     }
 
     /// Whether a read also re-fetches GitHub's rendering of the bodies. `.auto` lets
@@ -74,10 +76,11 @@ final class PRStore {
     /// Set by the app: where the watch list is persisted (ADR-128).
     weak var sessions: SessionStore?
     /// Set by the app to route through `TabStore.notify` (ADR-066), as the background agents do.
-    var router: ((SessionID?, String, String, NotificationStore.Entry.Kind, PullRequestRef) -> Void)?
+    var router: ((SessionID?, String?, String, String, NotificationStore.Entry.Kind, PullRequestRef) -> Void)?
     /// Which session each open pull request belongs to, refreshed on every poll, so a verdict landing
     /// between polls still knows who to tell.
     private var sessionIds: [String: SessionID] = [:]
+    private var projects: [String: String] = [:]
 
     func start() {
         Task { await refreshAvailability() }
@@ -187,7 +190,7 @@ final class PRStore {
         guard availability?.isReady != false else { return }
         let appActive = NSApp.isActive
         let now = Date()
-        for item in open { sessionIds[item.ref.id] = item.sessionId }
+        for item in open { sessionIds[item.ref.id] = item.sessionId; projects[item.ref.id] = item.project }
         for item in open where staleAfter == nil || item.isFront {
             let pr = pullRequests[item.ref.id]
             guard let interval = PullRequestRefresh.interval(for: pr, isFront: item.isFront, appActive: appActive,
@@ -338,7 +341,7 @@ final class PRStore {
         guard let verdict = PullRequestWatch.completion(previous: previous, fresh: fresh) else { return }
         let body = PullRequestWatch.sentence(verdict, host: ref.codeHost, number: ref.number)
         Self.log.info("pr watch \(ref.url.absoluteString, privacy: .public): \(body, privacy: .public)")
-        router?(sessionIds[ref.id], fresh.title, body, .checks(passed: !verdict.isFailure), ref)
+        router?(sessionIds[ref.id], projects[ref.id], fresh.title, body, .checks(passed: !verdict.isFailure), ref)
     }
 
     /// A push moves the head commit, which makes the diff the Files tab cached a diff of an older
