@@ -347,6 +347,7 @@ struct SessionContextMenu: View {
         if let tab = tabs.tab(for: summary.id) { MoveToWindowMenu(tab: tab) }
         if TabStore.ghosttyBinary != nil { Button("Open in Ghostty") { tabs.openInGhostty(summary) } }
         OpenInMenu(path: summary.lastCwd ?? summary.cwd ?? "")
+        SoundPackMenu(target: .session(summary.id))
         if let agent {
             Divider()
             if agent.isRunning { Button("Stop Detached Session") { Task { await background.stopAgent(agent) } } }

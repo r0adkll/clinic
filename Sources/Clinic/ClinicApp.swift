@@ -207,6 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         tabs.automations = automations
         tabs.soundPacks = soundPacks
+        soundPacks.sessions = sessions
+        soundPacks.liveSessions = { [weak self] in self?.tabs.tabs.compactMap(\.sessionId) ?? [] }
         automations.start(sessions: sessions, settingsFilePath: hooks.settingsFileURL.path,
                           chatsDirectory: SessionStore.chatsDirectory)
         // Starting by hand re-arms the wake agent that an explicit quit switched off.

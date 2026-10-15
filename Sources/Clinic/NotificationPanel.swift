@@ -44,6 +44,7 @@ struct NotificationPanel: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(e.title).lineLimit(1)
                             Text(e.body).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            if let caption = e.caption { SpokenCaption(text: caption) }
                             Text(e.date, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary)
                         }
                         Spacer()
@@ -105,6 +106,7 @@ struct NotificationCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(e.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                     Text(e.body).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    if let caption = e.caption { SpokenCaption(text: caption) }
                 }
                 Spacer(minLength: 4)
                 Button { store.dismissCard() } label: { Image(systemName: "xmark").font(.caption.weight(.bold)) }.buttonStyle(.plain).foregroundStyle(.secondary)
@@ -122,5 +124,19 @@ struct NotificationCard: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .padding(12)
         }
+    }
+}
+
+/// What a sound pack said for a notification (ADR-201): read as well as heard, and there for anyone
+/// who had the sound off.
+struct SpokenCaption: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "speaker.wave.2.fill")
+            .font(.caption2).foregroundStyle(Color.accent)
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .accessibilityLabel("Said: \(text)")
     }
 }

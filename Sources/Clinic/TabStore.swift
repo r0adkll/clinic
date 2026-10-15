@@ -284,13 +284,14 @@ final class TabStore {
         // What Clinic said and about which session: the history is in memory only, so this is the record.
         Self.log.info("attention for \(sessionId?.rawValue ?? "-", privacy: .public): \(body, privacy: .public)")
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
-        let voiced = witness.map { voice($0, tab: tab, sessionId: sessionId) } ?? false
+        let spoken = witness.map { voice($0, tab: tab, sessionId: sessionId) } ?? .none
+        let shown = spoken.caption.flatMap { history.setCaption($0, on: entry.id) } ?? entry
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
-            history.showCard(entry)
-            if !voiced { sounds.playForCard() }
+            history.showCard(shown)
+            if !spoken.covered { sounds.playForCard() }
         } else {
-            let silent = voiced || sounds.playForSystemNotification()
+            let silent = spoken.covered || sounds.playForSystemNotification()
             notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body,
                                silent: silent, pullRequest: pullRequest?.url, answerable: kind == .needsPermission)
         }
@@ -305,9 +306,9 @@ final class TabStore {
     /// Plays the line a pack has for this moment (ADR-199). True when a pack voice covers it, so no
     /// other sound should. A muted session is never voiced, as it is never notified (ADR-066).
     @discardableResult
-    func voice(_ witness: SoundWitness, tab: Tab?, sessionId: SessionID?, onScreen: Bool? = nil) -> Bool {
-        guard let soundPacks else { return false }
-        if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return false }
+    func voice(_ witness: SoundWitness, tab: Tab?, sessionId: SessionID?, onScreen: Bool? = nil) -> SoundPackStore.Spoken {
+        guard let soundPacks else { return .none }
+        if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return .none }
         return soundPacks.voice(witness, session: sessionId, onScreen: onScreen ?? tab.map(isFrontAndSelected) ?? false)
     }
 

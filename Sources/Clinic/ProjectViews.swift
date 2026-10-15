@@ -134,6 +134,7 @@ struct ProjectMenu: View {
         Button("Open Shell Here") { tabs.newShell(in: project.path) }
         ProjectRunMenu(projectPath: project.path)
         OpenInMenu(path: project.path)
+        SoundPackMenu(target: .project(project.path))
         Button("Open on GitHub") { if let remote { NSWorkspace.shared.open(remote) } }
             .disabled(remote == nil)
             .task { remote = await GitInfo.remoteWebURL(at: project.path) }

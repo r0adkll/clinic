@@ -5043,3 +5043,18 @@ filter column and the site-style page.
 **Verified.** `make test` 678 pass. In Clinic Dev, driven by AX and captured: facets, faceted counts, dimming,
 phrase-first search, the narrow fold with its badge, and a real install of Orc Peon (table in the ADR). Clinic
 Dev's sound data was removed afterwards.
+
+## 2026-10-14 — Sound packs per project and session (ADR-201)
+
+User: *"Okay, lets continue"* — ADR-199's phase 2. No new decisions were needed; ADR-199 had fixed the order.
+
+**Built.** ClinicCore `SoundPackAssignments` (in `ClinicState.soundPacks`: by project, by session, drawn), a
+pure `resolve` (session → nearest ancestor → family root → project → rotation draw → default, installed only)
+and `draw` (least-used among live sessions). `SoundSettings.rotation`. The store resolves and records draws
+(never from a view), `SoundPackMenu` in the project and session menus, *Use for Project ▸* and *Add to
+Rotation* on the pack page, a footer Rotation menu, and captions on history entries, the card and the panel.
+
+**Verified.** `make test` 683 pass. Clinic Dev with synthetic hooks: a project's pack (GLaDOS over the Peon
+default) and a rotation draw recorded once in `state.json`. The menus and the caption were not looked at:
+Clinic Dev's window was on another Space. Its four test packs and `ClinicSoundPacks` are left in place for
+that check; its `state.json` was restored.

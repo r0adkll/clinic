@@ -60,6 +60,9 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     public var volume = 0.5
     /// The pack every session uses until a project or session names another.
     public var defaultPack: String?
+    /// Packs a session with no pack of its own or its project's draws one from, and keeps (ADR-201).
+    /// Empty: every such session speaks with the default.
+    public var rotation: [String] = []
     public var disabledCategories: Set<CESPCategory> = []
     public var disabledWitnesses: Set<SoundWitness> = []
     /// Stay quiet for the tab the user is looking at.
@@ -72,7 +75,7 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, volume, defaultPack, disabledCategories, disabledWitnesses, quietOnScreen
+        case enabled, volume, defaultPack, rotation, disabledCategories, disabledWitnesses, quietOnScreen
     }
 
     /// Unknown categories or witnesses (from a newer build) are dropped, not fatal.
@@ -81,6 +84,7 @@ public struct SoundSettings: Codable, Sendable, Hashable {
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
         volume = min(1, max(0, (try? c.decode(Double.self, forKey: .volume)) ?? 0.5))
         defaultPack = try? c.decodeIfPresent(String.self, forKey: .defaultPack)
+        rotation = (try? c.decodeIfPresent([String].self, forKey: .rotation)) ?? []
         disabledCategories = Set(((try? c.decode([String].self, forKey: .disabledCategories)) ?? []).compactMap(CESPCategory.init(rawValue:)))
         disabledWitnesses = Set(((try? c.decode([String].self, forKey: .disabledWitnesses)) ?? []).compactMap(SoundWitness.init(rawValue:)))
         quietOnScreen = (try? c.decode(Bool.self, forKey: .quietOnScreen)) ?? false
@@ -91,6 +95,7 @@ public struct SoundSettings: Codable, Sendable, Hashable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(volume, forKey: .volume)
         try c.encodeIfPresent(defaultPack, forKey: .defaultPack)
+        try c.encode(rotation, forKey: .rotation)
         try c.encode(disabledCategories.map(\.rawValue).sorted(), forKey: .disabledCategories)
         try c.encode(disabledWitnesses.map(\.rawValue).sorted(), forKey: .disabledWitnesses)
         try c.encode(quietOnScreen, forKey: .quietOnScreen)

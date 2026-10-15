@@ -62,6 +62,8 @@ public struct ClinicState: Codable, Sendable, Equatable {
     public var reports: [SessionID: [SessionReport]] = [:]
     /// Children that report to their parent (ADR-182); absent means the child does not.
     public var childReporting: [SessionID: ChildReporting] = [:]
+    /// Each project's and session's sound pack, and what sessions drew from the rotation (ADR-201).
+    public var soundPacks = SoundPackAssignments()
 
     public init() {}
 
@@ -135,7 +137,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, parents, collapsedSessions, reports, childReporting
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, parents, collapsedSessions, reports, childReporting, soundPacks
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -172,6 +174,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         collapsedSessions = (try? c.decodeIfPresent(Set<SessionID>.self, forKey: .collapsedSessions)) ?? []
         reports = (try? c.decodeIfPresent([SessionID: [SessionReport]].self, forKey: .reports)) ?? [:]
         childReporting = (try? c.decodeIfPresent([SessionID: ChildReporting].self, forKey: .childReporting)) ?? [:]
+        soundPacks = (try? c.decodeIfPresent(SoundPackAssignments.self, forKey: .soundPacks)) ?? SoundPackAssignments()
         // ADR-156's `spawnedBy` (child → parent id) was written by `start_session` alone, so every entry is a spawn.
         if let legacy = (try? decoder.container(keyedBy: LegacyKeys.self)).flatMap({ try? $0.decodeIfPresent([SessionID: SessionID].self, forKey: .spawnedBy) }) {
             for (child, parent) in legacy where parents[child] == nil {

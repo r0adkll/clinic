@@ -271,29 +271,111 @@ final class SoundPackStore {
         return data
     }
 
+    // MARK: Which pack (ADR-201)
+
+    /// Set by the app: the sessions and projects packs are assigned to, kept in `state.json`.
+    @ObservationIgnored weak var sessions: SessionStore?
+    /// Set by the app: sessions with a live tab, whose packs a rotation draw spreads across.
+    @ObservationIgnored var liveSessions: () -> [SessionID] = { [] }
+
+    private func projectPath(of session: SessionID) -> String? {
+        sessions?.sessions[session].flatMap(ProjectGrouping.project(for:))?.path
+    }
+
+    /// The pack a session speaks with and why: its own, its family's, its project's, its draw from the
+    /// rotation, or the default. A session that has to draw does so here, once, and keeps it; a view
+    /// asking only to show the answer passes `draw: false` and gets nil instead.
+    func choice(for session: SessionID?, draw: Bool = true) -> SoundPackAssignments.Choice? {
+        let assignments = sessions?.state.soundPacks ?? SoundPackAssignments()
+        let installedNames = Set(installed.map(\.id))
+        func resolve(_ a: SoundPackAssignments) -> SoundPackAssignments.Resolution {
+            a.resolve(session, project: session.flatMap(projectPath(of:)), parent: { [sessions] in sessions?.parent(of: $0)?.id },
+                      projectOf: { self.projectPath(of: $0) }, rotation: settings.rotation, defaultPack: settings.defaultPack,
+                      installed: installedNames)
+        }
+        switch resolve(assignments) {
+        case .choice(let choice): return choice
+        case .none: return nil
+        case .draw(let who):
+            guard draw else { return nil }
+            let inUse = liveSessions().filter { $0 != who }.compactMap { assignments.drawn[$0] }
+            guard let pick = SoundPackAssignments.draw(rotation: settings.rotation, installed: installedNames, inUse: inUse) else { return nil }
+            let live = Set(sessions?.sessions.keys.map { $0 } ?? [])
+            sessions?.update { state in
+                state.soundPacks.drawn[who] = pick
+                state.soundPacks.pruneDraws(keeping: live)
+            }
+            Self.log.info("session \(who.rawValue, privacy: .public) drew \(pick, privacy: .public) from the rotation")
+            var drawn = assignments
+            drawn.drawn[who] = pick
+            if case .choice(let choice) = resolve(drawn) { return choice }
+            return nil
+        }
+    }
+
+    func pack(for session: SessionID?) -> InstalledSoundPack? {
+        choice(for: session).flatMap { installedPack($0.pack) }
+    }
+
+    func setPack(_ name: String?, forProject path: String) {
+        sessions?.update { $0.soundPacks.byProject[path] = name }
+    }
+
+    func setPack(_ name: String?, forSession id: SessionID) {
+        sessions?.update { $0.soundPacks.bySession[id] = name }
+    }
+
+    func isInRotation(_ name: String) -> Bool { settings.rotation.contains(name) }
+
+    func toggleRotation(_ name: String) {
+        if let i = settings.rotation.firstIndex(of: name) { settings.rotation.remove(at: i) } else { settings.rotation.append(name) }
+    }
+
+    /// The projects that speak with a pack of their own choosing.
+    func projects(using name: String) -> [String] {
+        (sessions?.state.soundPacks.byProject ?? [:]).filter { $0.value == name }.map(\.key).sorted()
+    }
+
+    /// Words for where a session's pack comes from, for menus: "Orc Peon, from clinic".
+    func describe(_ choice: SoundPackAssignments.Choice) -> String {
+        let name = installedPack(choice.pack)?.manifest.displayName ?? choice.pack
+        switch choice.source {
+        case .session: return name
+        case .parent(let id):
+            let parent = sessions?.sessions[id].map { sessions?.displayName(for: $0) ?? "" } ?? "its parent"
+            return "\(name), from \(parent)"
+        case .project(let path): return "\(name), from \((path as NSString).lastPathComponent)"
+        case .rotation: return "\(name), from the rotation"
+        case .defaultPack: return "\(name), the default"
+        }
+    }
+
     // MARK: Voicing (ADR-199)
 
-    /// The pack a session speaks with. Phase 1 has only the default; projects and sessions come next.
-    func pack(for session: SessionID?) -> InstalledSoundPack? {
-        settings.defaultPack.flatMap(installedPack)
+    /// What a moment sounded like: whether a pack voice covers it, and the line, for the card's caption.
+    struct Spoken {
+        var covered: Bool
+        var caption: String?
+        static let none = Spoken(covered: false, caption: nil)
     }
 
     /// Plays the line a witness calls for, if the pack has one and the user has not switched it off.
-    /// True when a pack voice covers the moment, so whatever would have sounded before must stay quiet.
-    func voice(_ witness: SoundWitness, session: SessionID?, onScreen: Bool) -> Bool {
+    /// `covered` means a pack voice has the moment, so whatever would have sounded before stays quiet.
+    func voice(_ witness: SoundWitness, session: SessionID?, onScreen: Bool) -> Spoken {
         let pack = pack(for: session)
         let decision = router.decide(witness, session: session?.rawValue, manifest: pack?.manifest, settings: settings,
                                      onScreen: onScreen, playing: player.playingCategory)
         switch decision {
-        case .pass: return false
-        case .hold: return true
+        case .pass: return .none
+        case .hold: return Spoken(covered: true, caption: nil)
         case .play(let cue):
-            guard let pack else { return false }
+            guard let pack else { return .none }
             let url = pack.url(of: cue.line)
             // A line that will not play is a line that does not exist: the old sound takes the moment.
-            guard player.play(url, volume: settings.volume, category: cue.category) else { return false }
-            Self.log.debug("\(witness.rawValue, privacy: .public) → \(cue.category.rawValue, privacy: .public): \(cue.line.label, privacy: .public)")
-            return true
+            guard player.play(url, volume: settings.volume, category: cue.category) else { return .none }
+            Self.log.debug("\(witness.rawValue, privacy: .public) → \(cue.category.rawValue, privacy: .public) [\(pack.id, privacy: .public) for \(session?.rawValue ?? "-", privacy: .public)]: \(cue.line.label, privacy: .public)")
+            let label = cue.line.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Spoken(covered: true, caption: label.isEmpty ? nil : "\(pack.manifest.displayName): “\(label)”")
         }
     }
 

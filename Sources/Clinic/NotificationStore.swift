@@ -21,6 +21,8 @@ final class NotificationStore {
         var url: URL? = nil
         /// The pull request this is about, so clicking opens its pane rather than the browser (ADR-128).
         var pullRequest: PullRequestRef? = nil
+        /// The line a sound pack said for it, with the pack's name (ADR-201).
+        var caption: String? = nil
         var read = false
     }
 
@@ -57,6 +59,13 @@ final class NotificationStore {
         entries.insert(e, at: 0)
         if entries.count > Self.maxEntries { entries.removeLast(entries.count - Self.maxEntries) }
         return e
+    }
+
+    /// Adds what the sound pack said to an entry already recorded, and returns it as it now stands.
+    func setCaption(_ caption: String, on id: Entry.ID) -> Entry? {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return nil }
+        entries[i].caption = caption
+        return entries[i]
     }
 
     func markAllRead() { for i in entries.indices { entries[i].read = true } }

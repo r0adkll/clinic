@@ -443,6 +443,11 @@ struct SoundPackRow: View {
         if let lines = pack?.entry.soundCount ?? installed.map({ $0.manifest.allLines.count }) { parts.append("\(lines) lines") }
         if let quality = pack?.entry.quality { parts.append(quality.capitalized) }
         if let author = pack?.entry.authorName ?? installed?.manifest.author?.name { parts.append(author) }
+        if installed != nil, store.isInRotation(name) { parts.append("in rotation") }
+        let projects = store.projects(using: name)
+        if installed != nil, !projects.isEmpty {
+            parts.append(projects.count == 1 ? (projects[0] as NSString).lastPathComponent : "\(projects.count) projects")
+        }
         if let installed, installed.origin != .clinic { parts.append("from \(installed.origin.label)") }
         if let installed, store.update(for: installed) != nil { parts.append("update available") }
         return parts.joined(separator: " · ")
@@ -482,6 +487,7 @@ struct SoundTagChip: View {
 /// line it says under the moment that plays it.
 struct SoundPackDetail: View {
     @Environment(SoundPackStore.self) private var store
+    @Environment(SessionStore.self) private var sessions
     let name: String
     @State private var expanded: Set<CESPCategory> = []
 
@@ -588,8 +594,10 @@ struct SoundPackDetail: View {
             } else if let entry {
                 Button("Install") { store.install(entry) }.buttonStyle(.borderedProminent).disabled(busy)
             }
-            Button("Use for Project…") {}.disabled(true).help("Coming with per-project packs")
-            Button("Add to Rotation") {}.disabled(true).help("Coming with pack rotation")
+            projectMenu.disabled(installed == nil)
+            Button(store.isInRotation(name) ? "In Rotation ✓" : "Add to Rotation") { store.toggleRotation(name) }
+                .disabled(installed == nil)
+                .help(installed == nil ? "Install it first" : "Sessions with no pack of their own draw one from the rotation and keep it")
             if busy { ProgressView().controlSize(.small) }
             Spacer(minLength: 8)
             Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -606,10 +614,29 @@ struct SoundPackDetail: View {
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    /// *Use for Project ▸*: every project, ticked where this is its pack.
+    private var projectMenu: some View {
+        Menu("Use for Project") {
+            ForEach(sessions.projects) { project in
+                Toggle(project.name, isOn: Binding(
+                    get: { sessions.state.soundPacks.byProject[project.path] == name },
+                    set: { on in store.setPack(on ? name : nil, forProject: project.path) }))
+            }
+        }
+        .fixedSize()
+        .help("Give a project this voice: its sessions speak with it unless one has its own")
+    }
+
+    /// Where this pack is heard: as the default, in the rotation, for which projects.
     private var status: String {
         guard let installed else { return "Every file is checked as it installs" }
-        if store.settings.defaultPack == name { return "Plays for every session" }
-        return installed.origin == .clinic ? "Installed" : "Found in \(installed.origin.label)"
+        var uses: [String] = []
+        if store.settings.defaultPack == name { uses.append("Default") }
+        if store.isInRotation(name) { uses.append("In the rotation") }
+        let projects = store.projects(using: name).map { ($0 as NSString).lastPathComponent }
+        if !projects.isEmpty { uses.append(projects.count <= 2 ? projects.joined(separator: ", ") : "\(projects.count) projects") }
+        if uses.isEmpty { return installed.origin == .clinic ? "Installed" : "Found in \(installed.origin.label)" }
+        return uses.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -848,11 +875,12 @@ struct SoundsFooter: View {
                 }
                 if store.installed.isEmpty { Text("Install a pack from Browse") }
             } label: {
-                Text(store.pack(for: nil)?.manifest.displayName ?? "No default pack")
+                Text(store.settings.defaultPack.flatMap(store.installedPack).map { "Default: \($0.manifest.displayName)" } ?? "No default pack")
             }
             .menuStyle(.button).fixedSize()
             .disabled(!store.settings.enabled)
-            .help("The pack every session speaks with")
+            .help("The pack a session speaks with when nothing else gives it one")
+            SoundRotationMenu().disabled(!store.settings.enabled)
             Divider().frame(height: 14)
             status
             Spacer(minLength: 0)
@@ -880,5 +908,79 @@ struct SoundsFooter: View {
                 Text("Packs play through Focus, like your own notification sounds.").font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+// MARK: - Choosing a pack (ADR-201)
+
+/// *Sound Pack ▸* in a project's or a session's menu: Automatic, or one installed pack.
+struct SoundPackMenu: View {
+    @Environment(SoundPackStore.self) private var store
+    @Environment(SessionStore.self) private var sessions
+
+    enum Target {
+        case project(String)
+        case session(SessionID)
+    }
+
+    let target: Target
+
+    private var chosen: String? {
+        switch target {
+        case .project(let path): sessions.state.soundPacks.byProject[path]
+        case .session(let id): sessions.state.soundPacks.bySession[id]
+        }
+    }
+
+    private func set(_ name: String?) {
+        switch target {
+        case .project(let path): store.setPack(name, forProject: path)
+        case .session(let id): store.setPack(name, forSession: id)
+        }
+    }
+
+    /// What Automatic means here, in words: the session's family, project, draw or the default.
+    private var automatic: String {
+        switch target {
+        case .project:
+            if !store.settings.rotation.isEmpty { return "Automatic (the rotation)" }
+            return store.settings.defaultPack.flatMap(store.installedPack).map { "Automatic (\($0.manifest.displayName))" } ?? "Automatic"
+        case .session(let id):
+            guard chosen == nil else { return "Automatic" }
+            return store.choice(for: id, draw: false).map { "Automatic (\(store.describe($0)))" } ?? "Automatic"
+        }
+    }
+
+    var body: some View {
+        Menu("Sound Pack") {
+            Toggle(automatic, isOn: Binding(get: { chosen == nil }, set: { _ in set(nil) }))
+            if !store.installed.isEmpty { Divider() }
+            ForEach(store.installed) { pack in
+                Toggle(pack.manifest.displayName, isOn: Binding(get: { chosen == pack.id }, set: { _ in set(pack.id) }))
+            }
+            Divider()
+            Button("Browse Sound Packs…") { NotificationCenter.default.post(name: .clinicSounds, object: nil) }
+        }
+    }
+}
+
+/// The footer's rotation: which installed packs sessions draw from.
+struct SoundRotationMenu: View {
+    @Environment(SoundPackStore.self) private var store
+
+    var body: some View {
+        let count = store.settings.rotation.filter { store.installedPack($0) != nil }.count
+        Menu {
+            ForEach(store.installed) { pack in
+                Toggle(pack.manifest.displayName, isOn: Binding(get: { store.isInRotation(pack.id) }, set: { _ in store.toggleRotation(pack.id) }))
+            }
+            if store.installed.isEmpty { Text("Install packs from Browse") }
+            Divider()
+            Button("Clear Rotation") { store.settings.rotation = [] }.disabled(store.settings.rotation.isEmpty)
+        } label: {
+            Text(count == 0 ? "No rotation" : "Rotation · \(count)")
+        }
+        .menuStyle(.button).fixedSize()
+        .help("Sessions with no pack of their own, and none from their project, each draw one of these and keep it")
     }
 }
