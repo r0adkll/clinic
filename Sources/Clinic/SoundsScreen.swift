@@ -798,6 +798,7 @@ struct SoundEventsView: View {
         Form {
             Section {
                 Toggle("Stay quiet for the tab I'm looking at", isOn: $store.settings.quietOnScreen)
+                FocusQuietRow()
             } footer: {
                 Text("A pack line replaces the notification sound for the same moment. Where the pack has no line, or the moment is switched off here, your notification sound plays as before.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -862,6 +863,25 @@ struct SoundEventsView: View {
     }
 }
 
+/// Where a Focus can quiet Clinic: its own Focus filter, added in System Settings (ADR-207).
+struct FocusQuietRow: View {
+    var body: some View {
+        LabeledContent {
+            Button("Focus Settings…") { FocusQuiet.openFocusSettings() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.fill").foregroundStyle(Color.accent).frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(FocusQuiet.shared.isQuiet ? "Quiet for a Focus" : "Quiet during a Focus")
+                    Text("Add the Clinic filter to a Focus and switch its Sounds off. Pack lines and notification sounds stay quiet while that Focus is on; notifications still arrive.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Footer
 
 /// The master switch, the volume and the default pack, under every section.
@@ -914,8 +934,9 @@ struct SoundsFooter: View {
             if let error = store.loadError {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(error).font(.caption).lineLimit(2)
-            } else {
-                Text("Packs play through Focus, like your own notification sounds.").font(.caption).foregroundStyle(.secondary)
+            } else if FocusQuiet.shared.isQuiet {
+                Image(systemName: "moon.fill").foregroundStyle(Color.accent)
+                Text("Quiet for a Focus").font(.caption)
             }
         }
     }

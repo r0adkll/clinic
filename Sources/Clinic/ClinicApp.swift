@@ -121,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `-ClinicSkipNotificationPermission YES` (ADR-159): `make screenshots` runs a re-identified copy of
         // the app, and asking for permission would leave that copy in System Settings ▸ Notifications.
         if !UserDefaults.standard.bool(forKey: "ClinicSkipNotificationPermission") { notifications.requestAuthorization() }
+        // Launched during a Focus that keeps Clinic quiet (ADR-207).
+        Task { await FocusQuiet.shared.refresh() }
         hooks.start()
         sessions.onArchive = { [weak self] id in self?.history.markRead(sessionId: id) }
         sessions.start()

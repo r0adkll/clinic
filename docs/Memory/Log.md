@@ -5132,3 +5132,17 @@ own pack first.
 capability on the App IDs and profiles for Debug, Dev and Developer ID. The trial was reverted; the choice went to
 the user.
 
+## 2026-10-15 — A Focus filter quiets Clinic's sounds (ADR-207)
+
+The Focus Status entitlement needs provisioning profiles Clinic does not have, so the user was asked and chose a
+Focus filter (`SetFocusFilterIntent`, no entitlement), quieting pack lines and the notification sound.
+
+**Built.** `FocusQuiet` and `ClinicFocusFilter` (*Clinic Sounds*, a *Sounds* switch, on by default since the
+defaults are what the system sends when the Focus ends). `TabStore` voices nothing and plays no notification sound
+while quiet. Sounds screen: a *Quiet during a Focus* row with *Focus Settings…*, and a moon in the footer while
+quiet. `-ClinicFocusQuiet YES` seam.
+
+**Verified.** `make build`; the App Intents metadata lists the filter under the Focus configuration protocol; the
+row rendered from its real source in a harness. A real Focus was not toggled (it would change the user's Focus
+setup), so that is left as the manual check in the ADR.
+
