@@ -52,8 +52,8 @@ Organised by milestone ([[ADR-024 Milestones and Versioning]]). Milestone 1 scop
 - ~~Sidebar selection for unopened rows~~ fixed.
 - ~~Xcode scheme test action~~ `make test` runs both package suites instead.
 - Verify by hand: working → finished notification in a *real* conversation (synthetic hooks verified); ⌘W close sheet; Resume after `claude` exits. (Quit sheet verified.)
-- ~~Developer ID certificate, notarytool profile, `make release`~~ done (first notarized build 2026-09-08); ~~tag + GitHub release + Homebrew cask~~ scripted → [[ADR-153 Versions Are Semver And A Release Updates The Tap]] (`make publish`, not yet run); Sparkle deferred (ADR-010).
-- Cut 0.1.0: `make publish` (guided: build, smoke test, notes, tag, Release, cask). Then update the tap README and the README screenshots.
+- ~~Developer ID certificate, notarytool profile, `make release`~~ done (first notarized build 2026-09-08); ~~tag + GitHub release + Homebrew cask~~ scripted → [[ADR-153 Versions Are Semver And A Release Updates The Tap]] (`make publish`, used for every release since; 0.3.1 is the latest as of 2026-10-15); Sparkle deferred (ADR-010).
+- ~~Cut 0.1.0~~ done; releases are cut with `make publish` (0.3.1 as of 2026-10-15).
 - Smoke instances: run with `CLINIC_APP_SUPPORT=<short dir>` (own sockets/state) — a second instance on the default dir steals the running app's sockets.
 - Clean the throwaway test sessions (hooktest project, `New session` rows, detached agent de9b277b).
 - One-off `ghostty_surface_new` OutOfMemory seen right after a rapid relaunch; retry + alert added. Watch for recurrence.
