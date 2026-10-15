@@ -37,8 +37,8 @@ sounds like nobody made one.
 
 ## Verification
 - `make build` and the Clinic Dev build pass.
-- **Not looked at.** The check in Clinic Dev was stopped partway, because the user had their own Clinic Dev open
-  (pid 39602). A second instance had been launched beside it and was quit.
+- **Checked by the user in Clinic Dev** (2026-10-15): *"It works!"* My own scripted check had been stopped
+  partway, because the user had their own Clinic Dev open (pid 39602); the second instance was quit.
 - Manual check:
   1. Give a project a pack from its *Sound Pack ▸* menu.
   2. Open that project's composer: the pill reads the pack's name, and its menu ticks "‹pack› (from ‹project›)".

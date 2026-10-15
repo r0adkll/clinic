@@ -5112,3 +5112,5 @@ parent's or project's pack as the ticked selection; the default and the rotation
 **Not verified on screen.** The user had their own Clinic Dev open (pid 39602), so my second instance was quit.
 Before I noticed, I had written a Campfire → GLaDOS project pack into Clinic Dev's `state.json` and
 `ClinicSoundPacks` (default Peon, volume 0.12) into its preferences; the user was told.
+
+**Checked by the user** later the same day in their Clinic Dev: *"It works!"*
