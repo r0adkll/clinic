@@ -293,18 +293,27 @@ struct MoveToGroupMenu: View {
 
     var body: some View {
         if !SessionStore.isChats(project.path) {
-            let current = sessions.group(of: project.path)?.id
-            Menu("Move to Group") {
-                ForEach(sessions.groups) { group in
-                    Toggle(group.name, isOn: Binding(get: { current == group.id },
-                                                     set: { _ in sessions.move(project: project.path, toGroup: group.id) }))
-                }
-                if !sessions.groups.isEmpty { Divider() }
-                Button("New Group\u{2026}") { GroupActions.newGroup(sessions: sessions, with: [project.path]) }
-                if current != nil {
-                    Button("Remove from Group") { sessions.move(project: project.path, toGroup: nil) }
-                }
-            }
+            Menu("Move to Group") { MoveToGroupItems(project: project) }
+        }
+    }
+}
+
+/// The groups to move a project into, New Group… and Remove from Group: the project menu's submenu and
+/// the header's quick action (ADR-211) both list these.
+struct MoveToGroupItems: View {
+    @Environment(SessionStore.self) private var sessions
+    let project: Project
+
+    var body: some View {
+        let current = sessions.group(of: project.path)?.id
+        ForEach(sessions.groups) { group in
+            Toggle(group.name, isOn: Binding(get: { current == group.id },
+                                             set: { _ in sessions.move(project: project.path, toGroup: group.id) }))
+        }
+        if !sessions.groups.isEmpty { Divider() }
+        Button("New Group\u{2026}") { GroupActions.newGroup(sessions: sessions, with: [project.path]) }
+        if current != nil {
+            Button("Remove from Group") { sessions.move(project: project.path, toGroup: nil) }
         }
     }
 }

@@ -252,6 +252,8 @@ private struct GeneralPane: View {
                 }
             }
 
+            ProjectQuickActionSettings()
+
             Section {
                 LabeledContent("Account") {
                     if usage.isConnected {

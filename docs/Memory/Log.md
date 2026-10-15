@@ -5204,3 +5204,18 @@ showed, but a turn that ended unseen (idle and unread, the common case) left it 
 counts waiting (a tab at a prompt, an open Grill round with or without a tab, a detached agent asking) and
 unread, once per session under its listed project. Orange "N need you" or blue "N new". All three cases were
 checked in Clinic Dev, which was restored afterwards. `make test` 708 pass.
+
+## 2026-10-15 — Project headers carry chosen quick actions (ADR-211)
+
+User asked for project hover quick actions, such as adding to or removing from a group and Git Pull, with a
+setting to customise them up to a maximum.
+
+**Built.** `ProjectQuickAction` in ClinicCore, with parse, order, cap and the Chats filter, and 6 tests. The
+header's `ProjectQuickActions` take room only while hovered. *Run* and *Move to Group* are menus, sharing
+`ProjectRunItems` and `MoveToGroupItems` with the project menu. Settings ▸ General ▸ Project quick actions, with
+a switch per action, a cap of five and Restore Defaults. Every project menu ends with *Customize Quick
+Actions…*.
+
+**Verified.** `make test` 714 pass. In Clinic Dev: header buttons shown with a seeded hover (seam removed), the
+Settings section, and the cap through AX. The Clinic Dev preference keys the run wrote were deleted. The
+actions' clicks are left to a manual check.

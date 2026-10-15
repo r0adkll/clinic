@@ -514,13 +514,26 @@ struct ProjectRunMenu: View {
 
     var body: some View {
         if let ctx = tabs.runContext(projectPath: projectPath), let file = ctx.file, !file.configurations.isEmpty {
-            Menu("Run") {
-                ForEach(file.configurations) { config in
-                    Button { tabs.run(config, in: ctx) } label: { Label(config.name, systemImage: config.uiSymbol) }
-                }
-                Divider()
-                Button("Edit Configurations…") { tabs.showRunSheet(.edit, context: ctx) }
+            Menu("Run") { ProjectRunItems(projectPath: projectPath) }
+        } else if !SessionStore.isChats(projectPath) {
+            Button("Set Up Run Configurations with Claude…") { tabs.setUpRunsWithClaude(projectPath: projectPath) }
+        }
+    }
+}
+
+/// A project's run configurations and Edit, or the offer to set some up: the Run submenu and the
+/// header's Run quick action (ADR-211).
+struct ProjectRunItems: View {
+    @Environment(TabStore.self) private var tabs
+    let projectPath: String
+
+    var body: some View {
+        if let ctx = tabs.runContext(projectPath: projectPath), let file = ctx.file, !file.configurations.isEmpty {
+            ForEach(file.configurations) { config in
+                Button { tabs.run(config, in: ctx) } label: { Label(config.name, systemImage: config.uiSymbol) }
             }
+            Divider()
+            Button("Edit Configurations…") { tabs.showRunSheet(.edit, context: ctx) }
         } else if !SessionStore.isChats(projectPath) {
             Button("Set Up Run Configurations with Claude…") { tabs.setUpRunsWithClaude(projectPath: projectPath) }
         }

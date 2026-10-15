@@ -29,18 +29,15 @@ struct ProjectHeader: View {
             }
             if let draft = composer.draft(for: project.path) { DraftMark(project: project, draft: draft) }
             Spacer(minLength: 4)
-            // Both reveal on hover but always occupy their space, so the header never reflows.
-            HStack(spacing: 2) {
-                Button { tabs.startNewSession(projectPath: project.path) } label: {
-                    Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 18, height: 18).contentShape(Rectangle())
-                }.buttonStyle(.plain).help("New session in \(project.name)")
-                Menu { ProjectMenu(project: project) } label: { Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help("Project actions")
-            }
-            .foregroundStyle(.secondary)
-            .opacity(hovering ? 1 : 0)
-            .padding(.trailing, 6)
+            // The chosen quick actions and ⋯ (ADR-211). They take room only under the pointer: reserved
+            // for up to six buttons they would cut every name short all the time, so a long name gives
+            // way while hovered instead. Collapsed rather than removed, so an open menu keeps its anchor.
+            ProjectQuickActions(project: project)
+                .fixedSize()
+                .opacity(hovering ? 1 : 0)
+                .frame(maxWidth: hovering ? nil : 0, alignment: .trailing)
+                .clipped()
+                .padding(.trailing, 6)
         }
         .textCase(nil)
         // 2 pt in from the section header's inset, so the project tiles share one column with the
@@ -224,6 +221,8 @@ struct ProjectMenu: View {
         if !SessionStore.isChats(project.path) {
             Button("Remove Project", role: .destructive) { sessions.removeProject(project) }
         }
+        Divider()
+        Button("Customize Quick Actions\u{2026}") { PreferencesView.open(.general) }
     }
 }
 
