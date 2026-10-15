@@ -22,9 +22,15 @@ comment had to explain away ("no phantom disclosure column").
   icon. With the pointer on the tile, a black scrim covers it (0.55, 0.7 while pressed) with a white bold
   `chevron.right` on top, pointing right when collapsed and down when expanded. Clicking it collapses or expands
   the project, as the chevron did. Only the tile reacts; the rest of the header still starts a session.
-- **The tile is blurred under the scrim** (2 pt, opaque, clipped to the tile's corner). A first pass used a plain
-  0.45 scrim. The icon's own glyph still showed through it, so `clinic`'s `>+` read as `>>` and a monogram
-  fought the chevron. The blur leaves the tile's colour, which is enough to tell projects apart while hovering.
+- **A picture is blurred under the scrim** (2 pt, opaque, clipped to the tile's corner). A first pass used a plain
+  0.45 scrim. The icon's own glyph still showed through it, so `clinic`'s `>+` read as `>>`. The blur leaves the
+  tile's colour, which is enough to tell projects apart while hovering.
+- **A drawn tile swaps its glyph for the chevron instead.** A monogram (and the Chats tile) has nothing to
+  obscure: it is a white glyph on a flat colour, and the blur and scrim only turned it a muddy dark. User
+  (2026-10-15): *"The arrow/scrim does not look good on non-icon projects (i.e. ones that use the default
+  background plus project abbreviation)"*. So the letter crossfades to a white chevron of the same weight on the
+  tile's own colour, and a press darkens the tile by 0.2. `ProjectIcon` takes `showsFold` and `collapsed` for
+  this. Which way the chevron points does not depend on whether it shows, so it does not turn as it fades out.
 - **The scrim and chevron fade in over 0.12 s**, and the chevron turns over 0.2 s when the state changes.
 - **The header moves 2 pt right.** Without the chevron column the tile landed 2 pt left of the nav rows' tiles
   and the *Projects* caption. With the nudge all three share one leading edge, measured in a screenshot.
@@ -41,8 +47,9 @@ comment had to explain away ("no phantom disclosure column").
 - Collapse All and Expand All in the toolbar are unchanged.
 
 **Verified** in Clinic Dev. At rest, the headers have no chevron and the tiles line up with the nav tiles. With
-the hover state seeded by a temporary launch argument (removed before committing), every tile showed the
-scrim. The blurred version reads `>` on the collapsed `clinic` and `⌄` on the expanded projects. The fold
+the hover state seeded by a temporary launch argument (removed before committing), the picture tiles
+(`clinic`, `Campfire`, `firenation`) show a blurred scrim with a clear chevron, and the drawn ones (`proj`,
+`repo`, `repo2`, Chats) keep their colour with only the letter replaced by the chevron. The fold
 action pressed through the accessibility API expanded `clinic` and flipped its action to "Collapse clinic".
 Pressing it again collapsed it. A real pointer hover was not seen, because the Dev window was behind the
 user's windows and taking focus was not worth it; hover it once by hand.

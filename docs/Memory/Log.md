@@ -5174,3 +5174,7 @@ tiles and the *Projects* caption share one edge. ADR-077's chevron metric is str
 **Verified.** Clinic Dev screenshots at rest and with hover seeded through a temporary launch argument, which
 was removed. A plain 0.45 scrim let the icon's glyph muddle the chevron, so the tile is now blurred. The fold
 was pressed through AX both ways. A real pointer hover is left to the user.
+
+**Follow-up.** User: the scrim looks wrong on monogram tiles. Drawn tiles (monogram, Chats) now crossfade their
+letter to the chevron on their own colour. Only pictures get the blur and scrim. Checked the same way, with a
+seeded hover in Clinic Dev.

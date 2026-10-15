@@ -55,9 +55,10 @@ struct ProjectHeader: View {
     }
 }
 
-/// The project's icon, which is also its fold control (ADR-209): hovering the tile lays a scrim over it
-/// with the disclosure chevron on top, and clicking it collapses or expands the project. It replaces
-/// a chevron column of its own, which gives the header's name 16 pt more room.
+/// The project's icon, which is also its fold control (ADR-209): hovering the tile shows the disclosure
+/// chevron on it, and clicking it collapses or expands the project. A drawn tile (a monogram, Chats) swaps
+/// its glyph for the chevron; a picture is blurred under a scrim with the chevron on top. It replaces a
+/// chevron column of its own, which gives the header's name 16 pt more room.
 struct ProjectFoldIcon: View {
     @Environment(SessionStore.self) private var sessions
     let project: Project
@@ -66,38 +67,42 @@ struct ProjectFoldIcon: View {
     @State private var hovering = false
 
     var body: some View {
+        let picture = ProjectIcon.hasPicture(project)
         Button { sessions.setCollapsed(project, !collapsed) } label: {
-            ProjectIcon(project: project, size: size)
+            ProjectIcon(project: project, size: size, showsFold: hovering && !picture, collapsed: collapsed)
         }
-        .buttonStyle(FoldIconStyle(collapsed: collapsed, hovering: hovering, size: size))
+        .buttonStyle(FoldIconStyle(collapsed: collapsed, hovering: hovering, picture: picture, size: size))
         .onHover { hovering = $0 }
         .help(collapsed ? "Expand \(project.name)" : "Collapse \(project.name)")
         .accessibilityLabel(collapsed ? "Expand \(project.name)" : "Collapse \(project.name)")
     }
 
-    /// The scrim and chevron, drawn only while the pointer is on the tile; a press darkens the scrim.
+    /// A picture's scrim and chevron, drawn only while the pointer is on the tile; a press darkens the
+    /// scrim, or a drawn tile's own colour.
     private struct FoldIconStyle: ButtonStyle {
         let collapsed: Bool
         let hovering: Bool
+        let picture: Bool
         let size: CGFloat
 
         func makeBody(configuration: Configuration) -> some View {
             // ProjectIcon's own corner, so the blur and scrim stay on the tile and nothing past it.
             let tile = RoundedRectangle(cornerRadius: size * 0.22)
             configuration.label
-                // A softened tile under a dark scrim: with the glyph still sharp, a monogram or a
-                // `>` in the icon read as part of the chevron.
-                .blur(radius: hovering ? 2 : 0, opaque: true)
+                // A softened picture under a dark scrim: with it still sharp, a `>` in the icon read as
+                // part of the chevron. A drawn tile is left alone; it shows the chevron itself.
+                .blur(radius: picture && hovering ? 2 : 0, opaque: true)
                 .clipShape(tile)
                 .overlay {
-                    ZStack {
-                        tile.fill(.black.opacity(configuration.isPressed ? 0.7 : 0.55))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: size * 0.5, weight: .bold))
-                            .foregroundStyle(.white)
-                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    if picture {
+                        ZStack {
+                            tile.fill(.black.opacity(configuration.isPressed ? 0.7 : 0.55))
+                            ProjectIcon.chevron(collapsed: collapsed, size: size)
+                        }
+                        .opacity(hovering ? 1 : 0)
+                    } else {
+                        tile.fill(.black.opacity(configuration.isPressed ? 0.2 : 0))
                     }
-                    .opacity(hovering ? 1 : 0)
                 }
                 .contentShape(Rectangle())
                 .animation(.easeOut(duration: 0.12), value: hovering)
@@ -217,20 +222,22 @@ struct ProjectMenu: View {
 struct ProjectIcon: View {
     let project: Project
     var size: CGFloat = 22
+    /// On a drawn tile, shows the fold chevron in place of its glyph (ADR-209). A picture ignores it.
+    var showsFold = false
+    /// Which way that chevron points.
+    var collapsed = false
 
     var body: some View {
         Group {
             if SessionStore.isChats(project.path) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: size * 0.22).fill(Color.accent)
+                drawn(Color.accent) {
                     Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.5)).foregroundStyle(.white)
                 }
-            } else if let image = icon {
+            } else if let image = Self.picture(for: project) {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: size * 0.22).fill(Self.color(for: project.path))
+                drawn(Self.color(for: project.path)) {
                     Text(String(project.name.prefix(1)).uppercased())
                         .font(.system(size: size * 0.6, weight: .bold, design: .rounded)).foregroundStyle(.white)
                 }
@@ -239,8 +246,28 @@ struct ProjectIcon: View {
         .frame(width: size, height: size)
     }
 
-    /// Reading `revision` first makes this view depend on `invalidate` (ADR-076).
-    private var icon: NSImage? {
+    /// A glyph on a coloured tile, crossfading to the chevron while `showsFold` is set.
+    private func drawn(_ fill: Color, @ViewBuilder glyph: () -> some View) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.22).fill(fill)
+            glyph().opacity(showsFold ? 0 : 1)
+            Self.chevron(collapsed: collapsed, size: size).opacity(showsFold ? 1 : 0)
+        }
+    }
+
+    static func chevron(collapsed: Bool, size: CGFloat) -> some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: size * 0.5, weight: .bold))
+            .foregroundStyle(.white)
+            .rotationEffect(.degrees(collapsed ? 0 : 90))
+    }
+
+    static func hasPicture(_ project: Project) -> Bool {
+        !SessionStore.isChats(project.path) && picture(for: project) != nil
+    }
+
+    /// Reading `revision` first makes the calling view depend on `invalidate` (ADR-076).
+    private static func picture(for project: Project) -> NSImage? {
         _ = ProjectIconCache.shared.revision
         return ProjectIconCache.shared.image(for: project.path)
     }
