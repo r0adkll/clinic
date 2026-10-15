@@ -421,7 +421,8 @@ private struct RootToolbar: ViewModifier {
         }
     }
 
-    /// Caffeine, Run, its devices and Open In: what the selected tab (or the lack of one) decides.
+    /// Caffeine, Run, its devices and Open In: what the selected tab (or the lack of one) decides. Then
+    /// the sound packs' speaker, which comes and goes with installed packs.
     private struct TabControls: View {
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
@@ -434,6 +435,15 @@ private struct RootToolbar: ViewModifier {
             if let runTab { RunToolbarControl(tab: runTab).ownGlass() }
             if let runTab, !platforms.isEmpty { DeviceControls(tab: runTab, platforms: platforms) }
             if let openIn { OpenInToolbarMenu(path: openIn, projectPath: openInProject, sessions: sessions).ownGlass() }
+            SoundsItem()
+        }
+    }
+
+    /// The speaker beside the bell (ADR-208), once there is a pack to quiet.
+    private struct SoundsItem: View {
+        @Environment(SoundPackStore.self) private var store
+        var body: some View {
+            if !store.installed.isEmpty { SoundsToolbarControl().ownGlass() }
         }
     }
 

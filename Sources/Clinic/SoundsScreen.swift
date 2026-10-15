@@ -891,7 +891,9 @@ struct SoundsFooter: View {
     var body: some View {
         @Bindable var store = store
         HStack(spacing: 10) {
-            Toggle("Sounds", isOn: $store.settings.enabled).toggleStyle(.switch).controlSize(.small)
+            // Through the store, so switching on also ends a pause rather than leaving it in force (ADR-208).
+            Toggle("Sounds", isOn: Binding(get: { store.settings.enabled }, set: { $0 ? store.resume() : store.turnOff() }))
+                .toggleStyle(.switch).controlSize(.small)
                 .help("Off, every moment makes the notification sound it made before packs")
             Image(systemName: "speaker.fill").font(.caption).foregroundStyle(.secondary)
             Slider(value: $store.settings.volume, in: 0...1) { editing in if !editing { store.sampleVolume() } }
@@ -937,7 +939,87 @@ struct SoundsFooter: View {
             } else if FocusQuiet.shared.isQuiet {
                 Image(systemName: "moon.fill").foregroundStyle(Color.accent)
                 Text("Quiet for a Focus").font(.caption)
+            } else if let paused = store.pausedUntil {
+                Image(systemName: "speaker.zzz").foregroundStyle(Color.accent)
+                Text("Paused until \(paused.formatted(date: .omitted, time: .shortened))").font(.caption)
+                Button("Resume") { store.resume() }.buttonStyle(.borderless).controlSize(.small)
             }
+        }
+    }
+}
+
+// MARK: - Toolbar (ADR-208)
+
+/// The toolbar's speaker: a click turns pack lines off or back on, and the chevron pauses them for a
+/// while. Off or paused, every moment makes the notification sound it made before packs (ADR-097).
+struct SoundsToolbarControl: View {
+    @Environment(SoundPackStore.self) private var store
+    @Environment(KeyBindings.self) private var bindings
+
+    var body: some View {
+        let paused = store.pausedUntil
+        ToolbarSplitButton(help: help(paused) + bindings.hint(.toggleSoundPacks), choicesHelp: "Pause sound packs for a while",
+                           smokeId: "sounds") {
+            store.toggleSpeaking()
+        } label: {
+            Image(systemName: store.speaks ? "speaker.wave.2" : paused != nil ? "speaker.zzz" : "speaker.slash")
+                .font(.system(size: 14))
+                .contentTransition(.symbolEffect(.replace))
+                .accessibilityLabel("Sound Packs")
+                .frame(width: 34, height: 28)
+        } choices: {
+            PopoverMenu(width: 290) {
+                PopoverMenuHeader(title: status(paused))
+                if paused != nil {
+                    PopoverMenuRow(title: "Resume Now") { store.resume() } icon: { Image(systemName: "speaker.wave.2") }
+                }
+                let now = Date()
+                ForEach(SoundPause.allCases, id: \.self) { length in
+                    PopoverMenuRow(title: length.title, trailing: length.end(from: now).formatted(date: .omitted, time: .shortened)) {
+                        store.pause(length)
+                    } icon: { Image(systemName: "speaker.zzz") }
+                }
+                if store.settings.enabled {
+                    PopoverMenuRow(title: "Turn Sound Packs Off") { store.turnOff() } icon: { Image(systemName: "speaker.slash") }
+                } else {
+                    PopoverMenuRow(title: "Turn Sound Packs On") { store.resume() } icon: { Image(systemName: "speaker.wave.2") }
+                }
+                PopoverMenuDivider()
+                PopoverMenuNote(text: FocusQuiet.shared.isQuiet
+                    ? "A Focus is keeping Clinic quiet, so nothing plays until it ends."
+                    : "Off or paused, notifications make their usual sound.")
+                PopoverMenuRow(title: "Sound Settings…") {
+                    NotificationCenter.default.post(name: .clinicSounds, object: nil)
+                } icon: { Image(systemName: "gearshape") }
+            }
+        }
+    }
+
+    private func status(_ paused: Date?) -> String {
+        if let paused { return "Paused until \(paused.formatted(date: .omitted, time: .shortened))" }
+        guard store.settings.enabled else { return "Sound packs are off" }
+        return store.pack(for: nil).map { "Sound packs on · \($0.manifest.displayName)" } ?? "Sound packs on"
+    }
+
+    private func help(_ paused: Date?) -> String {
+        if let paused { return "Sound packs paused until \(paused.formatted(date: .omitted, time: .shortened)). Click to resume" }
+        return store.speaks ? "Sound packs are on. Click to turn them off" : "Sound packs are off. Click to turn them on"
+    }
+}
+
+/// *Sound Packs ▸* in the View menu: the toolbar speaker's choices, for the keyboard (ADR-208).
+struct SoundPackPauseItems: View {
+    let store: SoundPackStore
+    let shortcut: KeyboardShortcut?
+
+    var body: some View {
+        Button(store.speaks ? "Turn Sound Packs Off" : store.pausedUntil != nil ? "Resume Sound Packs" : "Turn Sound Packs On") {
+            store.toggleSpeaking()
+        }
+            .keyboardShortcut(shortcut)
+        Divider()
+        ForEach(SoundPause.allCases, id: \.self) { length in
+            Button(length.title) { store.pause(length) }
         }
     }
 }

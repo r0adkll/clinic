@@ -5146,3 +5146,18 @@ quiet. `-ClinicFocusQuiet YES` seam.
 row rendered from its real source in a harness. A real Focus was not toggled (it would change the user's Focus
 setup), so that is left as the manual check in the ADR.
 
+
+## 2026-10-15 — Sound packs pause from the toolbar (ADR-208)
+
+User asked for a global setting or toolbar action to mute, disable or pause the sound packs, falling back to
+normal notification sounds. The master switch already did the fallback but lived only in the Sounds footer.
+
+**Built.** `SoundSettings.pausedUntil` and `SoundPause` (30 min, 1 h, until the next 8:00) in ClinicCore. The
+router checks the pause against the clock. `SoundPackStore` gains `pause`/`resume`/`turnOff`/`toggleSpeaking` and
+a timer that clears an ended pause. There is a toolbar speaker split control beside the bell, shown while a pack is
+installed, and View ▸ Sound Packs with a rebindable toggle that has no default chord. The footer switch now goes
+through the store, and the footer shows *Paused until …* with *Resume*.
+
+**Verified.** `make test` 695 pass. Clinic Dev was driven by accessibility: toggle, menu pause, popover rows, a
+seeded 25 s pause surviving a relaunch and ending by itself. Clinic Dev's settings were left as found. The
+fallback sound during a pause was not heard; there is a manual check in the ADR.

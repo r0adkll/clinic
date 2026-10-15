@@ -32,7 +32,7 @@ struct ClinicApp: App {
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1180, height: 760)
-        .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine) }
+        .commands { ClinicCommands(tabs: appDelegate.tabs, bindings: appDelegate.bindings, caffeine: appDelegate.caffeine, soundPacks: appDelegate.soundPacks) }
         // A `Window` rather than a `Settings` scene (ADR-108). The settings scene builds a window
         // that cannot be zoomed or miniaturised — reasonable for a fixed panel, wrong for one the
         // reader is meant to size to the pane they are in. `.appSettings` below keeps ⌘, and the
@@ -782,6 +782,7 @@ struct ClinicCommands: Commands {
     let tabs: TabStore
     let bindings: KeyBindings
     let caffeine: CaffeineController
+    let soundPacks: SoundPackStore
     var sessions: SessionStore { tabs.sessions }
     private var selectedSession: SessionSummary? { tabs.selectedTab?.sessionId.flatMap { sessions.sessions[$0] } }
     private func key(_ a: ShortcutAction) -> KeyboardShortcut? { bindings.shortcut(for: a) }
@@ -844,6 +845,8 @@ struct ClinicCommands: Commands {
                 Divider()
                 Button(caffeine.toggleTitle) { caffeine.toggle() }.keyboardShortcut(key(.caffeine))
             }
+            Menu("Sound Packs") { SoundPackPauseItems(store: soundPacks, shortcut: key(.toggleSoundPacks)) }
+                .disabled(soundPacks.installed.isEmpty)
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
             Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
             Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))

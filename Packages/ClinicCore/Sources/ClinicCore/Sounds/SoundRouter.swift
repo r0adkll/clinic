@@ -72,6 +72,10 @@ public struct SoundSettings: Codable, Sendable, Hashable {
 
     /// The master switch. Off, every moment falls back to ADR-097's notification sound.
     public var enabled = true
+    /// Pack lines are paused until then, from the toolbar (ADR-208). Like the switch being off, every
+    /// moment makes ADR-097's notification sound meanwhile. Kept across launches; a date gone by means
+    /// nothing.
+    public var pausedUntil: Date?
     /// CESP's master volume, 0–1.
     public var volume = 0.5
     /// The pack every session uses until a project or session names another.
@@ -90,8 +94,16 @@ public struct SoundSettings: Codable, Sendable, Hashable {
 
     public init() {}
 
-    public func isOn(_ witness: SoundWitness) -> Bool {
-        guard enabled, !disabledCategories.contains(witness.category) else { return false }
+    /// Whether pack lines are paused at `now`.
+    public func isPaused(at now: Date = Date()) -> Bool {
+        pausedUntil.map { now < $0 } ?? false
+    }
+
+    /// Whether packs speak at all at `now`: switched on and not paused.
+    public func speaks(at now: Date = Date()) -> Bool { enabled && !isPaused(at: now) }
+
+    public func isOn(_ witness: SoundWitness, at now: Date = Date()) -> Bool {
+        guard speaks(at: now), !disabledCategories.contains(witness.category) else { return false }
         return witness.isOptIn ? enabledOptIns.contains(witness) : !disabledWitnesses.contains(witness)
     }
 
@@ -105,13 +117,14 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, volume, defaultPack, rotation, disabledCategories, disabledWitnesses, enabledOptIns, quietOnScreen, quietPeonPing
+        case enabled, pausedUntil, volume, defaultPack, rotation, disabledCategories, disabledWitnesses, enabledOptIns, quietOnScreen, quietPeonPing
     }
 
     /// Unknown categories or witnesses (from a newer build) are dropped, not fatal.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        pausedUntil = try? c.decodeIfPresent(Date.self, forKey: .pausedUntil)
         volume = min(1, max(0, (try? c.decode(Double.self, forKey: .volume)) ?? 0.5))
         defaultPack = try? c.decodeIfPresent(String.self, forKey: .defaultPack)
         rotation = (try? c.decodeIfPresent([String].self, forKey: .rotation)) ?? []
@@ -125,6 +138,7 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(pausedUntil, forKey: .pausedUntil)
         try c.encode(volume, forKey: .volume)
         try c.encodeIfPresent(defaultPack, forKey: .defaultPack)
         try c.encode(rotation, forKey: .rotation)
@@ -141,6 +155,31 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     }
 
     public func encoded() -> Data? { try? JSONEncoder().encode(self) }
+}
+
+/// How long the toolbar's pause lasts (ADR-208).
+public enum SoundPause: String, CaseIterable, Sendable {
+    case thirtyMinutes, oneHour, untilMorning
+
+    public var title: String {
+        switch self {
+        case .thirtyMinutes: "Pause for 30 Minutes"
+        case .oneHour: "Pause for 1 Hour"
+        case .untilMorning: "Pause Until Morning"
+        }
+    }
+
+    /// When a pause chosen at `now` ends. Morning is the next 8:00, so a pause chosen at 2 a.m. ends
+    /// that same morning rather than the one after.
+    public func end(from now: Date, calendar: Calendar = .current) -> Date {
+        switch self {
+        case .thirtyMinutes: return now.addingTimeInterval(30 * 60)
+        case .oneHour: return now.addingTimeInterval(60 * 60)
+        case .untilMorning:
+            return calendar.nextDate(after: now, matching: DateComponents(hour: 8, minute: 0, second: 0), matchingPolicy: .nextTime)
+                ?? now.addingTimeInterval(12 * 60 * 60)
+        }
+    }
 }
 
 /// Decides whether a witness makes a sound, and which line (ADR-199).
@@ -190,13 +229,13 @@ public struct SoundRouter: Sendable {
         if witness == .promptSubmitted, let session {
             let recent = (prompts[session] ?? []).filter { now.timeIntervalSince($0) < Self.spamWindow } + [now]
             prompts[session] = recent
-            if recent.count >= Self.spamCount, settings.isOn(.rapidPrompts),
+            if recent.count >= Self.spamCount, settings.isOn(.rapidPrompts, at: now),
                manifest.map({ !$0.lines(for: .userSpam).isEmpty }) == true {
                 witness = .rapidPrompts
                 prompts[session] = []
             }
         }
-        guard settings.isOn(witness), let manifest else { return .pass }
+        guard settings.isOn(witness, at: now), let manifest else { return .pass }
         let category = witness.category
         let lines = manifest.lines(for: category)
         guard !lines.isEmpty else { return .pass }

@@ -91,6 +91,62 @@ final class SoundPackStore {
             self.previewURL = nil
         }
         rescan()
+        schedulePauseEnd()
+    }
+
+    // MARK: Pausing (ADR-208)
+
+    /// Packs speak now: switched on and not paused. Otherwise every moment makes ADR-097's sound.
+    var speaks: Bool { settings.speaks() }
+    /// When a pause in force ends; nil when packs are not paused.
+    var pausedUntil: Date? { settings.isPaused() ? settings.pausedUntil : nil }
+
+    @ObservationIgnored private var pauseEnd: Task<Void, Never>?
+
+    /// Pauses pack lines, switching packs on if they were off: a pause is a promise they come back.
+    func pause(_ length: SoundPause) {
+        settings.enabled = true
+        settings.pausedUntil = length.end(from: Date())
+        quietLine()
+        schedulePauseEnd()
+        Self.log.notice("sound packs paused until \(self.settings.pausedUntil?.description ?? "-", privacy: .public)")
+    }
+
+    func resume() {
+        settings.enabled = true
+        settings.pausedUntil = nil
+        schedulePauseEnd()
+    }
+
+    func turnOff() {
+        settings.enabled = false
+        settings.pausedUntil = nil
+        quietLine()
+        schedulePauseEnd()
+    }
+
+    /// The toolbar's click: speaking turns off, and off or paused speaks again.
+    func toggleSpeaking() {
+        if speaks { turnOff() } else { resume() }
+    }
+
+    /// Stops a line Clinic is saying, but not one the user is previewing.
+    private func quietLine() {
+        if player.playingCategory != nil { player.stop() }
+    }
+
+    /// Clears the pause when it ends, so the toolbar and footer change back on their own. `speaks`
+    /// reads the clock, so a late timer never lets a pause run long.
+    private func schedulePauseEnd() {
+        pauseEnd?.cancel()
+        guard let until = settings.pausedUntil else { return }
+        guard until > Date() else { settings.pausedUntil = nil; return }
+        pauseEnd = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(until.timeIntervalSinceNow))
+            guard !Task.isCancelled, let self, self.settings.pausedUntil == until else { return }
+            self.settings.pausedUntil = nil
+            Self.log.notice("sound packs: pause ended")
+        }
     }
 
     // MARK: Folders
