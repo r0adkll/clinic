@@ -13,6 +13,7 @@ struct SoundsScreen: View {
     @AppStorage("ClinicSoundsFiltersShown") private var filtersPreferred = true
     /// A choice made in a narrow window, where the column is folded unless asked for.
     @State private var narrowOverride: Bool?
+    @AppStorage("ClinicPeonPingBannerDismissed") private var peonPingDismissed = false
 
     /// Below this content width the filter column folds by itself.
     private static let roomForFilters: CGFloat = 900
@@ -21,12 +22,19 @@ struct SoundsScreen: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if store.peonPing != nil && !peonPingDismissed {
+                PeonPingBanner { peonPingDismissed = true }
+                Divider()
+            }
             content
             Divider()
             SoundsFooter()
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .task { store.loadIfNeeded() }
+        .task {
+            store.loadIfNeeded()
+            store.detectPeonPing()
+        }
     }
 
     // MARK: Header
@@ -742,7 +750,8 @@ extension CESPCategory {
         case .inputRequired: "permission, a question, a Grill round"
         case .userSpam: "three prompts in ten seconds"
         case .sessionEnd: "when a session ends"
-        case .resourceLimit, .taskProgress: "Clinic doesn't play this yet"
+        case .resourceLimit: "context or the plan window past 90%, a rate limit"
+        case .taskProgress: "a turn still running after ten minutes, if turned on"
         }
     }
 }
@@ -827,11 +836,12 @@ struct SoundEventsView: View {
 
     private func witnessRow(_ witness: SoundWitness) -> some View {
         Toggle(isOn: Binding(
-            get: { !store.settings.disabledWitnesses.contains(witness) },
-            set: { on in if on { store.settings.disabledWitnesses.remove(witness) } else { store.settings.disabledWitnesses.insert(witness) } }
+            get: { witness.isOptIn ? store.settings.enabledOptIns.contains(witness) : !store.settings.disabledWitnesses.contains(witness) },
+            set: { store.settings.set(witness, on: $0) }
         )) {
             HStack(spacing: 8) {
                 Text(witness.title)
+                if witness.isOptIn { Text("off by default").font(.caption).foregroundStyle(.tertiary) }
                 Spacer(minLength: 8)
                 Label(witness.category.rawValue, systemImage: witness.category.symbol)
                     .font(.caption.monospaced())
@@ -982,5 +992,110 @@ struct SoundRotationMenu: View {
         }
         .menuStyle(.button).fixedSize()
         .help("Sessions with no pack of their own, and none from their project, each draw one of these and keep it")
+    }
+}
+
+// MARK: - peon-ping (ADR-203)
+
+/// Says peon-ping is here too, what that means for Clinic's sessions, and what Clinic can do about it.
+struct PeonPingBanner: View {
+    @Environment(SoundPackStore.self) private var store
+    let dismiss: () -> Void
+    @State private var importing: PeonPing.Import?
+
+    var body: some View {
+        @Bindable var store = store
+        let found = store.peonPing
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: found?.hooksInstalled == true ? "speaker.wave.2.bubble" : "square.and.arrow.down")
+                .font(.title3).foregroundStyle(Color.accent)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(found?.hooksInstalled == true ? "peon-ping is installed too" : "peon-ping's settings are here")
+                    .font(.callout.weight(.semibold))
+                Text(found?.hooksInstalled == true
+                     ? "Its hooks in ~/.claude/settings.json play in Clinic's sessions as well, so each moment is heard twice. “peon pause” silences it everywhere; Clinic can quiet it in its own sessions and leave it playing elsewhere."
+                     : "Clinic can take its default pack, volume, categories, rotation and per-folder packs.")
+                    // Bounded, never fixedSize: measured for the window's minimum size at almost no width,
+                    // an unbounded paragraph made the window taller than the screen (ADR-178).
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                HStack(spacing: 12) {
+                    if found?.hooksInstalled == true {
+                        Toggle("Quiet it in Clinic's sessions", isOn: $store.settings.quietPeonPing)
+                            .toggleStyle(.checkbox)
+                            .help("Sessions started from now on get a paused peon-ping of their own (CLAUDE_PEON_DIR). Running ones keep theirs.")
+                    }
+                    if found?.config != nil {
+                        Button("Import Its Settings…") { importing = store.peonPingImport() }
+                    }
+                }
+                .font(.callout)
+            }
+            Spacer(minLength: 8)
+            Button(action: dismiss) { Image(systemName: "xmark").font(.caption.weight(.bold)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(Color.accent.opacity(0.06))
+        .sheet(item: Binding(get: { importing.map(ImportBox.init) }, set: { importing = $0?.plan })) { box in
+            PeonPingImportSheet(plan: box.plan)
+        }
+    }
+
+    private struct ImportBox: Identifiable {
+        let plan: PeonPing.Import
+        var id: Int { 0 }
+    }
+}
+
+/// What importing peon-ping's settings will change, shown before it does (ADR-203).
+struct PeonPingImportSheet: View {
+    @Environment(SoundPackStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let plan: PeonPing.Import
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import peon-ping's settings").font(.title3.weight(.semibold))
+            if plan.isEmpty {
+                Text("Nothing in its config has a place in Clinic yet.").foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                if let pack = plan.defaultPack { line("Default pack", name(pack)) }
+                if let volume = plan.volume { line("Volume", "\(Int((volume * 100).rounded()))%") }
+                if !plan.disabledCategories.isEmpty { line("Turned off", plan.disabledCategories.map(\.title).sorted().joined(separator: ", ")) }
+                if !plan.rotation.isEmpty { line("Rotation", plan.rotation.map(name).joined(separator: ", ")) }
+                ForEach(plan.projectPacks.sorted(by: { $0.key < $1.key }), id: \.key) { path, pack in
+                    line((path as NSString).lastPathComponent, name(pack) + (store.sessions?.state.soundPacks.byProject[path] != nil ? " (keeps its own)" : ""))
+                }
+            }
+            .font(.callout)
+            if !plan.missingPacks.isEmpty {
+                Text("Not installed, so left out: \(plan.missingPacks.joined(separator: ", ")). Install them from Browse and import again.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if !plan.unmatchedRules.isEmpty {
+                Text("Folder rules that match no project here: \(plan.unmatchedRules.joined(separator: ", ")).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("peon-ping's own files are only read.").font(.caption2).foregroundStyle(.tertiary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Import") { store.apply(plan); dismiss() }
+                    .keyboardShortcut(.defaultAction).disabled(plan.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    private func name(_ pack: String) -> String { store.installedPack(pack)?.manifest.displayName ?? pack }
+
+    private func line(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(value)
+        }
     }
 }

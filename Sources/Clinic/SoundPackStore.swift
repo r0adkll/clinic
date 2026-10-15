@@ -70,9 +70,21 @@ final class SoundPackStore {
     @ObservationIgnored private var previewURL: URL?
     @ObservationIgnored private let player = LinePlayer()
     @ObservationIgnored private var router = SoundRouter()
+    @ObservationIgnored private var watch = ResourceWatch()
+
+    /// peon-ping, when it is installed alongside Clinic (ADR-203).
+    struct PeonPingFound: Equatable {
+        /// Its hooks are in `~/.claude/settings.json`, so it plays in Clinic's sessions too.
+        var hooksInstalled: Bool
+        var configURL: URL?
+        var config: PeonPing.Config?
+    }
+
+    private(set) var peonPing: PeonPingFound?
 
     init() {
         settings = SoundSettings(json: UserDefaults.standard.data(forKey: SoundSettings.defaultsKey))
+        detectPeonPing()
         player.onFinish = { [weak self] url in
             guard let self, self.previewURL == url else { return }
             self.previewing = nil
@@ -409,7 +421,68 @@ final class SoundPackStore {
         }
     }
 
-    func forget(session: SessionID) { router.forget(session: session.rawValue) }
+    func forget(session: SessionID) {
+        router.forget(session: session.rawValue)
+        watch.forget(session: session.rawValue)
+    }
+
+    /// The limits a status line report has just crossed (ADR-203): the session's context, the plan's window.
+    func witnesses(for report: StatusLineReport, session: SessionID) -> [SoundWitness] {
+        var out: [SoundWitness] = []
+        if watch.context(report.contextUsedPercentage, session: session.rawValue) { out.append(.contextFilling) }
+        if watch.plan(report.fiveHour) { out.append(.planNearlySpent) }
+        return out
+    }
+
+    // MARK: peon-ping (ADR-203)
+
+    /// Looks for peon-ping's hooks and its config. Reads only; `~/.claude` is not Clinic's to write (ADR-018).
+    func detectPeonPing() {
+        let claude = ClaudePaths().configDirectory
+        let hooks = (try? Data(contentsOf: claude.appendingPathComponent("settings.json"))).map(PeonPing.hooksInstalled) ?? false
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let configURL = PeonPing.configCandidates(claudeDirectory: claude, home: home)
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+        let config = configURL.flatMap { try? Data(contentsOf: $0) }.flatMap { try? PeonPing.Config(json: $0) }
+        let found = hooks || config != nil ? PeonPingFound(hooksInstalled: hooks, configURL: configURL, config: config) : nil
+        if peonPing != found { peonPing = found }
+    }
+
+    /// What importing peon-ping's settings would change, against the projects and packs here now.
+    func peonPingImport() -> PeonPing.Import? {
+        guard let config = peonPing?.config else { return nil }
+        return PeonPing.plan(config, projects: sessions?.projects.map(\.path) ?? [], installed: Set(installed.map(\.id)))
+    }
+
+    /// Applies an import. A project that already has a pack of its own keeps it.
+    func apply(_ plan: PeonPing.Import) {
+        if let pack = plan.defaultPack { settings.defaultPack = pack }
+        if let volume = plan.volume { settings.volume = volume }
+        settings.disabledCategories.formUnion(plan.disabledCategories)
+        if !plan.rotation.isEmpty { settings.rotation = plan.rotation }
+        let projects = plan.projectPacks
+        sessions?.update { state in
+            for (path, pack) in projects where state.soundPacks.byProject[path] == nil { state.soundPacks.byProject[path] = pack }
+        }
+        message = .done("Imported peon-ping's settings.")
+        Self.log.notice("imported peon-ping settings: \(projects.count, privacy: .public) project packs")
+    }
+
+    /// Clinic's paused peon-ping, which its sessions use instead of the real one when asked.
+    static var peonPingQuietDirectory: URL { ClinicPaths.directory.appendingPathComponent("PeonPingQuiet", isDirectory: true) }
+
+    /// What a session's terminal adds to its environment: `CLAUDE_PEON_DIR`, while the user wants
+    /// peon-ping quiet in Clinic's sessions. Applies to sessions started from then on.
+    var sessionEnvironment: [String: String] {
+        guard settings.quietPeonPing else { return [:] }
+        do {
+            try PeonPing.prepareQuietDirectory(Self.peonPingQuietDirectory)
+            return ["CLAUDE_PEON_DIR": Self.peonPingQuietDirectory.path]
+        } catch {
+            Self.log.error("peon-ping quiet folder: \(error, privacy: .public)")
+            return [:]
+        }
+    }
 
     // MARK: Previews
 

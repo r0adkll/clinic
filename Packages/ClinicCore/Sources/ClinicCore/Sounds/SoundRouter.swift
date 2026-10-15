@@ -4,9 +4,11 @@ import Foundation
 /// can be switched off on its own in the Sounds screen's Events table.
 public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
     // Claude Code's hooks
-    case sessionStarted, promptSubmitted, rapidPrompts, turnFinished, turnFailed, permissionNeeded, inputNeeded, sessionEnded
+    case sessionStarted, promptSubmitted, rapidPrompts, turnFinished, turnFailed, rateLimited, permissionNeeded, inputNeeded, sessionEnded
     // Clinic's own
     case runSucceeded, runFailed, checksPassed, checksFailed, childReported, agentAsked
+    // Clinic's own, read off the status line and the clock (ADR-203)
+    case contextFilling, planNearlySpent, turnLong
 
     public var id: String { rawValue }
 
@@ -19,13 +21,19 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
         case .turnFailed, .runFailed, .checksFailed: .taskError
         case .permissionNeeded, .inputNeeded, .agentAsked: .inputRequired
         case .sessionEnded: .sessionEnd
+        case .rateLimited, .contextFilling, .planNearlySpent: .resourceLimit
+        case .turnLong: .taskProgress
         }
     }
+
+    /// Off until the user turns it on (ADR-203): a line every ten minutes of a long turn is more than
+    /// most people want, and the setting has to stay off for settings saved before it existed.
+    public var isOptIn: Bool { self == .turnLong }
 
     /// True for a witness Claude Code's hooks report; false for one only Clinic sees.
     public var isHook: Bool {
         switch self {
-        case .sessionStarted, .promptSubmitted, .rapidPrompts, .turnFinished, .turnFailed, .permissionNeeded, .inputNeeded, .sessionEnded: true
+        case .sessionStarted, .promptSubmitted, .rapidPrompts, .turnFinished, .turnFailed, .rateLimited, .permissionNeeded, .inputNeeded, .sessionEnded: true
         default: false
         }
     }
@@ -37,6 +45,7 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
         case .rapidPrompts: "Three prompts in ten seconds"
         case .turnFinished: "A turn finishes"
         case .turnFailed: "A turn ends with an API error"
+        case .rateLimited: "A turn is stopped by a rate or usage limit"
         case .permissionNeeded: "A tool needs permission"
         case .inputNeeded: "Claude is waiting for you"
         case .sessionEnded: "A session ends"
@@ -46,6 +55,9 @@ public enum SoundWitness: String, CaseIterable, Codable, Sendable, Hashable, Ide
         case .checksFailed: "A watched pull request's checks fail"
         case .childReported: "A child session reports back"
         case .agentAsked: "An agent asks for you or posts a Grill round"
+        case .contextFilling: "A session's context passes 90%"
+        case .planNearlySpent: "The plan's five-hour window passes 90%"
+        case .turnLong: "A turn is still running after ten minutes"
         }
     }
 }
@@ -65,17 +77,31 @@ public struct SoundSettings: Codable, Sendable, Hashable {
     public var rotation: [String] = []
     public var disabledCategories: Set<CESPCategory> = []
     public var disabledWitnesses: Set<SoundWitness> = []
+    /// Opt-in witnesses the user has turned on (ADR-203). Everything else is on unless disabled.
+    public var enabledOptIns: Set<SoundWitness> = []
     /// Stay quiet for the tab the user is looking at.
     public var quietOnScreen = false
+    /// Give Clinic's sessions a paused peon-ping of their own, so it does not play over Clinic (ADR-203).
+    public var quietPeonPing = false
 
     public init() {}
 
     public func isOn(_ witness: SoundWitness) -> Bool {
-        enabled && !disabledWitnesses.contains(witness) && !disabledCategories.contains(witness.category)
+        guard enabled, !disabledCategories.contains(witness.category) else { return false }
+        return witness.isOptIn ? enabledOptIns.contains(witness) : !disabledWitnesses.contains(witness)
+    }
+
+    /// The switch in the Events table, whichever way a witness defaults.
+    public mutating func set(_ witness: SoundWitness, on: Bool) {
+        if witness.isOptIn {
+            if on { enabledOptIns.insert(witness) } else { enabledOptIns.remove(witness) }
+        } else {
+            if on { disabledWitnesses.remove(witness) } else { disabledWitnesses.insert(witness) }
+        }
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, volume, defaultPack, rotation, disabledCategories, disabledWitnesses, quietOnScreen
+        case enabled, volume, defaultPack, rotation, disabledCategories, disabledWitnesses, enabledOptIns, quietOnScreen, quietPeonPing
     }
 
     /// Unknown categories or witnesses (from a newer build) are dropped, not fatal.
@@ -87,7 +113,9 @@ public struct SoundSettings: Codable, Sendable, Hashable {
         rotation = (try? c.decodeIfPresent([String].self, forKey: .rotation)) ?? []
         disabledCategories = Set(((try? c.decode([String].self, forKey: .disabledCategories)) ?? []).compactMap(CESPCategory.init(rawValue:)))
         disabledWitnesses = Set(((try? c.decode([String].self, forKey: .disabledWitnesses)) ?? []).compactMap(SoundWitness.init(rawValue:)))
+        enabledOptIns = Set(((try? c.decode([String].self, forKey: .enabledOptIns)) ?? []).compactMap(SoundWitness.init(rawValue:)))
         quietOnScreen = (try? c.decode(Bool.self, forKey: .quietOnScreen)) ?? false
+        quietPeonPing = (try? c.decode(Bool.self, forKey: .quietPeonPing)) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -98,7 +126,9 @@ public struct SoundSettings: Codable, Sendable, Hashable {
         try c.encode(rotation, forKey: .rotation)
         try c.encode(disabledCategories.map(\.rawValue).sorted(), forKey: .disabledCategories)
         try c.encode(disabledWitnesses.map(\.rawValue).sorted(), forKey: .disabledWitnesses)
+        try c.encode(enabledOptIns.map(\.rawValue).sorted(), forKey: .enabledOptIns)
         try c.encode(quietOnScreen, forKey: .quietOnScreen)
+        try c.encode(quietPeonPing, forKey: .quietPeonPing)
     }
 
     public init(json: Data?) {

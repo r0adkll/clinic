@@ -60,6 +60,8 @@ final class Tab: Identifiable {
     @ObservationIgnored var pendingReporting = false
     /// A fork's sound pack, picked in the composer, held until the CLI reports the fork's id (ADR-202).
     @ObservationIgnored var pendingSoundPack: String?
+    /// When the turn now running began, for the long-turn line (ADR-203).
+    @ObservationIgnored var turnStartedAt: Date?
     /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
     var closingGracefully = false
     /// The answer to press into the CLI's worktree exit dialog once it shows, the task watching the
@@ -713,6 +715,8 @@ final class TabStore {
         var options = GhosttySurfaceOptions()
         options.workingDirectory = cwd
         options.environment = ["CLINIC": "1"]
+        // A session's terminal can carry a paused peon-ping, so it does not play over Clinic (ADR-203).
+        if case .session = kind, let extra = soundPacks?.sessionEnvironment { options.environment.merge(extra) { _, new in new } }
         do {
             let surface: GhosttySurfaceView
             do {
@@ -1397,7 +1401,12 @@ final class TabStore {
         if let report = event.statusLine {
             // The plan windows are the account's, so they count whether or not the session has a tab here.
             usage?.absorb(report, at: event.receivedAt)
-            if let tab = tab(routing: event.sessionId), tab.statusLine != report { tab.statusLine = report }
+            let reporting = tab(routing: event.sessionId)
+            if let tab = reporting, tab.statusLine != report { tab.statusLine = report }
+            // Limits a pack voices (ADR-203): this session's context, and the account's five-hour window.
+            for witness in soundPacks?.witnesses(for: report, session: event.sessionId) ?? [] {
+                voice(witness, tab: reporting, sessionId: event.sessionId)
+            }
             return
         }
         // A hook usually means the transcript just grew; the card should not wait for the watcher's debounce.
@@ -1483,12 +1492,35 @@ final class TabStore {
             voice(.sessionStarted, tab: tab, sessionId: event.sessionId)
         case "UserPromptSubmit":
             voice(.promptSubmitted, tab: tab, sessionId: event.sessionId)
+            watchForLongTurn(tab, started: event.receivedAt)
         case "SessionEnd" where event.reason != "clear":
             voice(.sessionEnded, tab: tab, sessionId: event.sessionId)
             soundPacks?.forget(session: event.sessionId)
         default:
             break
         }
+    }
+
+    /// The opt-in `task.progress` line (ADR-203): once, if the turn this prompt began is still working ten
+    /// minutes on. A later prompt starts a new turn and the old watch lapses.
+    private func watchForLongTurn(_ tab: Tab, started: Date) {
+        tab.turnStartedAt = started
+        guard soundPacks?.settings.isOn(.turnLong) == true else { return }
+        Task { [weak self, weak tab] in
+            try? await Task.sleep(for: .seconds(Self.longTurn))
+            guard let self, let tab else { return }
+            guard tab.turnStartedAt == started, tab.state == .working else {
+                Self.log.debug("long turn lapsed for \(tab.sessionId?.rawValue ?? "-", privacy: .public): state \(String(describing: tab.state), privacy: .public), newer turn \(tab.turnStartedAt != started, privacy: .public)")
+                return
+            }
+            self.voice(.turnLong, tab: tab, sessionId: tab.sessionId)
+        }
+    }
+
+    /// Ten minutes; `-ClinicLongTurnSeconds <n>` shortens it so a run can be checked without waiting.
+    static var longTurn: TimeInterval {
+        let override = UserDefaults.standard.double(forKey: "ClinicLongTurnSeconds")
+        return override > 0 ? override : 600
     }
 
     // MARK: Answering a permission prompt from Clinic (ADR-180)
@@ -1526,7 +1558,8 @@ final class TabStore {
         let isFrontAndSelected = isFrontAndSelected(tab)
         // The tab on screen is not notified, but its pack still speaks unless told not to (ADR-199).
         if failed {
-            notify(tab, sessionId: sessionId, body: message ?? "The turn ended with an API error", kind: .error, witness: .turnFailed)
+            notify(tab, sessionId: sessionId, body: message ?? "The turn ended with an API error", kind: .error,
+                   witness: ResourceWatch.isLimit(message) ? .rateLimited : .turnFailed)
         } else if SessionStateMachine.isFinishedEdge(from: old, to: new) {
             if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: sessionId, body: "Finished", kind: .finished, witness: .turnFinished) }
             else { voice(.turnFinished, tab: tab, sessionId: sessionId, onScreen: true) }

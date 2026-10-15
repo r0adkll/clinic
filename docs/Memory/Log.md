@@ -5072,3 +5072,21 @@ tab (`pendingSoundPack`) until it is adopted.
 **Verified.** Tests and the build pass. The pill was seen in Clinic Dev's Campfire composer by AX and a
 capture. Its menu was not: a background app's SwiftUI menu does not open on an AX press. Manual steps are in the
 ADR. Four test packs and the `ClinicSoundPacks` setting are still in Clinic Dev for that.
+
+## 2026-10-15 — Sound packs phase 3: limits, long turns, peon-ping (ADR-203)
+
+User: *"Okay, let's continue."* ADR-199's phase 3, decided there.
+
+**Built.** ClinicCore `ResourceWatch` (crossings for context and the five-hour window, the limit words) and
+`PeonPing` (hook detection, `Config`, the import plan, the quiet folder). Witnesses `rateLimited`,
+`contextFilling`, `planNearlySpent` and the opt-in `turnLong` (with `enabledOptIns`, so old settings keep it off).
+In the app: the status line feeds the watch, a failed turn checks for a limit, prompts start a long-turn watch
+(`-ClinicLongTurnSeconds`), session terminals get `CLAUDE_PEON_DIR` when asked, and the Sounds screen has a
+peon-ping banner and an import sheet.
+
+**Caught.** The banner's paragraph had `.fixedSize(vertical:)`, which pushed the window's content to about
+2,400 pt, the same failure as ADR-178. It is bounded now. The long-turn line seemed missing until it turned out
+Peon has no `task.progress` lines; with Ana it played.
+
+**Verified.** `make test` 690 pass. Clinic Dev with synthetic hooks and status lines, a fake peon-ping in an
+isolated Claude config, and AX and captures for the banner and the import (details in the ADR). Cleaned up after.
