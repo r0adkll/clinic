@@ -790,8 +790,19 @@ final class TabStore {
             tab.unread = false
             if let id = tab.sessionId { history.markRead(sessionId: id) }
             if let id = tab.sessionId { sessions.update { $0.selectedSessionId = id } }
+            revealInScope(tab, in: window)
             updateBadge()
         }
+    }
+
+    /// A tab selected from outside the window's group (a notification, ⌘K, another window) takes the
+    /// sidebar to the group its row is in, or to All for an ungrouped project, so the selection is
+    /// always on screen (ADR-210). Chats is in every scope.
+    private func revealInScope(_ tab: Tab, in window: WindowState) {
+        guard let scope = window.groupScope, sessions.groups.contains(where: { $0.id == scope }) else { return }
+        let path = tab.sessionId.flatMap(sessions.sidebarProjectPath(of:)) ?? tab.projectPath
+        guard !SessionStore.isChats(path), sessions.group(of: path)?.id != scope else { return }
+        window.groupScope = sessions.group(of: path)?.id
     }
 
     /// Selects a tab in its own window and brings that window forward (ADR-041 across windows).

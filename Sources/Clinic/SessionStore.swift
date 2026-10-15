@@ -95,8 +95,12 @@ final class SessionStore {
         let path = project.path
         update { s in if collapsed { s.collapsedProjects.insert(path) } else { s.collapsedProjects.remove(path) } }
     }
-    func collapseAll() { let all = Set(projects.map(\.path)); update { s in s.collapsedProjects = all } }
-    func expandAll() { update { s in s.collapsedProjects = [] } }
+    /// Folds projects and groups alike (ADR-210).
+    func collapseAll() {
+        let all = Set(projects.map(\.path)), groups = Set(state.projectGroups.map(\.id))
+        update { s in s.collapsedProjects = all; s.collapsedGroups = groups }
+    }
+    func expandAll() { update { s in s.collapsedProjects = []; s.collapsedGroups = [] } }
 
     /// Moves `path` so it sits at `target`'s position; writes the complete visible order.
     func moveProject(_ path: String, before target: String) {
@@ -111,6 +115,45 @@ final class SessionStore {
     }
 
     func resetProjectOrder() { update { s in s.projectOrder = [] } }
+
+    // MARK: Groups of projects (ADR-210)
+
+    var groups: [ProjectGroup] { state.projectGroups }
+    func group(of path: String) -> ProjectGroup? { state.group(of: path) }
+
+    /// Where every project goes, for a window scoped to `scope` (nil: all of them).
+    func layout(scope: UUID?) -> ProjectLayout {
+        ProjectLayout(paths: projects.map(\.path), groups: state.projectGroups, pinned: [Self.chatsDirectory], scope: scope)
+    }
+
+    @discardableResult
+    func addGroup(named name: String, with paths: [String] = []) -> UUID {
+        let paths = paths.filter { !Self.isChats($0) }
+        let id = UUID()
+        update { s in s.addGroup(id: id, named: name, with: paths) }
+        return id
+    }
+    func renameGroup(_ id: UUID, to name: String) { update { s in s.renameGroup(id, to: name) } }
+    func deleteGroup(_ id: UUID) { update { s in s.deleteGroup(id) } }
+    func moveGroup(_ id: UUID, before target: UUID) { update { s in s.moveGroup(id, before: target) } }
+    func moveGroup(_ id: UUID, by offset: Int) { update { s in s.moveGroup(id, by: offset) } }
+    /// Chats is Clinic's own and never joins a group.
+    func move(project path: String, toGroup id: UUID?) {
+        guard !Self.isChats(path) else { return }
+        update { s in s.move(project: path, toGroup: id) }
+    }
+    func isCollapsed(group id: UUID) -> Bool { state.collapsedGroups.contains(id) }
+    func setCollapsed(group id: UUID, _ collapsed: Bool) {
+        update { s in if collapsed { s.collapsedGroups.insert(id) } else { s.collapsedGroups.remove(id) } }
+    }
+
+    /// The project a session's row is listed under: its root ancestor's, since a child hangs under its
+    /// parent in the parent's project (ADR-181).
+    func sidebarProjectPath(of id: SessionID) -> String? {
+        var current = id, seen: Set<SessionID> = [id]
+        while let parent = state.parents[current]?.id, sessions[parent] != nil, seen.insert(parent).inserted { current = parent }
+        return sessions[current].flatMap(ProjectGrouping.project(for:))?.path
+    }
 
     func addProject(_ path: String) { update { s in s.registerProject(path) } }
 

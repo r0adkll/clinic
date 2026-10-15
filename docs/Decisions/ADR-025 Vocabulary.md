@@ -7,6 +7,7 @@ tags: [adr, naming]
 
 ## Decision
 - **Project**: a directory group, matching one encoded cwd (worktrees fold into their repo's project).
+- **Group**: a named set of projects the user makes, shown under a caption in the sidebar; a window can be *scoped* to one. Never "workspace". *Added 2026-10-15 by [[ADR-210 Projects Can Be Grouped And A Window Scoped To A Group]].*
 - **Session**: one Claude Code conversation, one transcript, one id.
 - **Surface**: one libghostty terminal.
 - **Tab**: an open Session or shell inside the window.

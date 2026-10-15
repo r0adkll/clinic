@@ -6,7 +6,7 @@ import ClinicCore
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
-    case tasks, mcpServers, marketplace, automations, sounds, selectSessions, notifications, caffeine, toggleSoundPacks
+    case tasks, mcpServers, marketplace, automations, sounds, selectSessions, notifications, caffeine, toggleSoundPacks, nextProjectGroup, previousProjectGroup
     case togglePanel, newTerminal, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, cycleMarkdownView, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
@@ -43,6 +43,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "Notifications"
         case .caffeine: "Turn Caffeine On or Off"
         case .toggleSoundPacks: "Turn Sound Packs On or Off"
+        case .nextProjectGroup: "Next Project Group"
+        case .previousProjectGroup: "Previous Project Group"
         case .togglePanel: "Terminal Panel Tab"
         case .newTerminal: "New Terminal Panel Tab"
         case .toggleDiffPage: "Diff Panel Tab"
@@ -76,7 +78,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
-        case .tasks, .mcpServers, .marketplace, .automations, .sounds, .selectSessions, .notifications, .caffeine, .toggleSoundPacks: "View"
+        case .tasks, .mcpServers, .marketplace, .automations, .sounds, .selectSessions, .notifications, .caffeine, .toggleSoundPacks, .nextProjectGroup, .previousProjectGroup: "View"
         case .togglePanel, .newTerminal, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .cycleMarkdownView, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab,
@@ -116,6 +118,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .notifications: "cmd+shift+b"
         case .caffeine: nil
         case .toggleSoundPacks: nil   // ADR-208
+        case .nextProjectGroup, .previousProjectGroup: nil   // ADR-210
         case .togglePanel: "cmd+j"
         // ADR-198. ⌘J fronts the shell used last; ⇧ adds another beside it.
         case .newTerminal: "cmd+shift+j"

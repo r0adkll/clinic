@@ -21,6 +21,11 @@ struct ProjectHeader: View {
                 .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
+            // A folded project still says when a session in it waits on you (ADR-210).
+            if collapsed, tabs.waitingCount(in: [project.path]) > 0 {
+                Circle().fill(.orange).frame(width: 7, height: 7).help("A session here needs you")
+                    .accessibilityLabel("Needs you")
+            }
             if let draft = composer.draft(for: project.path) { DraftMark(project: project, draft: draft) }
             Spacer(minLength: 4)
             // Both reveal on hover but always occupy their space, so the header never reflows.
@@ -47,8 +52,10 @@ struct ProjectHeader: View {
         .contextMenu { ProjectMenu(project: project) }
         .draggable(project.path)
         .dropDestination(for: String.self) { items, _ in
-            guard let moved = items.first, moved != project.path else { return false }
+            guard let moved = items.first, moved != project.path, ProjectGroupDrag.groupId(moved) == nil else { return false }
             sessions.moveProject(moved, before: project.path)
+            // Dropped among a group's projects, it joins that group; among ungrouped ones, it leaves its own (ADR-210).
+            if !SessionStore.isChats(project.path) { sessions.move(project: moved, toGroup: sessions.group(of: project.path)?.id) }
             return true
         } isTargeted: { dropTargeted = $0 }
         .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accent).frame(height: 2) } }
@@ -196,6 +203,7 @@ struct ProjectMenu: View {
             Button("Task Source…") { NotificationCenter.default.post(name: .clinicTaskSource, object: project.path) }
         }
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.path, forType: .string) }
+        MoveToGroupMenu(project: project)
         Divider()
         Button("Generate Icon…") { NotificationCenter.default.post(name: .clinicGenerateIcon, object: project.path) }
         Button("Remove Generated Icon") {

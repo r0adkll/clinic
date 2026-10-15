@@ -859,6 +859,7 @@ struct ClinicCommands: Commands {
             Divider()
             Button("Collapse All Projects") { sessions.collapseAll() }
             Button("Expand All Projects") { sessions.expandAll() }
+            Menu("Project Group") { ProjectGroupScopeItems(sessions: sessions, window: tabs.activeWindow, key: key) }
         }
         CommandMenu("Panel") {
             Button(tabs.selectedTab?.panel.isVisible == true ? "Hide Panel" : "Show Panel") { tabs.togglePanelVisibility() }

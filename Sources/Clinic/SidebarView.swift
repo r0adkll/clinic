@@ -27,6 +27,7 @@ struct SidebarView: View {
             ScreenNavRow(screen: .sounds, icon: "speaker.wave.2", shortcut: .sounds,
                          help: "OpenPeon sound packs, and the moments they voice")
             sidebarToolbar
+            if !sessions.groups.isEmpty { GroupScopeChips() }
             // The gap above the first project sits outside the scroll view on purpose: as
             // `contentMargins(for: .scrollContent)` it was applied on a later layout pass and popped
             // in on the first scroll, and as a spacer row it took the sidebar's minimum row height.
@@ -52,8 +53,10 @@ struct SidebarView: View {
     /// and the search field (ADR-109).
     private var sidebarToolbar: some View {
         // Folding is suspended while a filter is typed (every match shows), so both are no-ops then.
-        let canCollapse = query.isEmpty && sessions.projects.contains { !sessions.isCollapsed($0) }
-        let canExpand = query.isEmpty && sessions.projects.contains { sessions.isCollapsed($0) }
+        let canCollapse = query.isEmpty && (sessions.projects.contains { !sessions.isCollapsed($0) }
+                                            || sessions.groups.contains { !sessions.isCollapsed(group: $0.id) })
+        let canExpand = query.isEmpty && (sessions.projects.contains { sessions.isCollapsed($0) }
+                                          || sessions.groups.contains { sessions.isCollapsed(group: $0.id) })
         return HStack(spacing: 2) {
             Text("Projects")
                 .font(.subheadline.weight(.semibold))
@@ -87,26 +90,32 @@ struct SidebarView: View {
                     ForEach(favorites) { summary in row(summary, lineage: favoriteLineage(summary)) }
                 }
             }
-            ForEach(sessions.projects) { project in
-                // A tree (ADR-181): children hang under their parent here, whatever project they run in.
-                let rows = sessions.treeRows(in: project, query: query)
-                let collapsed = query.isEmpty && sessions.isCollapsed(project)
-                let count = rows.reduce(0) { $0 + 1 + $1.folded.count }
-                if !rows.isEmpty || query.isEmpty {
+            // Groups (ADR-210): Chats and the ungrouped projects, then each group under its caption. A
+            // filter searches every group, scoped or not, and shows no captions, as it ignores folds.
+            let filtering = !query.isEmpty
+            let scope = filtering ? nil : window.activeGroupScope(in: sessions)
+            let layout = sessions.layout(scope: scope)
+            ForEach(layout.pinned + layout.ungrouped, id: \.self) { projectSection(Project(path: $0)) }
+            // Not before the first scan lists the projects: captions drawn alone are kept in place when
+            // the projects arrive above them, which scrolls Chats out of view.
+            ForEach(sessions.projects.isEmpty ? [] : layout.groups, id: \.group.id) { section in
+                let folded = !filtering && scope == nil && sessions.isCollapsed(group: section.group.id)
+                if !filtering && scope == nil {
                     Section {
-                        if !collapsed {
-                            ForEach(rows) { node in
-                                if let summary = sessions.sessions[node.id] { row(summary, lineage: lineage(node, in: project)) }
-                            }
-                            if rows.isEmpty { NewSessionPlaceholderRow(project: project) }
-                        }
+                        if !folded && section.paths.isEmpty { EmptyGroupRow() }
                     } header: {
-                        ProjectHeader(project: project, count: count, collapsed: collapsed)
+                        ProjectGroupHeader(group: section.group, paths: section.paths, collapsed: folded)
                     }
+                } else if scope != nil && section.paths.isEmpty {
+                    Section { EmptyGroupRow() }
                 }
+                if !folded { ForEach(section.paths, id: \.self) { projectSection(Project(path: $0)) } }
             }
         }
         .listStyle(.sidebar)
+        // A new scope is a different list: it starts at the top rather than wherever the outline kept
+        // the rows the two scopes share (ADR-210).
+        .id(window.activeGroupScope(in: sessions))
         .contextMenu(forSelectionType: SidebarItem.self) { items in
             let ids = Self.sessionIds(items, sessions: sessions)
             if ids.count > 1 { BulkSessionMenu(ids: ids) }
@@ -117,6 +126,27 @@ struct SidebarView: View {
         .overlay {
             if sessions.projects.isEmpty && !sessions.isScanning {
                 ContentUnavailableView("No sessions yet", systemImage: "tray", description: Text("Start one with ⌘N, or import an existing session with ⌘K."))
+            }
+        }
+    }
+
+    /// One project: its header, and its session tree unless folded.
+    @ViewBuilder
+    private func projectSection(_ project: Project) -> some View {
+        // A tree (ADR-181): children hang under their parent here, whatever project they run in.
+        let rows = sessions.treeRows(in: project, query: query)
+        let collapsed = query.isEmpty && sessions.isCollapsed(project)
+        let count = rows.reduce(0) { $0 + 1 + $1.folded.count }
+        if !rows.isEmpty || query.isEmpty {
+            Section {
+                if !collapsed {
+                    ForEach(rows) { node in
+                        if let summary = sessions.sessions[node.id] { row(summary, lineage: lineage(node, in: project)) }
+                    }
+                    if rows.isEmpty { NewSessionPlaceholderRow(project: project) }
+                }
+            } header: {
+                ProjectHeader(project: project, count: count, collapsed: collapsed)
             }
         }
     }
@@ -616,11 +646,16 @@ struct RowAction: View {
 /// The sidebar's add-project control (ADR-168): a folder already on this Mac, or a repository that is
 /// not here yet. `ToolbarIcon`'s metrics, as a menu.
 struct AddProjectMenu: View {
+    @Environment(SessionStore.self) private var sessions
     @State private var hovering = false
 
     var body: some View {
         Menu {
             AddProjectMenuItems()
+            Divider()
+            Button { GroupActions.newGroup(sessions: sessions) } label: {
+                Label("New Group\u{2026}", systemImage: "rectangle.stack.badge.plus")
+            }
         } label: {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: 14, weight: .medium))

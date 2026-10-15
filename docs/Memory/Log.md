@@ -5178,3 +5178,22 @@ was pressed through AX both ways. A real pointer hover is left to the user.
 **Follow-up.** User: the scrim looks wrong on monogram tiles. Drawn tiles (monogram, Chats) now crossfade their
 letter to the chevron on their own colour. Only pictures get the blur and scrim. Checked the same way, with a
 seeded hover in Clinic Dev.
+
+## 2026-10-15 — Projects can be grouped, and a window scoped to a group (ADR-210)
+
+User wanted project groups for a growing sidebar (12 projects, 11 folded). Mocked three directions on a design
+canvas (Sections, Folders, Workspaces) from their real projects. They chose Sections plus Workspaces together,
+and accepted every recommendation in two Grill rounds.
+
+**Built.** `ProjectGroup`, `ProjectLayout` and the group invariants on `ClinicState`, in ClinicCore with 13 tests.
+`SessionStore` group methods. `WindowState.groupScope`, with the main window's remembered. A selection outside
+the scope moves to its group. Chips, captions, `MoveToGroupMenu`, `GroupMenu`, and View ▸ Project Group with
+rebindable Next and Previous Group. Needs-you dots on folded groups and projects.
+
+**Found while verifying.** Chats opened scrolled out of view whenever groups existed. Ruled out the wrapping
+layout and the chip row's sizing first. The cause was the captions drawing before the first scan. Fixed by
+waiting for the scan, and by keying the list on the scope.
+
+**Verified.** `make test` 708 pass. Clinic Dev with seeded groups, checked by AX frames, chip presses and
+screenshots; its state and preferences were restored afterwards. Needs-you dots, scope switching on selection,
+drag and drop, and the name prompt are left to a manual check.

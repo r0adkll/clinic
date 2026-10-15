@@ -71,11 +71,24 @@ final class WindowState: Identifiable {
     var bulkSelection: Set<SidebarItem> = []
     /// What this window's Tasks screen shows (ADR-112); each window keeps its own.
     let tasks = TasksViewState()
+    /// The project group this window's sidebar shows, nil for all of them (ADR-210). Each window
+    /// keeps its own; the main window's is remembered across launches, since only its geometry is
+    /// restored (ADR-042) and other windows open fresh, on All.
+    var groupScope: UUID? {
+        didSet {
+            guard isPrimary, groupScope != oldValue else { return }
+            UserDefaults.standard.set(groupScope?.uuidString, forKey: Self.groupScopeKey)
+        }
+    }
+    static let groupScopeKey = "ClinicGroupScope"
 
     /// True while the content area belongs to a screen rather than a tab: no tab bar, no footer, no terminals.
     var isShowingScreen: Bool { screen != nil || editingDraft != nil }
 
-    init(id: UUID, isPrimary: Bool) { self.id = id; self.isPrimary = isPrimary }
+    init(id: UUID, isPrimary: Bool) {
+        self.id = id; self.isPrimary = isPrimary
+        if isPrimary { groupScope = UserDefaults.standard.string(forKey: Self.groupScopeKey).flatMap(UUID.init(uuidString:)) }
+    }
 
     var title: String { nsWindow?.title ?? "Clinic" }
 }
