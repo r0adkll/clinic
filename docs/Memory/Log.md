@@ -5161,3 +5161,16 @@ through the store, and the footer shows *Paused until …* with *Resume*.
 **Verified.** `make test` 695 pass. Clinic Dev was driven by accessibility: toggle, menu pause, popover rows, a
 seeded 25 s pause surviving a relaunch and ending by itself. Clinic Dev's settings were left as found. The
 fallback sound during a pause was not heard; there is a manual check in the ADR.
+
+## 2026-10-15 — The project icon is its fold control (ADR-209)
+
+User started a UX pass on the project sidebar with one idea: put the collapse caret into the project icon, shown
+on a scrim while hovering, with a click toggling.
+
+**Built.** `ProjectFoldIcon` replaces the header's chevron column. On hover the tile is blurred under a dark
+scrim with a white chevron, and a click folds the project. The header moved 2 pt right, so project tiles, nav
+tiles and the *Projects* caption share one edge. ADR-077's chevron metric is struck through.
+
+**Verified.** Clinic Dev screenshots at rest and with hover seeded through a temporary launch argument, which
+was removed. A plain 0.45 scrim let the icon's glyph muddle the chevron, so the tile is now blurred. The fold
+was pressed through AX both ways. A real pointer hover is left to the user.

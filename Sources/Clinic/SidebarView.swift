@@ -177,8 +177,8 @@ struct ScreenNavRow: View {
         Button { window.screen = screen } label: {
             HStack(spacing: 8) {
                 // The project headers' 22 pt tile size, in the Settings source list's accent wash
-                // (ADR-108, ADR-111). No phantom disclosure column: these rows are not part of the
-                // project outline, so they do not indent to clear a chevron they do not have.
+                // (ADR-108, ADR-111), and in the same column as those tiles now that a project's
+                // chevron lives on its icon (ADR-209).
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accent))

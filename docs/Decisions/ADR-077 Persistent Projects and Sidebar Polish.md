@@ -45,14 +45,14 @@ all sessions are archived").
 - **An empty project still offers a way in**: a project with no sessions gets a placeholder row
   under its header — "New Session", or "New Chat" in the Chats group, matching the project menu's
   own wording — so a persistent-but-empty group is a starting point rather than a dead header.
-- **Metrics.** Project header: 22 pt icon, `.body` semibold name, 12 pt chevron, 6 pt gaps, 3 pt
+- **Metrics.** Project header: 22 pt icon, `.body` semibold name, ~~12 pt chevron~~ (moved onto the icon, [[ADR-209 The Project Icon Is Its Fold Control]]), 6 pt gaps, 3 pt
   vertical padding, 6 pt between the hover actions and the sidebar edge, and the count pill always
   shown. An 8 pt gap sits below the toolbar's divider, outside the scroll view so it cannot shift.
   Session rows are **not** indented under their project: an outline indent was tried at 28, 18,
   12 and 6 pt and rejected at every step — in a sidebar this narrow the icon-vs-glyph contrast
   already reads as nesting, and the indent only costs title width. Session row: 10 pt glyph, 8 pt gap,
   3 pt vertical padding, trailing badges 4 pt apart. Add-project is `folder.badge.plus`.
-- **Metrics.** Project header: 22 pt icon, `.body` semibold name, 12 pt chevron, 6 pt gaps, 3 pt
+- **Metrics.** Project header: 22 pt icon, `.body` semibold name, ~~12 pt chevron~~ (moved onto the icon, [[ADR-209 The Project Icon Is Its Fold Control]]), 6 pt gaps, 3 pt
   vertical padding, 6 pt between the hover actions and the sidebar edge, and the count pill always
   shown. An 8 pt gap sits below the toolbar's divider, outside the scroll view so it cannot shift.
   Session rows are **not** indented under their project: an outline indent was tried at 28, 18,

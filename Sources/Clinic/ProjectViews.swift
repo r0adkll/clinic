@@ -16,12 +16,7 @@ struct ProjectHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Button { sessions.setCollapsed(project, !collapsed) } label: {
-                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(collapsed ? 0 : 90)).frame(width: 12, height: 12).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).help(collapsed ? "Expand" : "Collapse")
-            ProjectIcon(project: project, size: 22)
+            ProjectFoldIcon(project: project, collapsed: collapsed)
             Text(project.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                 .help(SessionStore.isChats(project.path) ? "Chats: sessions without a repository. Click to start one." : project.path + "\nClick to start a session here")
             Text("\(count)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
@@ -42,6 +37,9 @@ struct ProjectHeader: View {
             .padding(.trailing, 6)
         }
         .textCase(nil)
+        // 2 pt in from the section header's inset, so the project tiles share one column with the
+        // nav rows' tiles and the Projects caption above them (ADR-209).
+        .padding(.leading, 2)
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture { if SessionStore.isChats(project.path) { tabs.newChat() } else { tabs.startNewSession(projectPath: project.path) } }
@@ -54,6 +52,57 @@ struct ProjectHeader: View {
             return true
         } isTargeted: { dropTargeted = $0 }
         .overlay(alignment: .top) { if dropTargeted { Rectangle().fill(Color.accent).frame(height: 2) } }
+    }
+}
+
+/// The project's icon, which is also its fold control (ADR-209): hovering the tile lays a scrim over it
+/// with the disclosure chevron on top, and clicking it collapses or expands the project. It replaces
+/// a chevron column of its own, which gives the header's name 16 pt more room.
+struct ProjectFoldIcon: View {
+    @Environment(SessionStore.self) private var sessions
+    let project: Project
+    let collapsed: Bool
+    var size: CGFloat = 22
+    @State private var hovering = false
+
+    var body: some View {
+        Button { sessions.setCollapsed(project, !collapsed) } label: {
+            ProjectIcon(project: project, size: size)
+        }
+        .buttonStyle(FoldIconStyle(collapsed: collapsed, hovering: hovering, size: size))
+        .onHover { hovering = $0 }
+        .help(collapsed ? "Expand \(project.name)" : "Collapse \(project.name)")
+        .accessibilityLabel(collapsed ? "Expand \(project.name)" : "Collapse \(project.name)")
+    }
+
+    /// The scrim and chevron, drawn only while the pointer is on the tile; a press darkens the scrim.
+    private struct FoldIconStyle: ButtonStyle {
+        let collapsed: Bool
+        let hovering: Bool
+        let size: CGFloat
+
+        func makeBody(configuration: Configuration) -> some View {
+            // ProjectIcon's own corner, so the blur and scrim stay on the tile and nothing past it.
+            let tile = RoundedRectangle(cornerRadius: size * 0.22)
+            configuration.label
+                // A softened tile under a dark scrim: with the glyph still sharp, a monogram or a
+                // `>` in the icon read as part of the chevron.
+                .blur(radius: hovering ? 2 : 0, opaque: true)
+                .clipShape(tile)
+                .overlay {
+                    ZStack {
+                        tile.fill(.black.opacity(configuration.isPressed ? 0.7 : 0.55))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: size * 0.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    }
+                    .opacity(hovering ? 1 : 0)
+                }
+                .contentShape(Rectangle())
+                .animation(.easeOut(duration: 0.12), value: hovering)
+                .animation(.snappy(duration: 0.2), value: collapsed)
+        }
     }
 }
 
