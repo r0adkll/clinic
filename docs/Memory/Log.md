@@ -5019,3 +5019,27 @@ no accessibility), so the manual steps are in the ADR. Clinic Dev's `state.json`
 
 **Next.** Phase 2: project and session packs, the rotation, children inheriting, and captions on the card.
 Phase 3: context, plan-window and long-turn witnesses, and peon-ping detection, import and silencing.
+
+## 2026-10-14 — Sounds browsing redesign (ADR-200)
+
+User, after phase 1: *"the UI could use some UX/UI design improvements … a lang filter would be nice. Lets look
+at the website again and get inspiration and let me know how to improve your eyes so you can verify."*
+
+**Eyes.** Screen capture and accessibility both failed because tccd held the grants for an Apple
+Development-signed build while the session ran in `/Applications/Clinic.app` (Developer ID): *"Failed to match
+existing code requirement"*. The user ran `tccutil reset` for both services and re-added the app; after a
+relaunch both worked. From then on, verification used a small `AXUIElement` driver (press, select, set a field,
+resize) and `screencapture -l`.
+
+**Design round.** A canvas (claude.ai artifact) of three layouts on the live registry, each with working filters,
+plus two pack pages. The user chose the filter column, then the list, then the detail, with language, franchise,
+tags and quality filters and the site-style page. A second iteration at 1100 and 880 pt was accepted.
+
+**Built.** ClinicCore `SoundCatalog`, `SoundPackFilter` and `SoundFranchises`, and
+`Resources/sound-franchises.json` from `scripts/sound-franchises` (openpeon.com's list, MIT). The store keeps a
+catalog and prefetches every manifest into Caches; `SoundsScreen` was rewritten as three columns with a folding
+filter column and the site-style page.
+
+**Verified.** `make test` 678 pass. In Clinic Dev, driven by AX and captured: facets, faceted counts, dimming,
+phrase-first search, the narrow fold with its badge, and a real install of Orc Peon (table in the ADR). Clinic
+Dev's sound data was removed afterwards.

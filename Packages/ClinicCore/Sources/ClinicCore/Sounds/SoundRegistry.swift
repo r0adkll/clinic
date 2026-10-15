@@ -39,7 +39,11 @@ public struct SoundRegistry: Sendable, Hashable {
         public var tags: [String]
         /// The lines the registry suggests trying first, as paths inside the pack.
         public var previews: [Preview]
+        public var added: String?
         public var updated: String?
+        /// The registry's own franchise, once it serves one (openpeon.com's source has a TODO for it).
+        /// Until then `SoundFranchises` names it (ADR-200).
+        public var franchise: String?
 
         public var id: String { name }
 
@@ -52,7 +56,7 @@ public struct SoundRegistry: Sendable, Hashable {
             case name, displayName = "display_name", version, description, author, trustTier = "trust_tier", quality
             case categories, language, license, soundCount = "sound_count", totalSizeBytes = "total_size_bytes"
             case sourceRepo = "source_repo", sourceRef = "source_ref", sourcePath = "source_path"
-            case manifestSHA256 = "manifest_sha256", tags, previews = "preview_sounds", updated
+            case manifestSHA256 = "manifest_sha256", tags, previews = "preview_sounds", added, updated, franchise
         }
 
         public init(name: String, displayName: String, version: String = "1.0.0", description: String = "",
@@ -100,7 +104,11 @@ public struct SoundRegistry: Sendable, Hashable {
             sourcePath = path.isEmpty ? "." : path
             manifestSHA256 = try? c.decodeIfPresent(String.self, forKey: .manifestSHA256)
             tags = (try? c.decodeIfPresent([String].self, forKey: .tags)) ?? []
+            added = try? c.decodeIfPresent(String.self, forKey: .added)
             updated = try? c.decodeIfPresent(String.self, forKey: .updated)
+            struct Named: Decodable { let name: String }
+            franchise = (try? c.decodeIfPresent(String.self, forKey: .franchise))
+                ?? (try? c.decodeIfPresent(Named.self, forKey: .franchise))?.name
             let raw = ((try? c.decodeIfPresent([Lossy<RawPreview>].self, forKey: .previews)) ?? []).compactMap(\.value)
             previews = raw.compactMap { p in
                 let path = p.file.contains("/") ? p.file : "sounds/" + p.file
@@ -128,12 +136,13 @@ public struct SoundRegistry: Sendable, Hashable {
 
         public var manifestURL: URL { rawURL("openpeon.json") }
 
-        /// What a search matches: the names, the author, the description and the tags.
-        public func matches(_ query: String) -> Bool {
-            let q = query.trimmingCharacters(in: .whitespaces)
-            guard !q.isEmpty else { return true }
-            return [displayName, name, description, authorName ?? "", tags.joined(separator: " "), language ?? ""]
-                .contains { $0.localizedCaseInsensitiveContains(q) }
+        /// Base language codes, lower case: `zh-CN` is `zh`, and `en,ru` is both. Empty when unknown.
+        public var languages: [String] {
+            var seen = Set<String>()
+            return (language ?? "").split(separator: ",").compactMap { part in
+                let code = part.trimmingCharacters(in: .whitespaces).split(separator: "-").first.map { $0.lowercased() } ?? ""
+                return code.isEmpty || !seen.insert(code).inserted ? nil : code
+            }
         }
     }
 }

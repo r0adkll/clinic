@@ -35,14 +35,18 @@ final class SoundPackStore {
     // MARK: Screen state
 
     var section: Section = .browse
-    var query = ""
-    var tag: String?
+    /// Browse's filter column, search and sort (ADR-200). The search also narrows Installed.
+    var filter = SoundPackFilter()
     var selectedId: String?
     var message: Message?
 
     // MARK: Packs
 
-    private(set) var registry: [SoundRegistry.Entry] = []
+    private(set) var registry: [SoundRegistry.Entry] = [] {
+        didSet { rebuildCatalog() }
+    }
+    /// The registry with franchises and spoken lines, ready to filter (ADR-200).
+    private(set) var catalog = SoundCatalog(entries: [])
     private(set) var isLoading = false
     private(set) var loadError: String?
     @ObservationIgnored private var fetchedAt: Date?
@@ -53,6 +57,7 @@ final class SoundPackStore {
     /// Manifests read from the registry's host, so a pack's every line can be heard before installing.
     private(set) var remoteManifests: [String: CESPManifest] = [:]
     @ObservationIgnored private var manifestTasks: Set<String> = []
+    @ObservationIgnored private var prefetching = false
 
     var settings: SoundSettings {
         didSet { UserDefaults.standard.set(settings.encoded(), forKey: SoundSettings.defaultsKey) }
@@ -108,6 +113,7 @@ final class SoundPackStore {
         if let name = settings.defaultPack, !seen.contains(name) {
             Self.log.notice("default sound pack \(name, privacy: .public) is no longer on disk")
         }
+        rebuildCatalog()
     }
 
     func installedPack(_ name: String) -> InstalledSoundPack? { installed.first { $0.id == name } }
@@ -129,6 +135,7 @@ final class SoundPackStore {
         if registry.isEmpty, let data = try? Data(contentsOf: Self.cacheDirectory.appendingPathComponent("index.json")),
            let cached = try? SoundRegistry(json: data) {
             registry = cached.packs
+            Task { await prefetchManifests() }
         }
         if let fetchedAt, Date().timeIntervalSince(fetchedAt) < 3600 { return }
         Task { await refresh() }
@@ -150,28 +157,57 @@ final class SoundPackStore {
             Self.log.error("registry: \(error, privacy: .public)")
         }
         rescan()
+        await prefetchManifests()
     }
 
-    /// The most used tags, for the filter chips.
-    var topTags: [String] {
-        var counts: [String: Int] = [:]
-        for entry in registry { for tag in entry.tags { counts[tag, default: 0] += 1 } }
-        return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(10).map(\.key)
+    private func rebuildCatalog() {
+        var lines: [String: [String]] = [:]
+        for (name, manifest) in remoteManifests { lines[name] = manifest.allLines.map(\.label) }
+        for pack in installed { lines[pack.id] = pack.manifest.allLines.map(\.label) }
+        catalog = SoundCatalog(entries: registry, lines: lines)
     }
 
-    /// Browse's list: matching the search and tag, official and verified packs first, then gold.
-    var visibleEntries: [SoundRegistry.Entry] {
-        func rank(_ e: SoundRegistry.Entry) -> Int {
-            (["official": 0, "verified": 1][e.trustTier ?? ""] ?? 2) * 3 + (["gold": 0, "silver": 1][e.quality ?? ""] ?? 2)
+    /// Reads every pack's `openpeon.json`, from the cache when this version's is there, so the search
+    /// can find a pack by what it says and a pack's page opens with its lines (ADR-200). A few at a time:
+    /// the host is shared with everyone, and the list is usable long before this finishes.
+    func prefetchManifests() async {
+        guard !prefetching else { return }
+        prefetching = true
+        defer { prefetching = false }
+        let folder = Self.cacheDirectory.appendingPathComponent("manifests", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let wanted = registry.filter { remoteManifests[$0.name] == nil && installedPack($0.name) == nil }
+        for start in stride(from: 0, to: wanted.count, by: 8) {
+            let chunk = Array(wanted[start..<min(start + 8, wanted.count)])
+            let read = await withTaskGroup(of: (String, CESPManifest?).self) { group in
+                for entry in chunk {
+                    let cached = folder.appendingPathComponent("\(entry.name)@\(entry.version).json")
+                    group.addTask {
+                        if let data = try? Data(contentsOf: cached), let manifest = try? SoundPackInstaller.checkedManifest(data) {
+                            return (entry.name, manifest)
+                        }
+                        guard let data = try? await Self.download(entry.manifestURL, limit: 1_000_000),
+                              let manifest = try? SoundPackInstaller.checkedManifest(data) else { return (entry.name, nil) }
+                        try? data.write(to: cached)
+                        return (entry.name, manifest)
+                    }
+                }
+                var out: [(String, CESPManifest?)] = []
+                for await result in group { out.append(result) }
+                return out
+            }
+            for case let (name, manifest?) in read { remoteManifests[name] = manifest }
+            if start % 80 == 0 { rebuildCatalog() }
         }
-        return registry
-            .filter { $0.matches(query) && (tag.map($0.tags.contains) ?? true) }
-            .sorted { rank($0) != rank($1) ? rank($0) < rank($1)
-                : $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        rebuildCatalog()
+        Self.log.info("sound pack manifests: \(self.remoteManifests.count, privacy: .public) of \(self.registry.count, privacy: .public)")
     }
+
+    /// Browse's list, filtered and sorted.
+    var visible: [SoundCatalog.Pack] { catalog.visible(filter) }
 
     var visibleInstalled: [InstalledSoundPack] {
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = filter.query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return installed }
         return installed.filter { $0.manifest.displayName.localizedCaseInsensitiveContains(q) || $0.id.localizedCaseInsensitiveContains(q) }
     }

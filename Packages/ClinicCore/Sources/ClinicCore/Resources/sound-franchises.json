@@ -1,0 +1,456 @@
+{
+ "source": "https://raw.githubusercontent.com/PeonPing/openpeon/main/site/src/lib/constants.ts",
+ "license": "MIT, Copyright (c) 2026 PeonPing (https://github.com/PeonPing/openpeon/blob/main/LICENSE)",
+ "franchises": [
+  {
+   "name": "2001: A Space Odyssey",
+   "url": "https://en.wikipedia.org/wiki/2001:_A_Space_Odyssey_(film)",
+   "keys": [
+    "hal9000"
+   ]
+  },
+  {
+   "name": "A Few Good Men",
+   "url": "https://en.wikipedia.org/wiki/A_Few_Good_Men",
+   "keys": [
+    "afewgoodmen"
+   ]
+  },
+  {
+   "name": "Age of Empires",
+   "url": "https://www.ageofempires.com",
+   "keys": [
+    "age-of-empires",
+    "aoe"
+   ]
+  },
+  {
+   "name": "Age of Mythology",
+   "url": "https://www.ageofempires.com/games/aom/",
+   "keys": [
+    "age-of-mythology",
+    "aom"
+   ]
+  },
+  {
+   "name": "Airplane!",
+   "url": "https://en.wikipedia.org/wiki/Airplane!",
+   "keys": [
+    "airplane"
+   ]
+  },
+  {
+   "name": "Anchorman",
+   "url": "https://en.wikipedia.org/wiki/Anchorman:_The_Legend_of_Ron_Burgundy",
+   "keys": [
+    "anchorman"
+   ]
+  },
+  {
+   "name": "Arc Raiders",
+   "url": "https://en.wikipedia.org/wiki/Arc_Raiders",
+   "keys": [
+    "arc_raiders",
+    "arc-raiders"
+   ]
+  },
+  {
+   "name": "Arknights: Endfield",
+   "url": "https://endfield.gryphline.com",
+   "keys": [
+    "arknights:endfield",
+    "明日方舟:终末地"
+   ]
+  },
+  {
+   "name": "Army of Darkness",
+   "url": "https://en.wikipedia.org/wiki/Army_of_Darkness",
+   "keys": [
+    "army of darkness",
+    "evil dead"
+   ]
+  },
+  {
+   "name": "Charlie Sheen",
+   "url": "https://en.wikipedia.org/wiki/Charlie_Sheen",
+   "keys": [
+    "charlie_sheen"
+   ]
+  },
+  {
+   "name": "Command & Conquer",
+   "url": "https://www.ea.com/games/command-and-conquer",
+   "keys": [
+    "command-and-conquer",
+    "command-conquer",
+    "c&c",
+    "cnc"
+   ]
+  },
+  {
+   "name": "Counter-Strike",
+   "url": "https://www.counter-strike.net",
+   "keys": [
+    "counterstrike",
+    "cs"
+   ]
+  },
+  {
+   "name": "Czech Viral Video",
+   "url": "https://en.wikipedia.org/wiki/Czech_Republic",
+   "keys": [
+    "milujipraci"
+   ]
+  },
+  {
+   "name": "Deadlock",
+   "url": "https://store.steampowered.com/app/1422450/Deadlock/",
+   "keys": [
+    "deadlock"
+   ]
+  },
+  {
+   "name": "Deadpool",
+   "url": "https://en.wikipedia.org/wiki/Deadpool",
+   "keys": [
+    "deadpool"
+   ]
+  },
+  {
+   "name": "Diablo",
+   "url": "https://diablo.blizzard.com",
+   "keys": [
+    "diehard",
+    "diablo"
+   ]
+  },
+  {
+   "name": "Dota 2",
+   "url": "https://www.dota2.com",
+   "keys": [
+    "dota2"
+   ]
+  },
+  {
+   "name": "Futurama",
+   "url": "https://en.wikipedia.org/wiki/Futurama",
+   "keys": [
+    "futurama"
+   ]
+  },
+  {
+   "name": "Halo",
+   "url": "https://www.halowaypoint.com",
+   "keys": [
+    "halo"
+   ]
+  },
+  {
+   "name": "Helldivers 2",
+   "url": "https://store.steampowered.com/app/553850/HELLDIVERS_2/",
+   "keys": [
+    "helldivers"
+   ]
+  },
+  {
+   "name": "Honkai: Star Rail",
+   "url": "https://hsr.hoyoverse.com",
+   "keys": [
+    "starrail"
+   ]
+  },
+  {
+   "name": "Kaamelott",
+   "url": "https://en.wikipedia.org/wiki/Kaamelott",
+   "keys": [
+    "kaamelott"
+   ]
+  },
+  {
+   "name": "League of Legends",
+   "url": "https://www.leagueoflegends.com",
+   "keys": [
+    "league-of-legends"
+   ]
+  },
+  {
+   "name": "Marcel Merčiak",
+   "url": "https://en.wikipedia.org/wiki/Marcel_Mer%C4%8Diak",
+   "keys": [
+    "marcel"
+   ]
+  },
+  {
+   "name": "Marvel",
+   "url": "https://en.wikipedia.org/wiki/Marvel_Cinematic_Universe",
+   "keys": [
+    "marvel",
+    "mcu"
+   ]
+  },
+  {
+   "name": "Metal Gear",
+   "url": "https://en.wikipedia.org/wiki/Metal_Gear",
+   "keys": [
+    "metal-gear-solid",
+    "mgs"
+   ]
+  },
+  {
+   "name": "Minecraft",
+   "url": "https://www.minecraft.net",
+   "keys": [
+    "minecraft"
+   ]
+  },
+  {
+   "name": "Mulle Meck",
+   "url": "https://en.wikipedia.org/wiki/Mulle_Meck",
+   "keys": [
+    "mullemeck"
+   ]
+  },
+  {
+   "name": "Overwatch",
+   "url": "https://overwatch.blizzard.com",
+   "keys": [
+    "professor-layton",
+    "overwatch"
+   ]
+  },
+  {
+   "name": "Portal",
+   "url": "https://store.steampowered.com/app/400/Portal/",
+   "keys": [
+    "portal"
+   ]
+  },
+  {
+   "name": "Postal",
+   "url": "https://en.wikipedia.org/wiki/Postal_(video_game_series)",
+   "keys": [
+    "postal"
+   ]
+  },
+  {
+   "name": "Rick and Morty",
+   "url": "https://en.wikipedia.org/wiki/Rick_and_Morty",
+   "keys": [
+    "rick",
+    "rick-and-morty"
+   ]
+  },
+  {
+   "name": "Silicon Valley",
+   "url": "https://en.wikipedia.org/wiki/Silicon_Valley_(TV_series)",
+   "keys": [
+    "silicon-valley"
+   ]
+  },
+  {
+   "name": "South Park",
+   "url": "https://en.wikipedia.org/wiki/South_Park",
+   "keys": [
+    "south-park"
+   ]
+  },
+  {
+   "name": "Star Trek",
+   "url": "https://en.wikipedia.org/wiki/Star_Trek",
+   "keys": [
+    "star-trek"
+   ]
+  },
+  {
+   "name": "Star Wars",
+   "url": "https://en.wikipedia.org/wiki/Star_Wars",
+   "keys": [
+    "star wars",
+    "star-wars"
+   ]
+  },
+  {
+   "name": "StarCraft",
+   "url": "https://liquipedia.net/starcraft/StarCraft",
+   "keys": [
+    "starcraft",
+    "sc",
+    "starcraft1",
+    "sc1",
+    "starcraft2",
+    "sc2"
+   ]
+  },
+  {
+   "name": "Starship Troopers",
+   "url": "https://en.wikipedia.org/wiki/Starship_Troopers_(film)",
+   "keys": [
+    "starship-troopers"
+   ]
+  },
+  {
+   "name": "Streamers",
+   "url": "",
+   "keys": [
+    "otto",
+    "streamer",
+    "streamers",
+    "twitch",
+    "vtuber"
+   ]
+  },
+  {
+   "name": "Stronghold",
+   "url": "https://en.wikipedia.org/wiki/Stronghold_(2001_video_game)",
+   "keys": [
+    "stronghold"
+   ]
+  },
+  {
+   "name": "Super Troopers",
+   "url": "https://en.wikipedia.org/wiki/Super_Troopers",
+   "keys": [
+    "super-troopers"
+   ]
+  },
+  {
+   "name": "Team Fortress 2",
+   "url": "https://store.steampowered.com/app/440/Team_Fortress_2/",
+   "keys": [
+    "tf2"
+   ]
+  },
+  {
+   "name": "Tekken",
+   "url": "https://en.wikipedia.org/wiki/Tekken",
+   "keys": [
+    "tekken"
+   ]
+  },
+  {
+   "name": "The Big Lebowski",
+   "url": "https://en.wikipedia.org/wiki/The_Big_Lebowski",
+   "keys": [
+    "the-big-lebowski",
+    "the-big-lebowski",
+    "big-lebowski"
+   ]
+  },
+  {
+   "name": "The Blues Brothers",
+   "url": "https://en.wikipedia.org/wiki/The_Blues_Brothers_(film)",
+   "keys": [
+    "the-blues-brothers"
+   ]
+  },
+  {
+   "name": "The Elder Scrolls",
+   "url": "https://elderscrolls.bethesda.net",
+   "keys": [
+    "elder-scrolls"
+   ]
+  },
+  {
+   "name": "The Legend of Zelda",
+   "url": "https://zelda.nintendo.com",
+   "keys": [
+    "zelda"
+   ]
+  },
+  {
+   "name": "The Sopranos",
+   "url": "https://en.wikipedia.org/wiki/The_Sopranos",
+   "keys": [
+    "sopranos",
+    "sopranos"
+   ]
+  },
+  {
+   "name": "The Wire",
+   "url": "https://en.wikipedia.org/wiki/The_Wire",
+   "keys": [
+    "the-wire"
+   ]
+  },
+  {
+   "name": "The Witcher",
+   "url": "https://en.wikipedia.org/wiki/The_Witcher",
+   "keys": [
+    "thewitcher",
+    "tw3"
+   ]
+  },
+  {
+   "name": "Totally Spies",
+   "url": "https://en.wikipedia.org/wiki/Totally_Spies!",
+   "keys": [
+    "totally-spies-fr",
+    "totally-spies"
+   ]
+  },
+  {
+   "name": "Trickcal Re:Vive",
+   "url": "https://en.wikipedia.org/wiki/Trickcal_Re:Vive",
+   "keys": [
+    "trickcal"
+   ]
+  },
+  {
+   "name": "WALL-E",
+   "url": "https://en.wikipedia.org/wiki/WALL-E",
+   "keys": [
+    "wall-e"
+   ]
+  },
+  {
+   "name": "Warcraft",
+   "url": "https://liquipedia.net/warcraft/Main_Page",
+   "keys": [
+    "warcraft"
+   ]
+  },
+  {
+   "name": "Warcraft II",
+   "url": "https://liquipedia.net/warcraft/Warcraft_II",
+   "keys": [
+    "wc2_peasant",
+    "wc2_peasant_pt-br",
+    "wc2_sapper",
+    "wc2_sappers",
+    "wc2_human_ships",
+    "wc2_peon_ru",
+    "warcraft2",
+    "wc2"
+   ]
+  },
+  {
+   "name": "Warcraft III",
+   "url": "https://liquipedia.net/warcraft/Warcraft_III",
+   "keys": [
+    "warcraft3",
+    "wc3"
+   ]
+  },
+  {
+   "name": "Wolfenstein",
+   "url": "https://en.wikipedia.org/wiki/Wolfenstein",
+   "keys": [
+    "wolfenstein"
+   ]
+  },
+  {
+   "name": "Worms",
+   "url": "https://en.wikipedia.org/wiki/Worms_(series)",
+   "keys": [
+    "worms"
+   ]
+  },
+  {
+   "name": "Zoolander",
+   "url": "https://en.wikipedia.org/wiki/Zoolander",
+   "keys": [
+    "zoolander"
+   ]
+  }
+ ]
+}

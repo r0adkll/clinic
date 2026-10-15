@@ -71,7 +71,7 @@ private let registryJSON = """
     #expect(peon.tarballURL.absoluteString == "https://github.com/PeonPing/og-packs/archive/refs/tags/v1.1.0.tar.gz")
     #expect(peon.rawURL("sounds/PeonReady1.wav").absoluteString
             == "https://raw.githubusercontent.com/PeonPing/og-packs/v1.1.0/peon/sounds/PeonReady1.wav")
-    #expect(peon.matches("warcraft") && peon.matches("work") && !peon.matches("glados"))
+    #expect(peon.languages == ["en"])
     let quotes = registry.packs[1]
     #expect(quotes.previews == [.init(path: "sounds/a.mp3", label: "A line")])
     #expect(quotes.manifestURL.absoluteString == "https://raw.githubusercontent.com/someone/quotes/v1.0.0/openpeon.json")

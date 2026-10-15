@@ -1,10 +1,21 @@
 import SwiftUI
 import ClinicCore
 
-/// The Sounds screen (ADR-199): OpenPeon sound packs to browse, hear and install, and which of
+/// The Sounds screen (ADR-199, ADR-200): OpenPeon sound packs to browse, hear and install, and which of
 /// Clinic's moments they voice. Shown in the content area like the Marketplace; it owns no session.
+///
+/// Browse is three columns: filters (language, franchise, tags, quality), the list, and the pack's
+/// page. The filter column folds away by itself in a window too narrow for three, and comes back with
+/// the button beside the search.
 struct SoundsScreen: View {
     @Environment(SoundPackStore.self) private var store
+    /// Whether the reader wants the filter column in a window wide enough for it.
+    @AppStorage("ClinicSoundsFiltersShown") private var filtersPreferred = true
+    /// A choice made in a narrow window, where the column is folded unless asked for.
+    @State private var narrowOverride: Bool?
+
+    /// Below this content width the filter column folds by itself.
+    private static let roomForFilters: CGFloat = 900
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,35 +33,27 @@ struct SoundsScreen: View {
 
     private var header: some View {
         @Bindable var store = store
-        return VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "speaker.wave.2.fill").font(.title3).foregroundStyle(Color.accent)
-                Text("Sounds").font(.title3.weight(.semibold))
-                Text("OpenPeon sound packs for your sessions").font(.callout).foregroundStyle(.secondary)
-                Spacer(minLength: 12)
-                Button { NSWorkspace.shared.open(URL(string: "https://openpeon.com")!) } label: {
-                    Label("openpeon.com", systemImage: "arrow.up.right.square")
-                }
-                .buttonStyle(.borderless)
-                Button { Task { await store.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .disabled(store.isLoading)
-                    .help("Read the OpenPeon registry again, and look for packs on this Mac")
+        return HStack(spacing: 10) {
+            Image(systemName: "speaker.wave.2.fill").font(.title3).foregroundStyle(Color.accent)
+            Text("Sounds").font(.title3.weight(.semibold))
+            Text("OpenPeon sound packs for your sessions").font(.callout).foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            if store.isLoading { ProgressView().controlSize(.small) }
+            Picker("", selection: $store.section) {
+                ForEach(SoundPackStore.Section.allCases) { section in Text(label(for: section)).tag(section) }
             }
-            HStack(spacing: 10) {
-                Picker("", selection: $store.section) {
-                    ForEach(SoundPackStore.Section.allCases) { section in Text(label(for: section)).tag(section) }
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                if store.section != .events {
-                    SearchField(text: $store.query, prompt: store.section == .installed ? "Filter installed" : "Search packs, games, voices")
-                        .frame(maxWidth: 320)
-                }
-                Spacer(minLength: 0)
-                if store.isLoading { ProgressView().controlSize(.small) }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            Menu {
+                Button("Refresh") { Task { await store.refresh() } }
+                Button("Open openpeon.com") { NSWorkspace.shared.open(URL(string: "https://openpeon.com/packs")!) }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
-            if store.section == .browse, !store.topTags.isEmpty { tagFilter }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("Refresh the registry, or open openpeon.com")
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+        .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     private func label(for section: SoundPackStore.Section) -> String {
@@ -63,17 +66,6 @@ struct SoundsScreen: View {
         }
     }
 
-    private var tagFilter: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                SoundTagChip(label: "All", selected: store.tag == nil) { store.tag = nil }
-                ForEach(store.topTags, id: \.self) { tag in
-                    SoundTagChip(label: tag, selected: store.tag == tag) { store.tag = store.tag == tag ? nil : tag }
-                }
-            }
-        }
-    }
-
     // MARK: Content
 
     @ViewBuilder
@@ -82,304 +74,654 @@ struct SoundsScreen: View {
         case .events:
             SoundEventsView()
         case .browse, .installed:
-            HStack(spacing: 0) {
-                list.frame(width: 340)
-                Divider()
-                Group {
-                    if let name = store.selectedId, store.entry(name) != nil || store.installedPack(name) != nil {
-                        SoundPackDetail(name: name).id(name)
-                    } else {
-                        ContentUnavailableView("Nothing selected", systemImage: "waveform",
-                                               description: Text("Pick a pack to hear its lines."))
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let wide = width >= Self.roomForFilters
+                let showFilters = store.section == .browse && (wide ? filtersPreferred : (narrowOverride ?? false))
+                let listWidth: CGFloat = width - (showFilters ? 221 : 0) < 760 ? 290 : 320
+                HStack(spacing: 0) {
+                    if showFilters {
+                        SoundFilterColumn().frame(width: 220)
+                        Divider()
+                    }
+                    SoundPackList(filtersShown: showFilters) {
+                        if wide { filtersPreferred.toggle() } else { narrowOverride = !showFilters }
+                    }
+                    .frame(width: listWidth)
+                    Divider()
+                    Group {
+                        if let name = store.selectedId, store.entry(name) != nil || store.installedPack(name) != nil {
+                            SoundPackDetail(name: name).id(name)
+                        } else {
+                            ContentUnavailableView("Nothing selected", systemImage: "waveform",
+                                                   description: Text("Pick a pack to hear what it says."))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Filter column
+
+/// Language, franchise, tags and quality (ADR-200). Every count is what ticking that box would show.
+struct SoundFilterColumn: View {
+    @Environment(SoundPackStore.self) private var store
+    @State private var folded: Set<SoundPackFilter.Facet> = []
+    @State private var showingAll: Set<SoundPackFilter.Facet> = []
+    @State private var franchiseQuery = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                section(.language, "Language") { languageRows }
+                section(.franchise, "Franchise") { franchiseRows }
+                section(.tag, "Tags") { tagChips }
+                section(.quality, "Quality") { qualityRows }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+        }
+        .background(Color.primary.opacity(0.025))
+    }
+
+    private func picked(_ facet: SoundPackFilter.Facet) -> Int {
+        facet == .quality ? store.filter.values(.quality).count + store.filter.values(.trust).count : store.filter.values(facet).count
+    }
+
+    private func section<Content: View>(_ facet: SoundPackFilter.Facet, _ title: String, @ViewBuilder content: () -> Content) -> some View {
+        let open = !folded.contains(facet)
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                if open { folded.insert(facet) } else { folded.remove(facet) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .frame(width: 10)
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 4)
+                    if picked(facet) > 0 {
+                        Text("\(picked(facet))").font(.caption.weight(.semibold)).foregroundStyle(Color.accent)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6).padding(.horizontal, 4)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title), \(open ? "expanded" : "collapsed")")
+            if open { content().padding(.leading, 4).padding(.bottom, 6) }
+        }
+    }
+
+    private func toggle(_ value: String, _ facet: SoundPackFilter.Facet) -> Binding<Bool> {
+        Binding(get: { store.filter.contains(value, in: facet) }, set: { _ in store.filter.toggle(value, in: facet) })
+    }
+
+    private func row(_ value: String, _ facet: SoundPackFilter.Facet, label: String, detail: String? = nil, count: Int) -> some View {
+        Toggle(isOn: toggle(value, facet)) {
+            HStack(spacing: 6) {
+                Text(label).lineLimit(1)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                Spacer(minLength: 4)
+                Text("\(count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(.vertical, 1)
+        // A value that would show nothing with the other filters as they are stays, but steps back.
+        .opacity(count == 0 && !store.filter.contains(value, in: facet) ? 0.45 : 1)
+        .accessibilityLabel("\(label), \(count) packs")
+    }
+
+    /// The first `limit`, then the rest on request; anything ticked always shows.
+    private func limited<T>(_ facet: SoundPackFilter.Facet, _ all: [T], _ limit: Int, value: (T) -> String) -> [T] {
+        guard !showingAll.contains(facet) else { return all }
+        let ticked = store.filter.values(facet)
+        return Array(all.prefix(limit)) + all.dropFirst(limit).filter { ticked.contains(value($0)) }
+    }
+
+    @ViewBuilder
+    private func more(_ facet: SoundPackFilter.Facet, total: Int, shown: Int, noun: String) -> some View {
+        if total > shown || showingAll.contains(facet) {
+            Button(showingAll.contains(facet) ? "Show fewer" : "All \(total) \(noun)") {
+                if showingAll.contains(facet) { showingAll.remove(facet) } else { showingAll.insert(facet) }
+            }
+            .buttonStyle(.link).font(.caption).padding(.leading, 20).padding(.top, 2)
+        }
+    }
+
+    // Language: the Mac's own languages first, then the most common.
+    @ViewBuilder
+    private var languageRows: some View {
+        let counts = store.catalog.counts(.language, store.filter)
+        let preferred = Locale.preferredLanguages.compactMap { Locale(identifier: $0).language.languageCode?.identifier }
+        let all = store.catalog.values(.language).sorted { a, b in
+            let pa = preferred.firstIndex(of: a.value) ?? .max, pb = preferred.firstIndex(of: b.value) ?? .max
+            return pa != pb ? pa < pb : a.total > b.total
+        }
+        let shown = limited(.language, all, 5) { $0.value }
+        ForEach(shown, id: \.value) { item in
+            let names = SoundLanguage.names(item.value)
+            row(item.value, .language, label: names.native, detail: names.native == names.local ? item.value.uppercased() : names.local,
+                count: counts[item.value] ?? 0)
+        }
+        more(.language, total: all.count, shown: shown.count, noun: "languages")
+    }
+
+    @ViewBuilder
+    private var franchiseRows: some View {
+        let counts = store.catalog.counts(.franchise, store.filter)
+        // Most common first, with the packs that have none at the end however many they are.
+        let all = store.catalog.values(.franchise).sorted { a, b in
+            (a.value == SoundCatalog.noFranchise ? 1 : 0) < (b.value == SoundCatalog.noFranchise ? 1 : 0)
+        }
+        if showingAll.contains(.franchise) {
+            SearchField(text: $franchiseQuery, prompt: "Filter franchises").padding(.vertical, 3)
+        }
+        let matching = franchiseQuery.isEmpty ? all : all.filter { $0.value.localizedCaseInsensitiveContains(franchiseQuery) }
+        let shown = limited(.franchise, matching, 8) { $0.value }
+        ForEach(shown, id: \.value) { item in
+            row(item.value, .franchise, label: item.value == SoundCatalog.noFranchise ? "No franchise" : item.value,
+                count: counts[item.value] ?? 0)
+        }
+        more(.franchise, total: all.count, shown: shown.count, noun: "franchises")
+    }
+
+    @ViewBuilder
+    private var tagChips: some View {
+        let counts = store.catalog.counts(.tag, store.filter)
+        let all = store.catalog.values(.tag)
+        let shown = limited(.tag, all, 12) { $0.value }
+        FlowLayout(spacing: 5) {
+            ForEach(shown, id: \.value) { item in
+                let count = counts[item.value] ?? 0
+                let selected = store.filter.contains(item.value, in: .tag)
+                SoundTagChip(label: item.value, count: count, selected: selected) {
+                    store.filter.toggle(item.value, in: .tag)
+                }
+                .opacity(count == 0 && !selected ? 0.45 : 1)
+            }
+        }
+        .padding(.vertical, 2)
+        more(.tag, total: all.count, shown: shown.count, noun: "tags")
+    }
+
+    @ViewBuilder
+    private var qualityRows: some View {
+        let quality = store.catalog.counts(.quality, store.filter)
+        let trust = store.catalog.counts(.trust, store.filter)
+        row("gold", .quality, label: "Gold", count: quality["gold"] ?? 0)
+        row("silver", .quality, label: "Silver", count: quality["silver"] ?? 0)
+        Divider().padding(.vertical, 3)
+        row("official", .trust, label: "Official", detail: "by OpenPeon", count: trust["official"] ?? 0)
+        row("verified", .trust, label: "Verified", detail: "reviewed", count: trust["verified"] ?? 0)
+        row("community", .trust, label: "Community", count: trust["community"] ?? 0)
+    }
+}
+
+/// A language's name in itself and in the reader's language, from the system's own tables.
+enum SoundLanguage {
+    static func names(_ code: String) -> (native: String, local: String) {
+        let own = Locale(identifier: code)
+        let native = own.localizedString(forLanguageCode: code).map { $0.capitalized(with: own) } ?? code.uppercased()
+        let local = Locale.current.localizedString(forLanguageCode: code).map { $0.capitalized(with: .current) } ?? code.uppercased()
+        return (native, local)
+    }
+}
+
+// MARK: - List column
+
+struct SoundPackList: View {
+    @Environment(SoundPackStore.self) private var store
+    let filtersShown: Bool
+    let toggleFilters: () -> Void
+
+    var body: some View {
+        @Bindable var store = store
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    if store.section == .browse { filterButton }
+                    SearchField(text: $store.filter.query, prompt: store.section == .installed ? "Filter installed" : "Search packs, lines, authors")
+                }
+                if store.section == .browse {
+                    HStack(spacing: 8) {
+                        Text(countLabel).font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 4)
+                        Picker("Sort", selection: $store.filter.sort) {
+                            ForEach(SoundPackFilter.Sort.allCases) { Text($0.label).tag($0) }
+                        }
+                        .labelsHidden().controlSize(.small).fixedSize()
+                        .help("Sort the list")
+                    }
+                    if store.filter.activeCount > 0 { activeChips }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            Divider()
+            list
+        }
+    }
+
+    private var countLabel: String {
+        let shown = store.visible.count, total = store.registry.count
+        return shown == total ? "\(total) packs" : "\(shown) of \(total) packs"
+    }
+
+    private var filterButton: some View {
+        Button(action: toggleFilters) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .foregroundStyle(store.filter.activeCount > 0 ? AnyShapeStyle(Color.accent) : AnyShapeStyle(.secondary))
+                .frame(width: 24, height: 22)
+                .overlay(alignment: .topTrailing) {
+                    if !filtersShown && store.filter.activeCount > 0 {
+                        Text("\(store.filter.activeCount)")
+                            .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 3).frame(minWidth: 13, minHeight: 13)
+                            .background(Color.accent, in: Capsule())
+                            .offset(x: 5, y: -4)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(filtersShown ? "Hide filters" : "Show filters")
+        .accessibilityLabel(filtersShown ? "Hide filters" : "Show filters")
+    }
+
+    /// What is ticked, each removable, and a way to untick it all.
+    private var activeChips: some View {
+        let f = store.filter
+        var chips: [(String, SoundPackFilter.Facet, String)] = []
+        for code in f.values(.language).sorted() { chips.append((SoundLanguage.names(code).native, .language, code)) }
+        for name in f.values(.franchise).sorted() { chips.append((name == SoundCatalog.noFranchise ? "No franchise" : name, .franchise, name)) }
+        for tag in f.values(.tag).sorted() { chips.append(("#" + tag, .tag, tag)) }
+        for q in f.values(.quality).sorted() { chips.append((q.capitalized, .quality, q)) }
+        for t in f.values(.trust).sorted() { chips.append((t.capitalized, .trust, t)) }
+        return FlowLayout(spacing: 5) {
+            ForEach(chips, id: \.2) { chip in
+                Button { store.filter.toggle(chip.2, in: chip.1) } label: {
+                    HStack(spacing: 3) { Text(chip.0); Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+                        .font(.caption).foregroundStyle(Color.accent)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color.accent.opacity(0.16), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove filter \(chip.0)")
+            }
+            Button("Clear all") { store.filter.clear() }.buttonStyle(.link).font(.caption)
         }
     }
 
     private var list: some View {
         @Bindable var store = store
-        return List(selection: $store.selectedId) {
-            if store.section == .browse {
-                ForEach(store.visibleEntries) { entry in
-                    SoundPackRow(name: entry.name, title: entry.displayName, subtitle: entry.description,
-                                 detail: rowDetail(entry), badge: entry.trustTier).tag(entry.name)
+        return ScrollViewReader { proxy in
+            List(selection: $store.selectedId) {
+                if store.section == .browse {
+                    ForEach(store.visible) { pack in SoundPackRow(name: pack.id).tag(pack.id) }
+                } else {
+                    ForEach(store.visibleInstalled) { pack in SoundPackRow(name: pack.id).tag(pack.id) }
+                }
+            }
+            .listStyle(.inset)
+            .overlay { emptyState }
+            // New results start at the top, not wherever the last ones were scrolled to.
+            .onChange(of: store.filter) {
+                if let first = store.visible.first?.id { proxy.scrollTo(first, anchor: .top) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if store.section == .browse && store.visible.isEmpty && !store.isLoading {
+            if store.registry.isEmpty {
+                ContentUnavailableView {
+                    Label("No packs to show", systemImage: "waveform.slash")
+                } description: {
+                    Text(store.loadError ?? "The OpenPeon registry has not been read yet.")
+                } actions: {
+                    Button("Try Again") { Task { await store.refresh() } }
                 }
             } else {
-                ForEach(store.visibleInstalled) { pack in
-                    SoundPackRow(name: pack.id, title: pack.manifest.displayName, subtitle: pack.manifest.description ?? "",
-                                 detail: installedDetail(pack), badge: nil).tag(pack.id)
+                ContentUnavailableView {
+                    Label("No pack matches", systemImage: "line.3.horizontal.decrease.circle")
+                } actions: {
+                    Button("Clear Filters") { store.filter.clear() }
                 }
             }
-        }
-        .listStyle(.inset)
-        .overlay {
-            if store.section == .browse && store.visibleEntries.isEmpty && !store.isLoading {
-                if store.registry.isEmpty {
-                    ContentUnavailableView {
-                        Label("No packs to show", systemImage: "waveform.slash")
-                    } description: {
-                        Text(store.loadError ?? "The OpenPeon registry has not been read yet.")
-                    } actions: {
-                        Button("Try Again") { Task { await store.refresh() } }
-                    }
-                } else {
-                    ContentUnavailableView.search(text: store.query)
-                }
-            } else if store.section == .installed && store.visibleInstalled.isEmpty {
-                if store.installed.isEmpty {
-                    ContentUnavailableView("No packs installed", systemImage: "speaker.slash",
-                                           description: Text("Install one from Browse. Packs in ~/.openpeon or peon-ping's folder show up here too."))
-                } else {
-                    ContentUnavailableView.search(text: store.query)
-                }
+        } else if store.section == .installed && store.visibleInstalled.isEmpty {
+            if store.installed.isEmpty {
+                ContentUnavailableView("No packs installed", systemImage: "speaker.slash",
+                                       description: Text("Install one from Browse. Packs in ~/.openpeon or peon-ping's folder show up here too."))
+            } else {
+                ContentUnavailableView.search(text: store.filter.query)
             }
         }
-    }
-
-    private func rowDetail(_ entry: SoundRegistry.Entry) -> String {
-        var parts: [String] = []
-        if let author = entry.authorName { parts.append(author) }
-        if let lines = entry.soundCount { parts.append("\(lines) lines") }
-        if let language = entry.language, language != "en" { parts.append(language) }
-        parts.append(contentsOf: entry.tags.prefix(2))
-        return parts.joined(separator: " · ")
-    }
-
-    private func installedDetail(_ pack: InstalledSoundPack) -> String {
-        var parts = ["v\(pack.manifest.version)", "\(pack.manifest.allLines.count) lines"]
-        if pack.origin != .clinic { parts.append("from \(pack.origin.label)") }
-        if store.update(for: pack) != nil { parts.append("update available") }
-        return parts.joined(separator: " · ")
     }
 }
 
-// MARK: - Rows
-
+/// One pack in the list: its name, what it is and where it stands here.
 struct SoundPackRow: View {
     @Environment(SoundPackStore.self) private var store
     let name: String
-    let title: String
-    let subtitle: String
-    let detail: String
-    let badge: String?
-
-    private var isInstalled: Bool { store.installedPack(name) != nil }
-    private var isDefault: Bool { store.settings.defaultPack == name && isInstalled }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isDefault ? "speaker.wave.2.fill" : isInstalled ? "checkmark.circle.fill" : "waveform")
-                .font(.system(size: 13))
-                .foregroundStyle(isDefault ? AnyShapeStyle(Color.accent) : isInstalled ? AnyShapeStyle(Color.green) : AnyShapeStyle(.tertiary))
-                .frame(width: 16, height: 16)
-                .padding(.top, 1)
-                .help(isDefault ? "The default pack" : isInstalled ? "Installed" : "")
-            VStack(alignment: .leading, spacing: 3) {
+        let pack = store.catalog.pack(name)
+        let installed = store.installedPack(name)
+        let title = installed?.manifest.displayName ?? pack?.entry.displayName ?? name
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title).font(.body.weight(.semibold)).lineLimit(1)
-                    if let badge, badge != "community" { TrustBadge(tier: badge) }
-                    Spacer(minLength: 0)
+                    if installed != nil {
+                        Text(store.settings.defaultPack == name ? "Default" : "Installed")
+                            .font(.caption).foregroundStyle(store.settings.defaultPack == name ? Color.accent : Color.green)
+                    }
                 }
-                if !subtitle.isEmpty {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-                Text(detail).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                Text(meta(pack, installed)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            let languages = pack?.entry.languages ?? installed?.manifest.language.map { [$0] } ?? []
+            if !languages.isEmpty {
+                Text(languages.map { $0.uppercased() }.joined(separator: "·"))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.tertiary))
             }
         }
         .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
     }
-}
 
-/// The registry's own word for who stands behind a pack.
-struct TrustBadge: View {
-    let tier: String
-
-    var body: some View {
-        Label(tier.capitalized, systemImage: tier == "official" ? "checkmark.seal.fill" : "checkmark.seal")
-            .labelStyle(.titleAndIcon)
-            .font(.caption2)
-            .foregroundStyle(tier == "official" ? Color.accent : Color.secondary)
-            .help(tier == "official" ? "Published by OpenPeon" : tier == "verified" ? "Reviewed by OpenPeon" : "Submitted by the community")
+    private func meta(_ pack: SoundCatalog.Pack?, _ installed: InstalledSoundPack?) -> String {
+        var parts: [String] = []
+        if let franchise = pack?.franchise { parts.append(franchise) }
+        if let lines = pack?.entry.soundCount ?? installed.map({ $0.manifest.allLines.count }) { parts.append("\(lines) lines") }
+        if let quality = pack?.entry.quality { parts.append(quality.capitalized) }
+        if let author = pack?.entry.authorName ?? installed?.manifest.author?.name { parts.append(author) }
+        if let installed, installed.origin != .clinic { parts.append("from \(installed.origin.label)") }
+        if let installed, store.update(for: installed) != nil { parts.append("update available") }
+        return parts.joined(separator: " · ")
     }
 }
 
 struct SoundTagChip: View {
     let label: String
+    var count: Int?
     let selected: Bool
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.callout)
-                .foregroundStyle(selected ? Color.accent : Color.secondary)
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(selected ? Color.accent.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.07), in: Capsule())
-                .overlay(Capsule().strokeBorder(selected ? Color.accent.opacity(0.35) : Color.primary.opacity(0.08)))
-                .contentShape(Capsule())
+            HStack(spacing: 4) {
+                Text(label)
+                if let count { Text("\(count)").monospacedDigit().opacity(0.6) }
+            }
+            .font(.caption)
+            .foregroundStyle(selected ? Color.accent : Color.secondary)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(selected ? Color.accent.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.07), in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? Color.accent.opacity(0.35) : Color.primary.opacity(0.08)))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .accessibilityLabel("Tag \(label)\(count.map { ", \($0) packs" } ?? "")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-// MARK: - Detail
+// MARK: - Pack page
 
-/// One pack: who made it, what it costs, and every line it would say, each with a ▶.
+/// One pack, the way openpeon.com shows it (ADR-200): who made it, what it is, the actions, and every
+/// line it says under the moment that plays it.
 struct SoundPackDetail: View {
     @Environment(SoundPackStore.self) private var store
     let name: String
+    @State private var expanded: Set<CESPCategory> = []
 
-    private var entry: SoundRegistry.Entry? { store.entry(name) }
-    private var pack: InstalledSoundPack? { store.installedPack(name) }
+    private var pack: SoundCatalog.Pack? { store.catalog.pack(name) }
+    private var entry: SoundRegistry.Entry? { pack?.entry }
+    private var installed: InstalledSoundPack? { store.installedPack(name) }
     private var manifest: CESPManifest? { store.manifest(for: name) }
+    private var displayName: String { installed?.manifest.displayName ?? entry?.displayName ?? name }
+
+    /// Lines shown per category before *Show all*.
+    private static let linesShown = 6
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                title
-                if let description = entry?.description ?? pack?.manifest.description, !description.isEmpty {
-                    Text(description).font(.body).textSelection(.enabled)
+                hero
+                chips
+                if let description, !description.isEmpty {
+                    Text(description).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-                actions
+                actionBar
                 lines
-                facts
+                related
+                source
             }
-            .frame(maxWidth: 620, alignment: .leading)
-            .padding(20)
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 22).padding(.vertical, 20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { if let entry { store.loadManifest(for: entry) } }
     }
 
-    private var displayName: String { pack?.manifest.displayName ?? entry?.displayName ?? name }
+    /// The registry's description, unless it only says the name again.
+    private var description: String? {
+        let text = entry?.description ?? installed?.manifest.description ?? ""
+        return text.lowercased().hasPrefix(displayName.lowercased() + " sound pack") ? nil : text
+    }
 
-    private var title: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(displayName).font(.title2.weight(.semibold)).textSelection(.enabled)
-                Text(pack?.manifest.version ?? entry?.version ?? "")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule())
-                if let tier = entry?.trustTier { TrustBadge(tier: tier) }
-                if let pack {
-                    Label(pack.origin == .clinic ? "Installed" : "Found in \(pack.origin.label)", systemImage: "checkmark.circle.fill")
-                        .font(.caption).foregroundStyle(.green)
+    private var initials: String {
+        displayName.split(whereSeparator: { $0 == " " || $0 == "(" }).prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+
+    private var hero: some View {
+        HStack(spacing: 14) {
+            Text(initials)
+                .font(.system(size: 17, weight: .bold)).foregroundStyle(Color.accent)
+                .frame(width: 48, height: 48)
+                .background(Color.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(displayName).font(.title2.weight(.bold)).lineLimit(2).textSelection(.enabled)
+                HStack(spacing: 4) {
+                    if let franchise = pack?.franchise {
+                        Button(franchise) {
+                            store.filter.set([franchise], in: .franchise)
+                            store.section = .browse
+                        }
+                        .buttonStyle(.link)
+                        .help("Show every \(franchise) pack")
+                        Text("·")
+                    }
+                    if let author = entry?.authorName ?? installed?.manifest.author?.name { Text("by \(author)") }
                 }
+                .font(.callout).foregroundStyle(.secondary)
             }
-            let author = pack?.manifest.author?.name ?? entry?.authorName
-            let license = pack?.manifest.license ?? entry?.license
-            HStack(spacing: 6) {
-                if let author { Text(author) }
-                if let license { Text("·"); Text(license) }
-                if let language = pack?.manifest.language ?? entry?.language { Text("·"); Text(language) }
-                if let bytes = entry?.totalSizeBytes { Text("·"); Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)) }
-            }
-            .font(.callout).foregroundStyle(.secondary)
         }
     }
 
-    private var actions: some View {
-        HStack(spacing: 8) {
-            let busy = store.installing.contains(name)
-            if let pack {
-                if store.settings.defaultPack == name {
-                    Label("Default pack", systemImage: "speaker.wave.2.fill").foregroundStyle(Color.accent)
+    private var chips: some View {
+        var items: [(String, Color?)] = []
+        if let quality = entry?.quality { items.append((quality.uppercased(), quality == "gold" ? .yellow : nil)) }
+        if let trust = entry?.trustTier, trust != "community" { items.append((trust.capitalized, .blue)) }
+        if let version = installed?.manifest.version ?? entry?.version { items.append(("v" + version, nil)) }
+        for code in entry?.languages ?? [] { items.append(("\(SoundLanguage.names(code).native) (\(code.uppercased()))", nil)) }
+        if let license = entry?.license ?? installed?.manifest.license { items.append((license, nil)) }
+        if let count = entry?.soundCount ?? manifest.map({ $0.allLines.count }) { items.append(("\(count) lines", nil)) }
+        if let manifest { items.append(("\(manifest.voicedCategories.count) of 9 categories", nil)) }
+        if let bytes = entry?.totalSizeBytes { items.append((ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file), nil)) }
+        return FlowLayout(spacing: 5) {
+            ForEach(items, id: \.0) { item in
+                Text(item.0)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(item.1.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder((item.1 ?? .secondary).opacity(0.35)))
+            }
+        }
+    }
+
+    private var actionBar: some View {
+        let busy = store.installing.contains(name)
+        let isDefault = store.settings.defaultPack == name && installed != nil
+        return HStack(spacing: 8) {
+            if let installed {
+                if isDefault {
+                    Label("Default pack", systemImage: "speaker.wave.2.fill").foregroundStyle(Color.accent).font(.callout.weight(.medium))
                 } else {
                     Button("Use as Default") { store.settings.defaultPack = name }.buttonStyle(.borderedProminent)
                 }
-                if let update = store.update(for: pack) {
+                if let update = store.update(for: installed) {
                     Button("Update to \(update.version)") { store.install(update) }.disabled(busy)
-                }
-                if pack.origin == .clinic {
-                    Button("Uninstall", role: .destructive) { store.uninstall(pack) }.disabled(busy)
                 }
             } else if let entry {
                 Button("Install") { store.install(entry) }.buttonStyle(.borderedProminent).disabled(busy)
             }
+            Button("Use for Project…") {}.disabled(true).help("Coming with per-project packs")
+            Button("Add to Rotation") {}.disabled(true).help("Coming with pack rotation")
             if busy { ProgressView().controlSize(.small) }
-            if let entry {
-                Button { NSWorkspace.shared.open(URL(string: "https://github.com/\(entry.sourceRepo)")!) } label: {
-                    Label("Source", systemImage: "arrow.up.right.square")
-                }
+            Spacer(minLength: 8)
+            Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if let installed, installed.origin == .clinic {
+                Menu {
+                    Button("Uninstall", role: .destructive) { store.uninstall(installed) }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .disabled(busy)
+                .accessibilityLabel("More actions")
             }
-            Spacer(minLength: 0)
         }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var status: String {
+        guard let installed else { return "Every file is checked as it installs" }
+        if store.settings.defaultPack == name { return "Plays for every session" }
+        return installed.origin == .clinic ? "Installed" : "Found in \(installed.origin.label)"
     }
 
     @ViewBuilder
     private var lines: some View {
         if let manifest {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("What it says").font(.callout.weight(.semibold))
-                ForEach(CESPCategory.allCases) { category in
-                    let lines = manifest.lines(for: category)
-                    if !lines.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Image(systemName: category.symbol).foregroundStyle(Color.accent).frame(width: 16)
-                                Text(category.title).font(.caption.weight(.semibold))
-                                Text(category.rawValue).font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                                if store.settings.disabledCategories.contains(category) {
-                                    Text("off").font(.caption2).foregroundStyle(.secondary)
-                                        .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: Capsule())
-                                }
+            ForEach(CESPCategory.allCases) { category in
+                let all = manifest.lines(for: category)
+                if !all.isEmpty { categoryBlock(category, all) }
+            }
+            let missing = CESPCategory.allCases.filter { manifest.lines(for: $0).isEmpty }
+            if !missing.isEmpty {
+                Text("No lines for \(missing.map { $0.title.lowercased() }.formatted(.list(type: .and))). Those moments play your notification sound instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3])).foregroundStyle(.tertiary))
+            }
+        } else {
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading what it says…").foregroundStyle(.secondary) }
+                .font(.callout)
+        }
+    }
+
+    private func categoryBlock(_ category: CESPCategory, _ all: [CESPManifest.Line]) -> some View {
+        let open = expanded.contains(category)
+        let shown = open ? all : Array(all.prefix(Self.linesShown))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(category.rawValue)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(Color.accent)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                Text(category.title).font(.headline)
+                Text(category.whenClinicPlays).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 6)], alignment: .leading, spacing: 6) {
+                ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
+                    LineTile(label: line.label.isEmpty ? (line.file as NSString).lastPathComponent : line.label, path: line.path, name: name)
+                }
+            }
+            if all.count > Self.linesShown {
+                Button(open ? "Show fewer" : "Show all \(all.count)") {
+                    if open { expanded.remove(category) } else { expanded.insert(category) }
+                }
+                .buttonStyle(.link).font(.caption)
+            }
+        }
+        .padding(.top, 6)
+    }
+
+    @ViewBuilder
+    private var related: some View {
+        let others: [SoundCatalog.Pack] = {
+            guard let pack else { return [] }
+            if let franchise = pack.franchise { return store.catalog.packs.filter { $0.franchise == franchise && $0.id != name } }
+            guard let tag = pack.entry.tags.dropFirst().first else { return [] }
+            return store.catalog.packs.filter { $0.entry.tags.contains(tag) && $0.id != name }
+        }()
+        if !others.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(pack?.franchise.map { "More from \($0)" } ?? "Related packs").font(.headline)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(others.prefix(4)) { other in
+                        Button { store.selectedId = other.id } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(other.entry.displayName).font(.callout.weight(.semibold)).lineLimit(1)
+                                Text([other.entry.soundCount.map { "\($0) lines" }, other.entry.languages.first?.uppercased(), other.entry.authorName]
+                                    .compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
-                            FlowLines(lines: lines, name: name)
+                            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-        } else if let entry, !entry.previews.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(entry.previews, id: \.path) { preview in
-                    LineButton(label: preview.label ?? (preview.path as NSString).lastPathComponent, path: preview.path, name: name)
-                }
-                ProgressView().controlSize(.small)
+            .padding(.top, 10)
+        }
+    }
+
+    @ViewBuilder
+    private var source: some View {
+        if let entry {
+            Button {
+                NSWorkspace.shared.open(URL(string: "https://github.com/\(entry.sourceRepo)")!)
+            } label: {
+                Label("\(entry.sourceRepo)\(entry.sourcePath == "." ? "" : "/" + entry.sourcePath) @ \(entry.sourceRef)", systemImage: "arrow.up.right.square")
             }
-        }
-    }
-
-    private var facts: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            fact("Name", name)
-            if let entry { fact("Source", "\(entry.sourceRepo) @ \(entry.sourceRef)" + (entry.sourcePath == "." ? "" : " / \(entry.sourcePath)")) }
-            if let pack { fact("Folder", pack.directory.path) }
-            if let tags = entry?.tags, !tags.isEmpty { fact("Tags", tags.joined(separator: ", ")) }
-        }
-        .font(.caption)
-    }
-
-    private func fact(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
-            Text(value).foregroundStyle(.secondary).textSelection(.enabled)
+            .buttonStyle(.link).font(.caption)
         }
     }
 }
 
-/// A category's lines, wrapping onto as many rows as they need.
-private struct FlowLines: View {
-    let lines: [CESPManifest.Line]
-    let name: String
-
-    var body: some View {
-        FlowLayout(spacing: 6) {
-            ForEach(lines, id: \.path) { line in
-                LineButton(label: line.label.isEmpty ? (line.file as NSString).lastPathComponent : line.label, path: line.path, name: name)
-            }
+extension CESPCategory {
+    /// What makes Clinic play this category (ADR-199). Categories with no witness yet say so.
+    var whenClinicPlays: String {
+        switch self {
+        case .sessionStart: "when a session starts or resumes"
+        case .taskAcknowledge: "when you send a prompt"
+        case .taskComplete: "a turn, run or checks finish, or a child reports"
+        case .taskError: "an API error, a failed run, failing checks"
+        case .inputRequired: "permission, a question, a Grill round"
+        case .userSpam: "three prompts in ten seconds"
+        case .sessionEnd: "when a session ends"
+        case .resourceLimit, .taskProgress: "Clinic doesn't play this yet"
         }
     }
 }
 
-/// One line as a capsule that plays it, and reads ■ while it does.
-private struct LineButton: View {
+/// One line as a tile that plays it, and reads ■ while it does.
+private struct LineTile: View {
     @Environment(SoundPackStore.self) private var store
     let label: String
     let path: String
@@ -389,19 +731,23 @@ private struct LineButton: View {
     var body: some View {
         let playing = store.isPreviewing(path, of: name)
         Button { store.togglePreview(path, of: name) } label: {
-            HStack(spacing: 4) {
-                Image(systemName: playing ? "stop.fill" : "play.fill").font(.system(size: 8))
-                Text(label).lineLimit(1)
+            HStack(spacing: 8) {
+                Image(systemName: playing ? "stop.fill" : "play.fill")
+                    .font(.system(size: 9)).foregroundStyle(playing ? Color.white : Color.primary)
+                    .frame(width: 22, height: 22)
+                    .background(playing ? AnyShapeStyle(Color.accent) : AnyShapeStyle(.quaternary), in: Circle())
+                Text(label).font(.callout).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
             }
-            .font(.caption)
-            .foregroundStyle(playing ? Color.accent : Color.primary)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(playing ? Color.accent.opacity(0.16) : Color.primary.opacity(hovering ? 0.11 : 0.06), in: Capsule())
-            .contentShape(Capsule())
+            .padding(.horizontal, 8).frame(height: 36)
+            .background(Color.primary.opacity(hovering ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(playing ? Color.accent.opacity(0.6) : Color.primary.opacity(0.1)))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(label)
+        .accessibilityLabel("\(playing ? "Stop" : "Play") \(label)")
     }
 }
 
@@ -494,6 +840,7 @@ struct SoundsFooter: View {
             Slider(value: $store.settings.volume, in: 0...1) { editing in if !editing { store.sampleVolume() } }
                 .controlSize(.small).frame(width: 110)
                 .disabled(!store.settings.enabled)
+                .accessibilityLabel("Volume")
             Image(systemName: "speaker.wave.3.fill").font(.caption).foregroundStyle(.secondary)
             Menu {
                 ForEach(store.installed) { pack in
