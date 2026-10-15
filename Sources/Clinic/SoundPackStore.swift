@@ -344,6 +344,19 @@ final class SoundPackStore {
         return "no pack"
     }
 
+    /// A pack a session about to start inherits because someone chose it: its parent's, or one set on its
+    /// project (ADR-205). Not the default or the rotation, which nobody chose for this project. Forms show
+    /// this as the selection rather than as *Automatic*.
+    func inheritedPack(project: String, parent: SessionID?) -> (pack: InstalledSoundPack, from: String)? {
+        if let parent, let choice = choice(for: parent, draw: false), let pack = installedPack(choice.pack) {
+            return (pack, "its parent")
+        }
+        if let own = sessions?.state.soundPacks.byProject[project], let pack = installedPack(own) {
+            return (pack, (project as NSString).lastPathComponent)
+        }
+        return nil
+    }
+
     /// The pack Automatic would give, when that is knowable before the session draws.
     func automaticPack(project: String, parent: SessionID?) -> String? {
         if let parent { return choice(for: parent, draw: false)?.pack }

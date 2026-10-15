@@ -285,15 +285,23 @@ struct NewSessionScreen: View {
         .help("Model")
     }
 
-    /// The session's sound pack (ADR-202): Automatic, saying what that will be, or one installed pack.
+    /// The session's sound pack (ADR-202, ADR-205): the pack it inherits from its project or parent,
+    /// shown as the selection; else Automatic, saying what that will be; or one installed pack.
     private var voiceMenu: some View {
-        let chosen = draft.soundPack.flatMap(soundPacks.installedPack)
+        let inherited = soundPacks.inheritedPack(project: draft.projectPath, parent: draft.parentId)
+        // Picking the inherited pack is following it, not overriding it.
+        let chosen = draft.soundPack.flatMap(soundPacks.installedPack).flatMap { $0.id == inherited?.pack.id ? nil : $0 }
         let automatic = soundPacks.automaticDescription(project: draft.projectPath, parent: draft.parentId)
         let heard = draft.soundPack ?? soundPacks.automaticPack(project: draft.projectPath, parent: draft.parentId)
         return Menu {
-            Toggle("Automatic (\(automatic))", isOn: Binding(get: { draft.soundPack == nil }, set: { _ in draft.soundPack = nil }))
+            if let inherited {
+                Toggle("\(inherited.pack.manifest.displayName) (from \(inherited.from))",
+                       isOn: Binding(get: { chosen == nil }, set: { _ in draft.soundPack = nil }))
+            } else {
+                Toggle("Automatic (\(automatic))", isOn: Binding(get: { draft.soundPack == nil }, set: { _ in draft.soundPack = nil }))
+            }
             Divider()
-            ForEach(soundPacks.installed) { pack in
+            ForEach(soundPacks.installed.filter { $0.id != inherited?.pack.id }) { pack in
                 Toggle(pack.manifest.displayName, isOn: Binding(get: { draft.soundPack == pack.id }, set: { _ in draft.soundPack = pack.id }))
             }
             Divider()
@@ -309,12 +317,13 @@ struct NewSessionScreen: View {
         } label: {
             chip(active: chosen != nil) {
                 Image(systemName: "speaker.wave.2").imageScale(.small)
-                Text(chosen?.manifest.displayName ?? "Auto")
+                Text(chosen?.manifest.displayName ?? inherited?.pack.manifest.displayName ?? "Auto")
             }
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help(chosen.map { "This session speaks with \($0.manifest.displayName)" } ?? "Sound pack: \(automatic)")
-        .accessibilityLabel("Sound pack, \(chosen?.manifest.displayName ?? "Automatic")")
+        .help(chosen.map { "This session speaks with \($0.manifest.displayName)" }
+              ?? inherited.map { "\($0.pack.manifest.displayName), from \($0.from)" } ?? "Sound pack: \(automatic)")
+        .accessibilityLabel("Sound pack, \(chosen?.manifest.displayName ?? inherited?.pack.manifest.displayName ?? "Automatic")")
     }
 
     /// Fresh, or a fork of the parent's conversation (ADR-182). A fork keeps the parent's directory.

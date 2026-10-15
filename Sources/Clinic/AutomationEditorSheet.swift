@@ -344,10 +344,18 @@ struct AutomationEditorSheet: View {
             if soundPacks.settings.enabled && soundPacks.installed.count >= 2 {
                 GridRow {
                     Text("Voice").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-                    Picker("", selection: $draft.soundPack) {
-                        Text("Automatic (\(soundPacks.automaticDescription(project: draft.target.soundProject, parent: nil)))").tag(String?.none)
+                    // The project's own pack shows as the selection, not as Automatic (ADR-205).
+                    let inherited = soundPacks.inheritedPack(project: draft.target.soundProject, parent: nil)
+                    Picker("", selection: Binding(
+                        get: { draft.soundPack == inherited?.pack.id ? nil : draft.soundPack },
+                        set: { draft.soundPack = $0 })) {
+                        Text(inherited.map { "\($0.pack.manifest.displayName) (from \($0.from))" }
+                             ?? "Automatic (\(soundPacks.automaticDescription(project: draft.target.soundProject, parent: nil)))")
+                            .tag(String?.none)
                         Divider()
-                        ForEach(soundPacks.installed) { pack in Text(pack.manifest.displayName).tag(Optional(pack.id)) }
+                        ForEach(soundPacks.installed.filter { $0.id != inherited?.pack.id }) { pack in
+                            Text(pack.manifest.displayName).tag(Optional(pack.id))
+                        }
                     }
                     .labelsHidden().controlSize(.large)
                     .help("The pack this automation's runs speak with when they finish or fail, so you can tell which one it was")

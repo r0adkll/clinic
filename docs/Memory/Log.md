@@ -5102,3 +5102,13 @@ the notification sound still plays.
 
 **Verified.** `make test` 691 pass. The editor captured in Clinic Dev with the Voice row. No real scheduled run
 was driven (details in the ADR).
+
+## 2026-10-15 — An inherited pack shows as the selection (ADR-205)
+
+User: *"if a session is inheriting a sound pack from the project (like one explicitly set) then it should just show
+that as selected instead of automatic."* The composer's pill and the automation editor's Voice row now show a
+parent's or project's pack as the ticked selection; the default and the rotation still read Automatic.
+
+**Not verified on screen.** The user had their own Clinic Dev open (pid 39602), so my second instance was quit.
+Before I noticed, I had written a Campfire → GLaDOS project pack into Clinic Dev's `state.json` and
+`ClinicSoundPacks` (default Peon, volume 0.12) into its preferences; the user was told.
