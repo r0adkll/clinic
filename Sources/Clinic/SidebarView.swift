@@ -24,6 +24,8 @@ struct SidebarView: View {
                          help: "Configure the MCP servers your sessions get")
             ScreenNavRow(screen: .automations, icon: "alarm", shortcut: .automations,
                          help: "Prompts that run on a schedule")
+            ScreenNavRow(screen: .sounds, icon: "speaker.wave.2", shortcut: .sounds,
+                         help: "OpenPeon sound packs, and the moments they voice")
             sidebarToolbar
             // The gap above the first project sits outside the scroll view on purpose: as
             // `contentMargins(for: .scrollContent)` it was applied on a later layout pass and popped

@@ -50,9 +50,7 @@ struct RootView: View {
             runSheet = request
         }
         .modifier(TasksRouting(window: window, isActive: isActive))
-        .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
-        .onReceive(NotificationCenter.default.publisher(for: .clinicAutomations)) { _ in if isActive { window.screen = .automations } }
+        .modifier(ScreenRouting(window: window, isActive: isActive))
         .onReceive(NotificationCenter.default.publisher(for: .clinicSessionDetails)) { n in
             guard isActive else { return }
             if let raw = n.object as? String { detailsFor = sessions.sessions[SessionID(raw)] }
@@ -154,6 +152,9 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if window.screen == .automations {
                 AutomationsScreen()
+            } else if window.screen == .sounds {
+                SoundsScreen()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if window.screen == .mcpServers {
                 MCPServersScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -492,5 +493,20 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+/// The View menu's screens (ADR-084, ADR-093, ADR-095, ADR-199), apart from Tasks, which routes itself.
+/// A modifier of its own so the root view's chain stays short enough to type-check.
+private struct ScreenRouting: ViewModifier {
+    let window: WindowState
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .clinicMCPServers)) { _ in if isActive { window.screen = .mcpServers } }
+            .onReceive(NotificationCenter.default.publisher(for: .clinicMarketplace)) { _ in if isActive { window.screen = .marketplace } }
+            .onReceive(NotificationCenter.default.publisher(for: .clinicAutomations)) { _ in if isActive { window.screen = .automations } }
+            .onReceive(NotificationCenter.default.publisher(for: .clinicSounds)) { _ in if isActive { window.screen = .sounds } }
     }
 }

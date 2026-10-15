@@ -24,6 +24,7 @@ struct ClinicApp: App {
                 .environment(appDelegate.marketplace)
                 .environment(appDelegate.mcpServers)
                 .environment(appDelegate.automations)
+                .environment(appDelegate.soundPacks)
                 .environment(appDelegate.tasks)
                 .environment(appDelegate.activities)
                 .environment(appDelegate.tabs.composer)
@@ -70,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let marketplace = MarketplaceModel()
     let mcpServers = MCPServersModel()
     let automations = AutomationsModel()
+    /// OpenPeon sound packs and the lines they play (ADR-199).
+    let soundPacks = SoundPackStore()
     var statusItem: StatusItemController?
     lazy var tabs = TabStore(sessions: sessions, hooks: hooks, notifications: notifications, history: history)
     /// Shares the PR store's `GitHubService`, so `gh` stays one actor with one availability cache (ADR-113).
@@ -154,8 +157,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A watched pull request's verdict reaches the reader the way an agent's does (ADR-128):
         // through TabStore, so it obeys the session's mute and the front-tab rule.
         prs.router = { [weak self] sid, title, body, kind, ref in
+            let witness: SoundWitness? = switch kind {
+            case .checks(let passed): passed ? .checksPassed : .checksFailed
+            default: nil
+            }
             self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body,
-                              kind: kind, pullRequest: ref)
+                              kind: kind, pullRequest: ref, witness: witness)
         }
         prs.start()
         tabs.prs = prs
@@ -199,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.tabs.notify(sid.flatMap { self?.tabs.tab(for: $0) }, sessionId: sid, title: title, body: body, kind: kind)
         }
         tabs.automations = automations
+        tabs.soundPacks = soundPacks
         automations.start(sessions: sessions, settingsFilePath: hooks.settingsFileURL.path,
                           chatsDirectory: SessionStore.chatsDirectory)
         // Starting by hand re-arms the wake agent that an explicit quit switched off.
@@ -214,12 +222,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let id = sessions.state.selectedSessionId, let s = sessions.sessions[id] { tabs.open(session: s) }
             }
         }
-        // `-ClinicScreenOnLaunch tasks|automations|marketplace|mcpServers` (ADR-038): land straight on a
+        // `-ClinicScreenOnLaunch tasks|automations|marketplace|mcpServers|sounds` (ADR-038): land straight on a
         // screen, so a smoke run does not have to synthesise a click into the sidebar.
         if let screen = UserDefaults.standard.string(forKey: "ClinicScreenOnLaunch"), !screen.isEmpty {
             let mapped: WindowState.Screen? = switch screen {
             case "tasks": .tasks
             case "automations": .automations
+            case "sounds": .sounds
             case "marketplace": .marketplace
             case "mcpServers": .mcpServers
             default: nil
@@ -821,6 +830,7 @@ struct ClinicCommands: Commands {
             Button("MCP Servers") { NotificationCenter.default.post(name: .clinicMCPServers, object: nil) }.keyboardShortcut(key(.mcpServers))
             Button("Marketplace") { NotificationCenter.default.post(name: .clinicMarketplace, object: nil) }.keyboardShortcut(key(.marketplace))
             Button("Automations") { NotificationCenter.default.post(name: .clinicAutomations, object: nil) }.keyboardShortcut(key(.automations))
+            Button("Sounds") { NotificationCenter.default.post(name: .clinicSounds, object: nil) }.keyboardShortcut(key(.sounds))
             Toggle("Select Sessions", isOn: Binding(get: { tabs.activeWindow.selectMode }, set: { tabs.activeWindow.selectMode = $0 })).keyboardShortcut(key(.selectSessions))
             Menu("Caffeine") {
                 CaffeineModeItems(caffeine: caffeine)
@@ -903,6 +913,7 @@ extension Notification.Name {
     static let clinicMCPServers = Notification.Name("com.r0adkll.clinic.mcpServers")
     static let clinicMarketplace = Notification.Name("com.r0adkll.clinic.marketplace")
     static let clinicAutomations = Notification.Name("com.r0adkll.clinic.automations")
+    static let clinicSounds = Notification.Name("com.r0adkll.clinic.sounds")
     static let clinicTasks = Notification.Name("com.r0adkll.clinic.tasks")
     /// Object: the `WorkItemRef` to reveal (ADR-114).
     static let clinicShowTask = Notification.Name("com.r0adkll.clinic.showTask")

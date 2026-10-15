@@ -6,7 +6,7 @@ import ClinicCore
 enum ShortcutAction: String, CaseIterable, Identifiable {
     case newSession, newSessionInFolder, newChat, newShell, newWindow, closeTab
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
-    case tasks, mcpServers, marketplace, automations, selectSessions, notifications, caffeine
+    case tasks, mcpServers, marketplace, automations, sounds, selectSessions, notifications, caffeine
     case togglePanel, newTerminal, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
     case togglePanelVisibility, zoomPanel, toggleFileTree, cycleMarkdownView, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
@@ -38,6 +38,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .mcpServers: "MCP Servers"
         case .marketplace: "Marketplace"
         case .automations: "Automations"
+        case .sounds: "Sounds"
         case .selectSessions: "Select Sessions"
         case .notifications: "Notifications"
         case .caffeine: "Turn Caffeine On or Off"
@@ -74,7 +75,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .newSession, .newSessionInFolder, .newChat, .newShell, .newWindow, .closeTab: "File"
         case .renameSession, .toggleFavorite, .archiveSession, .undoArchive, .stopSession, .forkSession, .backgroundSession, .sessionDetails, .replaySession, .jumpToSession, .moveTabToNewWindow: "Session"
-        case .tasks, .mcpServers, .marketplace, .automations, .selectSessions, .notifications, .caffeine: "View"
+        case .tasks, .mcpServers, .marketplace, .automations, .sounds, .selectSessions, .notifications, .caffeine: "View"
         case .togglePanel, .newTerminal, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
              .togglePanelVisibility, .zoomPanel, .toggleFileTree, .cycleMarkdownView, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab,
@@ -109,6 +110,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .mcpServers: "cmd+shift+m"
         case .marketplace: "cmd+opt+m"
         case .automations: "cmd+opt+a"
+        case .sounds: "cmd+opt+s"   // ADR-199
         case .selectSessions: "cmd+shift+s"
         case .notifications: "cmd+shift+b"
         case .caffeine: nil

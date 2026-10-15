@@ -26,6 +26,7 @@ final class WindowState: Identifiable {
         case marketplace   // ADR-084
         case mcpServers    // ADR-093
         case automations   // ADR-095
+        case sounds        // ADR-199
 
         var title: String {
             switch self {
@@ -33,6 +34,7 @@ final class WindowState: Identifiable {
             case .marketplace: "Marketplace"
             case .mcpServers: "MCP Servers"
             case .automations: "Automations"
+            case .sounds: "Sounds"
             }
         }
     }

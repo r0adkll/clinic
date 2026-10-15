@@ -66,16 +66,24 @@ final class SessionReportService {
             let now = Date()
             sessions.update { s in s.addReport(SessionReport(from: child, message: message, at: now, deliveredAt: now), to: parent) }
             cont.resume(returning: message)
+            tabs.voice(.childReported, tab: tabs.tab(for: parent), sessionId: parent)
             Self.log.info("report from \(child.rawValue, privacy: .public) resolved the wait of \(parent.rawValue, privacy: .public)")
             return "Delivered to \"\(parentTitle)\" as the result of its start_session call."
         }
         let report = SessionReport(from: child, message: message)
         sessions.update { s in s.addReport(report, to: parent) }
-        if deliver(report, to: parent) { return "Delivered to \"\(parentTitle)\" as its next prompt." }
+        // Every arrival is voiced (ADR-199); only the one with no tab to show it also notifies.
+        if deliver(report, to: parent) {
+            tabs.voice(.childReported, tab: tabs.tab(for: parent), sessionId: parent)
+            return "Delivered to \"\(parentTitle)\" as its next prompt."
+        }
         let reason = holdReason(parent: parent, child: child)
-        if tabs.tab(for: parent) == nil {
+        if let tab = tabs.tab(for: parent) {
+            tabs.voice(.childReported, tab: tab, sessionId: parent)
+        } else {
             let childTitle = sessions.sessions[child].map(sessions.displayName(for:)) ?? "A child session"
-            tabs.notify(nil, sessionId: parent, title: childTitle, body: "Finished; report waiting for \"\(parentTitle)\"", kind: .finished)
+            tabs.notify(nil, sessionId: parent, title: childTitle, body: "Finished; report waiting for \"\(parentTitle)\"", kind: .finished,
+                        witness: .childReported)
         }
         return "Held: \(reason). Clinic delivers it to \"\(parentTitle)\" as soon as that session can take a prompt."
     }

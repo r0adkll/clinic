@@ -109,7 +109,7 @@ final class MCPToolService {
             let message = args["message"] as? String ?? ""
             let title = args["title"] as? String ?? tab.title
             let lookingAtIt = tabs?.isFrontAndSelected(tab) ?? false
-            tabs?.notify(tab, sessionId: sessionId, title: title, body: message, kind: .needsInput)
+            tabs?.notify(tab, sessionId: sessionId, title: title, body: message, kind: .needsInput, witness: .agentAsked)
             return MCPToolSpec.textResult(lookingAtIt ? "The user is looking at this session; the message was added to their history without a notification." : "Notification delivered.")
 
         case "show_image":
@@ -143,7 +143,7 @@ final class MCPToolService {
             let noun = count == 1 ? "question" : "questions"
             // Same attention path as `notify_user`: an unanswered round is the canonical "needs you".
             tabs?.notify(tab, sessionId: sessionId, title: round.topic ?? tab.title,
-                         body: "\(count) \(noun) waiting in the Grill pane", kind: .needsInput)
+                         body: "\(count) \(noun) waiting in the Grill pane", kind: .needsInput, witness: .agentAsked)
             return MCPToolSpec.textResult("""
                 Posted \(count) \(noun) to the Grill pane. End your turn now — the user's answers \
                 will arrive as their next message. Write the round out in the conversation as well if \

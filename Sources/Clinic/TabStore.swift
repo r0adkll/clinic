@@ -260,6 +260,8 @@ final class TabStore {
     }
     /// Set by the app so the status line's plan windows reach the usage panel (ADR-162).
     weak var usage: UsageService?
+    /// Set by the app: OpenPeon packs voice the moments below, before any notification sound (ADR-199).
+    weak var soundPacks: SoundPackStore?
 
     init(sessions: SessionStore, hooks: HookService, notifications: NotificationService, history: NotificationStore) {
         self.sessions = sessions; self.hooks = hooks; self.notifications = notifications; self.history = history
@@ -272,19 +274,23 @@ final class TabStore {
 
     /// Single router for attention (ADR-066): history always; then by focus — looking at it: nothing more;
     /// app active elsewhere: in-app card (+ sound pref); app inactive: system notification. Muted sessions get history only.
+    ///
+    /// `witness` is what caused it, for the session's sound pack (ADR-199): a pack line, when there is
+    /// one, plays even for the tab on screen, and takes the place of the notification's own sound.
     func notify(_ tab: Tab?, sessionId: SessionID?, title: String, body: String, kind: NotificationStore.Entry.Kind,
-                url: URL? = nil, pullRequest: PullRequestRef? = nil) {
+                url: URL? = nil, pullRequest: PullRequestRef? = nil, witness: SoundWitness? = nil) {
         let entry = history.record(sessionId: sessionId, title: title, body: body, kind: kind, url: url,
                                    pullRequest: pullRequest)
         // What Clinic said and about which session: the history is in memory only, so this is the record.
         Self.log.info("attention for \(sessionId?.rawValue ?? "-", privacy: .public): \(body, privacy: .public)")
         if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return }
+        let voiced = witness.map { voice($0, tab: tab, sessionId: sessionId) } ?? false
         if let tab, isFrontAndSelected(tab) { return }
         if NSApp.isActive {
             history.showCard(entry)
-            sounds.playForCard()
+            if !voiced { sounds.playForCard() }
         } else {
-            let silent = sounds.playForSystemNotification()
+            let silent = voiced || sounds.playForSystemNotification()
             notifications.post(sessionId: sessionId ?? SessionID(UUID().uuidString), title: title, body: body,
                                silent: silent, pullRequest: pullRequest?.url, answerable: kind == .needsPermission)
         }
@@ -292,8 +298,17 @@ final class TabStore {
         updateBadge()
     }
 
-    private func notify(_ tab: Tab, sessionId: SessionID, body: String, kind: NotificationStore.Entry.Kind) {
-        notify(tab, sessionId: sessionId, title: tab.title, body: body, kind: kind)
+    private func notify(_ tab: Tab, sessionId: SessionID, body: String, kind: NotificationStore.Entry.Kind, witness: SoundWitness) {
+        notify(tab, sessionId: sessionId, title: tab.title, body: body, kind: kind, witness: witness)
+    }
+
+    /// Plays the line a pack has for this moment (ADR-199). True when a pack voice covers it, so no
+    /// other sound should. A muted session is never voiced, as it is never notified (ADR-066).
+    @discardableResult
+    func voice(_ witness: SoundWitness, tab: Tab?, sessionId: SessionID?, onScreen: Bool? = nil) -> Bool {
+        guard let soundPacks else { return false }
+        if let sessionId, sessions.state.mutedSessions.contains(sessionId) { return false }
+        return soundPacks.voice(witness, session: sessionId, onScreen: onScreen ?? tab.map(isFrontAndSelected) ?? false)
     }
 
     var selectedTab: Tab? { selectedTab(in: activeWindow) }
@@ -1411,6 +1426,7 @@ final class TabStore {
         if endedTurn, let id = tab.sessionId { reports?.childStopped(id) }
         if event.hookEventName == "SessionEnd", event.reason != "clear", let id = tab.sessionId { reports?.childEnded(id, reason: "its session ended") }
         if event.hookEventName == "SessionEnd", event.reason == "clear" { tab.clearedAt = event.receivedAt }
+        voiceHook(event, tab: tab)
         if event.hookEventName == "SessionEnd", tab.closingGracefully { tab.closingGracefully = false; close(tab, confirm: false); return }
         // A tab that stays after its session ended starts the next one undecided (ADR-190).
         if event.hookEventName == "SessionEnd" { tab.worktreeExitAnswer = nil; tab.worktreeAnsweredAt = nil }
@@ -1436,6 +1452,23 @@ final class TabStore {
         tab.pendingVerdict?.cancel(); tab.pendingVerdict = nil
         transition(tab, to: new, waitingOn: SessionStateMachine.waitingOn(tab.waitingOn, from: old, to: new, event: event),
                    failed: event.hookEventName == "StopFailure", message: event.message)
+    }
+
+    /// The hook witnesses that are not state changes (ADR-199). `/clear` and compaction are not a
+    /// session starting or ending, and a subagent's hooks are its parent's business.
+    private func voiceHook(_ event: HookEvent, tab: Tab) {
+        guard event.agentId == nil else { return }
+        switch event.hookEventName {
+        case "SessionStart" where event.source == "startup" || event.source == "resume":
+            voice(.sessionStarted, tab: tab, sessionId: event.sessionId)
+        case "UserPromptSubmit":
+            voice(.promptSubmitted, tab: tab, sessionId: event.sessionId)
+        case "SessionEnd" where event.reason != "clear":
+            voice(.sessionEnded, tab: tab, sessionId: event.sessionId)
+            soundPacks?.forget(session: event.sessionId)
+        default:
+            break
+        }
     }
 
     // MARK: Answering a permission prompt from Clinic (ADR-180)
@@ -1471,14 +1504,19 @@ final class TabStore {
         tab.waitingOn = waitingOn
         tab.errorBadge = failed
         let isFrontAndSelected = isFrontAndSelected(tab)
+        // The tab on screen is not notified, but its pack still speaks unless told not to (ADR-199).
         if failed {
-            notify(tab, sessionId: sessionId, body: message ?? "The turn ended with an API error", kind: .error)
+            notify(tab, sessionId: sessionId, body: message ?? "The turn ended with an API error", kind: .error, witness: .turnFailed)
         } else if SessionStateMachine.isFinishedEdge(from: old, to: new) {
-            if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: sessionId, body: "Finished", kind: .finished) }
+            if !isFrontAndSelected { tab.unread = true; notify(tab, sessionId: sessionId, body: "Finished", kind: .finished, witness: .turnFinished) }
+            else { voice(.turnFinished, tab: tab, sessionId: sessionId, onScreen: true) }
         } else if new.isWaiting && !old.isWaiting {
+            let permission = new == .waitingForPermission
             if !isFrontAndSelected {
-                let permission = new == .waitingForPermission
-                notify(tab, sessionId: sessionId, body: permission ? "Needs permission" : (message ?? "Waiting for input"), kind: permission ? .needsPermission : .needsInput)
+                notify(tab, sessionId: sessionId, body: permission ? "Needs permission" : (message ?? "Waiting for input"),
+                       kind: permission ? .needsPermission : .needsInput, witness: permission ? .permissionNeeded : .inputNeeded)
+            } else {
+                voice(permission ? .permissionNeeded : .inputNeeded, tab: tab, sessionId: sessionId, onScreen: true)
             }
         }
         updateBadge()

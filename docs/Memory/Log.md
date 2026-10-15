@@ -4990,3 +4990,32 @@ own pane. The session card shows a row per busy shell. Seam: `-ClinicSeveralTerm
 **Verified.** `make test` (654 pass), Clinic Dev build clean, and the seam run in Clinic Dev logged fronting,
 occlusion, name reuse, title collisions and idle/busy routing as intended (table in the ADR). The strip was
 not looked at: screen capture is declined and the process is not trusted for accessibility.
+
+## 2026-10-14 — OpenPeon sound packs, phase 1 (ADR-199)
+
+User: *"Let's build a direct integration with this, https://openpeon.com/, into Clinic. I'm thinking a top tab
+in the sidebar."* A design round of seven questions; the user took every recommendation: a fifth nav row
+*Sounds*; a pack line replaces the notification sound; session > project > rotation > default; packs in
+Clinic's own Application Support with `~/.openpeon` and peon-ping's folder read-only; Clinic-only witnesses
+voiced too; lines play for the tab on screen unless a setting says not to; peon-ping detected and imported.
+
+**Found first.** `AVAudioPlayer` decodes OGG Vorbis on macOS 26. peon-ping reads `CLAUDE_PEON_DIR`, so a
+Clinic-owned folder with `packs/` and `.paused` can silence it in Clinic's sessions alone (read, not run).
+The official packs share one 62 MB tarball, so installs fetch file by file from raw.githubusercontent.
+
+**Built (phase 1).** ClinicCore `Sounds/`: `CESP` (categories, manifest, aliases, path rules),
+`SoundRegistry` (a tolerant index decoder, raw URLs, semver compare), `SoundPackInstaller` (fetch, check,
+stage, swap; scan of the found folders), and `SoundRouter` with `SoundSettings` and `SoundWitness`. App:
+`SoundPackStore` (registry with a cached index, installs, previews, `voice`), `SoundsScreen` (Browse,
+Installed, Events, and a footer), `.sounds` screen and ⌘⌥S, and `TabStore.notify(…, witness:)` plus
+`TabStore.voice`, called from hook start, prompt and end, state transitions, runs, PR checks, child reports,
+`notify_user` and Grill rounds. RootView's screen receivers moved into `ScreenRouting`, because one more
+`.onReceive` put the body past the type-checker.
+
+**Verified.** `make test` 669 pass. The live registry decodes and installs. Clinic Dev with synthetic hooks
+logged every witness as intended (table in the ADR). The screen itself was not looked at (no screen capture,
+no accessibility), so the manual steps are in the ADR. Clinic Dev's `state.json`, its `mcp/` file, its
+`SoundPacks` folder and the `ClinicSoundPacks` default were restored or removed after the run.
+
+**Next.** Phase 2: project and session packs, the rotation, children inheriting, and captions on the card.
+Phase 3: context, plan-window and long-turn witnesses, and peon-ping detection, import and silencing.
