@@ -58,6 +58,8 @@ final class Tab: Identifiable {
     /// The parent to record once a fork learns its id (ADR-181), and whether it reports back (ADR-182).
     @ObservationIgnored var pendingParent: SessionParent?
     @ObservationIgnored var pendingReporting = false
+    /// A fork's sound pack, picked in the composer, held until the CLI reports the fork's id (ADR-202).
+    @ObservationIgnored var pendingSoundPack: String?
     /// Close the tab as soon as `SessionEnd` arrives (graceful close, ADR-063).
     var closingGracefully = false
     /// The answer to press into the CLI's worktree exit dialog once it shows, the task watching the
@@ -480,19 +482,24 @@ final class TabStore {
             closeDraft(d)
             if d.startAsFork {
                 fork(parentSummary, prompt: prompt ?? "", model: d.resolvedModel, effort: d.resolvedEffort, appendSystemPrompt: brief, reporting: d.reportBack)
-                if let t = tabs.last(where: { $0.pendingParent?.id == parentId }) { select(t) }
+                if let t = tabs.last(where: { $0.pendingParent?.id == parentId }) {
+                    t.pendingSoundPack = d.soundPack
+                    select(t)
+                }
             } else {
-                launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: false, worktreeName: nil, worktreeBaseRef: nil,
-                                 effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem,
-                                 parent: SessionParent(id: parentId, kind: .spawn), appendSystemPrompt: brief, reporting: d.reportBack)
+                let id = launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: false, worktreeName: nil, worktreeBaseRef: nil,
+                                          effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem,
+                                          parent: SessionParent(id: parentId, kind: .spawn), appendSystemPrompt: brief, reporting: d.reportBack)
+                assignSoundPack(d.soundPack, to: id)
             }
             return
         }
         let worktree = d.worktree && !SessionStore.isChats(d.projectPath)
         guard worktree, case .branch(let ref) = d.worktreeBase else {
             closeDraft(d)
-            launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: worktree, worktreeName: worktree ? d.worktreeName : nil,
-                             worktreeBaseRef: worktree ? d.worktreeBase.cliBaseRef : nil, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+            let id = launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: worktree, worktreeName: worktree ? d.worktreeName : nil,
+                                      worktreeBaseRef: worktree ? d.worktreeBase.cliBaseRef : nil, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+            assignSoundPack(d.soundPack, to: id)
             return
         }
         d.isStarting = true
@@ -504,13 +511,21 @@ final class TabStore {
                 // Discarded while git ran: the worktree stays, reusable by name, and nothing launches.
                 guard drafts[d.projectPath]?.id == d.id else { return }
                 closeDraft(d)
-                launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: true, worktreeName: plan.name,
-                                 worktreeBaseRef: d.worktreeBase.cliBaseRef, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+                let id = launchNewSession(projectPath: d.projectPath, model: d.resolvedModel, worktree: true, worktreeName: plan.name,
+                                          worktreeBaseRef: d.worktreeBase.cliBaseRef, effort: d.resolvedEffort, prompt: prompt, workItem: d.workItem)
+                assignSoundPack(d.soundPack, to: id)
             } catch {
                 d.isStarting = false
                 d.startError = Self.describeWorktreeFailure(error)
             }
         }
+    }
+
+    /// The composer's pick becomes the session's own pack before its first sound (ADR-202): the id is
+    /// Clinic's from the start (ADR-017), so the SessionStart line is already in its voice.
+    private func assignSoundPack(_ pack: String?, to id: SessionID?) {
+        guard let pack, let id else { return }
+        soundPacks?.setPack(pack, forSession: id)
     }
 
     private func closeDraft(_ d: NewSessionDraft) {
@@ -1406,6 +1421,10 @@ final class TabStore {
                 waiting.pendingParent = nil
                 if waiting.pendingReporting { reports?.arm(child: event.sessionId); reports?.childIdentified(event.sessionId, parent: parent.id) }
                 waiting.pendingReporting = false
+            }
+            if let pack = waiting.pendingSoundPack {
+                soundPacks?.setPack(pack, forSession: event.sessionId)
+                waiting.pendingSoundPack = nil
             }
             var resume = ClaudeLaunch(mode: .resume(id: event.sessionId, fork: false), settingsFilePath: hooks.settingsFileURL.path)
             resume.mcpConfigPath = mcp?.configPath(for: event.sessionId)

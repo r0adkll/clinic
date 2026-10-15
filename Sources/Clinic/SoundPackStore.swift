@@ -317,6 +317,36 @@ final class SoundPackStore {
         choice(for: session).flatMap { installedPack($0.pack) }
     }
 
+    /// What a session about to start in `project` would speak with if left Automatic, in words
+    /// (ADR-202). Nothing is drawn: a rotation is named, not consulted.
+    func automaticDescription(project: String, parent: SessionID?) -> String {
+        if let parent, let choice = choice(for: parent, draw: false) {
+            return "\(installedPack(choice.pack)?.manifest.displayName ?? choice.pack), from its parent"
+        }
+        if let own = sessions?.state.soundPacks.byProject[project], let pack = installedPack(own) {
+            return "\(pack.manifest.displayName), from \((project as NSString).lastPathComponent)"
+        }
+        if settings.rotation.contains(where: { installedPack($0) != nil }) { return "a pack from the rotation" }
+        if let pack = settings.defaultPack.flatMap(installedPack) { return "\(pack.manifest.displayName), the default" }
+        return "silent"
+    }
+
+    /// The pack Automatic would give, when that is knowable before the session draws.
+    func automaticPack(project: String, parent: SessionID?) -> String? {
+        if let parent { return choice(for: parent, draw: false)?.pack }
+        if let own = sessions?.state.soundPacks.byProject[project], installedPack(own) != nil { return own }
+        if settings.rotation.contains(where: { installedPack($0) != nil }) { return nil }
+        return settings.defaultPack.flatMap(installedPack)?.id
+    }
+
+    /// One greeting from a pack, or any line it has, so a choice can be heard before it is made.
+    func hear(_ name: String) {
+        guard let pack = installedPack(name) else { return }
+        let lines = pack.manifest.lines(for: .sessionStart)
+        guard let line = (lines.isEmpty ? pack.manifest.allLines : lines).randomElement() else { return }
+        togglePreview(pack.url(of: line), key: pack.id + "/" + line.path)
+    }
+
     func setPack(_ name: String?, forProject path: String) {
         sessions?.update { $0.soundPacks.byProject[path] = name }
     }

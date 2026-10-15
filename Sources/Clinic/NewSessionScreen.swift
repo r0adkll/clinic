@@ -21,6 +21,9 @@ final class NewSessionDraft: Identifiable {
     /// across launches: the parent's tab and the reason for the child are of the moment.
     var parentId: SessionID?
     var startAsFork = false
+    /// A sound pack picked for this one session (ADR-202). Nil is Automatic. Never remembered for the
+    /// next session: a remembered pick would quietly override the project's pack and the rotation.
+    var soundPack: String?
     var reportBack = true
     /// Clinic is creating the worktree from a named branch; Send is held until it lands (ADR-118).
     var isStarting = false
@@ -47,6 +50,7 @@ struct NewSessionScreen: View {
     @Environment(SessionStore.self) private var sessions
     @Environment(TasksStore.self) private var tasks
     @Environment(ComposerLibraryModel.self) private var library
+    @Environment(SoundPackStore.self) private var soundPacks
     @Bindable var draft: NewSessionDraft
     @FocusState private var focus: Field?
     @State private var branch: String?
@@ -221,6 +225,8 @@ struct NewSessionScreen: View {
             } else if !isChats {
                 worktreeChip
             }
+            // Only where a choice means something: sounds on, and more than one pack to choose from.
+            if soundPacks.settings.enabled && soundPacks.installed.count >= 2 { voiceMenu }
             Spacer(minLength: 4)
             saveButton
             Button { tabs.sendDraft(draft) } label: {
@@ -277,6 +283,38 @@ struct NewSessionScreen: View {
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help("Model")
+    }
+
+    /// The session's sound pack (ADR-202): Automatic, saying what that will be, or one installed pack.
+    private var voiceMenu: some View {
+        let chosen = draft.soundPack.flatMap(soundPacks.installedPack)
+        let automatic = soundPacks.automaticDescription(project: draft.projectPath, parent: draft.parentId)
+        let heard = draft.soundPack ?? soundPacks.automaticPack(project: draft.projectPath, parent: draft.parentId)
+        return Menu {
+            Toggle("Automatic (\(automatic))", isOn: Binding(get: { draft.soundPack == nil }, set: { _ in draft.soundPack = nil }))
+            Divider()
+            ForEach(soundPacks.installed) { pack in
+                Toggle(pack.manifest.displayName, isOn: Binding(get: { draft.soundPack == pack.id }, set: { _ in draft.soundPack = pack.id }))
+            }
+            Divider()
+            Button("Hear It") { if let heard { soundPacks.hear(heard) } }
+                .disabled(heard == nil)
+            if let chosen, !isChats {
+                Button("Use for Every Session in \(project.name)") {
+                    soundPacks.setPack(chosen.id, forProject: draft.projectPath)
+                    draft.soundPack = nil
+                }
+            }
+            Button("Browse Sound Packs…") { NotificationCenter.default.post(name: .clinicSounds, object: nil) }
+        } label: {
+            chip(active: chosen != nil) {
+                Image(systemName: "speaker.wave.2").imageScale(.small)
+                Text(chosen?.manifest.displayName ?? "Auto")
+            }
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help(chosen.map { "This session speaks with \($0.manifest.displayName)" } ?? "Sound pack: \(automatic)")
+        .accessibilityLabel("Sound pack, \(chosen?.manifest.displayName ?? "Automatic")")
     }
 
     /// Fresh, or a fork of the parent's conversation (ADR-182). A fork keeps the parent's directory.

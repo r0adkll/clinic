@@ -5058,3 +5058,17 @@ Rotation* on the pack page, a footer Rotation menu, and captions on history entr
 default) and a rotation draw recorded once in `state.json`. The menus and the caption were not looked at:
 Clinic Dev's window was on another Space. Its four test packs and `ClinicSoundPacks` are left in place for
 that check; its `state.json` was restored.
+
+## 2026-10-14 — A voice pill in the composer (ADR-202)
+
+User: *"Should we let user's pick installed sounds packs in the new session screen?"* I recommended yes with
+constraints (shown only with sounds on and two or more packs; Automatic says what it means; not remembered;
+the same menu as the context menu, plus Hear It and a shortcut to the project's pack). The user: *"Yes, that sgtm!"*
+
+**Built.** `NewSessionDraft.soundPack`, the pill and its menu, `SoundPackStore.automaticDescription`,
+`automaticPack` and `hear`, and `TabStore.assignSoundPack` on every launch path. A fork's pick waits on the
+tab (`pendingSoundPack`) until it is adopted.
+
+**Verified.** Tests and the build pass. The pill was seen in Clinic Dev's Campfire composer by AX and a
+capture. Its menu was not: a background app's SwiftUI menu does not open on an AX press. Manual steps are in the
+ADR. Four test packs and the `ClinicSoundPacks` setting are still in Clinic Dev for that.
