@@ -192,14 +192,15 @@ struct TabFooter: View {
                 .help("Working directory (click to copy): \(pwd)")
             }
             Spacer(minLength: 8)
-            if let percent = tab.statusLine?.contextUsedPercentage {
-                ContextGauge(percent: percent, windowSize: tab.statusLine?.contextWindowSize).fixedSize()
+            if let report = tab.statusLine, report.contextUsedPercentage != nil {
+                ContextMeter(report: report)
             }
         }
         .font(.callout)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        // The bar's height when it held the openers' chips, which it keeps without them (ADR-216).
+        .frame(height: 32)
         .background(.bar)
     }
 

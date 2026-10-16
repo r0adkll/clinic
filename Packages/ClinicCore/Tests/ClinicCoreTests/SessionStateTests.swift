@@ -112,6 +112,25 @@ import Testing
     }
 }
 
+@Suite struct StatusLineContextTests {
+    /// The shape CLI 2.1.301 sends (`context_window` from its `$6e`, `cost` beside it).
+    @Test func theLastRequestAndTheSessionCostAreRead() throws {
+        let json = #"{"hook_event_name":"StatusLine","session_id":"s","context_window":{"total_input_tokens":68200,"total_output_tokens":1100,"context_window_size":200000,"current_usage":{"input_tokens":200,"output_tokens":1100,"cache_creation_input_tokens":7900,"cache_read_input_tokens":60100},"used_percentage":34,"remaining_percentage":66},"cost":{"total_cost_usd":1.23,"total_duration_ms":600000,"total_api_duration_ms":240000,"total_lines_added":120,"total_lines_removed":40}}"#
+        let report = try #require(try HookEvent.decode(Data(json.utf8)).statusLine)
+        #expect(report.contextTokens == 68200)
+        #expect(report.lastRequest == .init(cacheRead: 60100, cacheWrite: 7900, input: 200, output: 1100))
+        #expect(report.cost == .init(usd: 1.23, durationMs: 600000, apiDurationMs: 240000, linesAdded: 120, linesRemoved: 40))
+        // Round-trips through the trace's encoding.
+        #expect(try JSONDecoder().decode(StatusLineReport.self, from: JSONEncoder().encode(report)) == report)
+    }
+
+    @Test func aPayloadWithoutThemLeavesThemNil() throws {
+        let report = try #require(try HookEvent.decode(Data(#"{"hook_event_name":"StatusLine","session_id":"s","context_window":{"used_percentage":5}}"#.utf8)).statusLine)
+        #expect(report.lastRequest == nil)
+        #expect(report.cost == nil)
+    }
+}
+
 @Suite struct ModelSwitchEventTests {
     @Test func theSwitchNamesTheModelTheSessionRunsNow() throws {
         let json = #"{"hook_event_name":"PostModelSwitch","session_id":"11111111-2222-3333-4444-555555555555","from_model":"claude-haiku-4-5-20251001","to_model":"claude-sonnet-5-5","requested_model":"sonnet","source":"command"}"#

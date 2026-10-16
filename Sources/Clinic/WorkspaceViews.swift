@@ -122,3 +122,143 @@ struct StatePill: View {
         }
     }
 }
+
+// MARK: - The footer's context meter (ADR-217)
+
+/// How full the session's context window is, at the footer's trailing end: a bar, the percentage and the
+/// tokens, all from the CLI's status line (ADR-157). Hovering opens a card with what the CLI says about it.
+struct ContextMeter: View {
+    let report: StatusLineReport
+    @State private var hovering = false
+    @State private var showsCard = false
+    @State private var opening: Task<Void, Never>?
+
+    private var percent: Double { max(0, min(100, report.contextUsedPercentage ?? 0)) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ContextBar(percent: percent, width: 64, height: 6)
+            Text("\(Int(percent.rounded(.down)))%").monospacedDigit().foregroundStyle(ContextBar.tint(percent).opacity(percent >= 90 ? 1 : 0.9))
+            if let used = report.contextTokens, let size = report.contextWindowSize {
+                Text("\(TokenCount.short(used)) / \(TokenCount.short(size))").monospacedDigit().foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 6).frame(height: 24)
+        .background(hovering ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onHover { inside in
+            hovering = inside
+            opening?.cancel()
+            if inside {
+                // A short wait, as a tooltip has, so passing the pointer over the footer opens nothing.
+                opening = Task { try? await Task.sleep(for: .milliseconds(350)); if !Task.isCancelled { showsCard = true } }
+            } else {
+                showsCard = false
+            }
+        }
+        .onTapGesture { showsCard.toggle() }
+        .popover(isPresented: $showsCard, arrowEdge: .top) { ContextCard(report: report) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Context \(Int(percent))% used")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default) { showsCard.toggle() }
+    }
+}
+
+/// The context bar: secondary until the window is nearly full, orange from 90 %, where Clinic also voices
+/// the limit (ADR-203).
+struct ContextBar: View {
+    let percent: Double
+    var width: CGFloat
+    var height: CGFloat
+
+    static func tint(_ percent: Double) -> Color { percent >= 90 ? .orange : .secondary }
+
+    var body: some View {
+        Capsule().fill(.quaternary)
+            .frame(width: width, height: height)
+            .overlay(alignment: .leading) {
+                Capsule().fill(Self.tint(percent)).frame(width: max(height, width * percent / 100), height: height)
+            }
+    }
+}
+
+/// What the CLI reports about the session's context and cost. It does not report what fills the context
+/// (system prompt, tools, memory files, messages); `/context` shows that in the terminal, and the card says so.
+private struct ContextCard: View {
+    let report: StatusLineReport
+
+    private var percent: Double { max(0, min(100, report.contextUsedPercentage ?? 0)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Context").font(.headline)
+                    Spacer()
+                    Text("\(Int(percent.rounded(.down)))% used").monospacedDigit().foregroundStyle(ContextBar.tint(percent))
+                }
+                ContextBar(percent: percent, width: 248, height: 8)
+                if let used = report.contextTokens, let size = report.contextWindowSize {
+                    Text("\(TokenCount.short(used)) of \(TokenCount.short(size)) tokens · \(TokenCount.short(max(0, size - used))) left")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            if let last = report.lastRequest {
+                section("Last request") {
+                    row("Read from cache", TokenCount.short(last.cacheRead))
+                    row("Written to cache", TokenCount.short(last.cacheWrite))
+                    row("New input", TokenCount.short(last.input))
+                    row("Reply", TokenCount.short(last.output))
+                }
+            }
+            if let cost = report.cost {
+                section("This session") {
+                    if let usd = cost.usd { row("Cost", usd.formatted(.currency(code: "USD"))) }
+                    if let ms = cost.durationMs {
+                        row("Time", Self.duration(ms) + (cost.apiDurationMs.map { " · \(Self.duration($0)) in the API" } ?? ""))
+                    }
+                    if let added = cost.linesAdded, let removed = cost.linesRemoved { row("Lines", "+\(added)  −\(removed)") }
+                }
+            }
+            Text("What fills the context — system prompt, tools, memory files, messages — isn't reported to Clinic. Type /context in the session to see it.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 276)
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).monospacedDigit().foregroundStyle(.secondary)
+        }
+        .font(.callout)
+    }
+
+    static func duration(_ ms: Int) -> String {
+        let s = ms / 1000
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
+    }
+}
+
+/// "68.2k", "1.1M", "200": tokens the way the CLI writes them.
+enum TokenCount {
+    static func short(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: n % 1_000_000 == 0 ? "%.0fM" : "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: n % 1_000 == 0 ? "%.0fk" : "%.1fk", Double(n) / 1_000) }
+        return "\(n)"
+    }
+}
+

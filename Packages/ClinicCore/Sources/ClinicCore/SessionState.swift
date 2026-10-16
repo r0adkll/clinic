@@ -221,6 +221,12 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
     public var contextUsedPercentage: Double?
     public var contextWindowSize: Int?
     public var contextTokens: Int?
+    /// The last request's input split by the cache, and its reply: what `contextTokens` is made of, as far as
+    /// the CLI says. It does not say what fills the context (system prompt, tools, messages); only `/context`
+    /// does, in the terminal.
+    public var lastRequest: RequestTokens?
+    /// The session so far: what it has cost, how long it and its API calls have taken, and lines changed.
+    public var cost: SessionCost?
     /// "Opus 5".
     public var modelDisplayName: String?
     public var modelId: String?
@@ -230,6 +236,28 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
     /// and sends a window only while its reset is still ahead; per-model weekly limits are never here.
     public var fiveHour: RateWindow?
     public var sevenDay: RateWindow?
+
+    public struct RequestTokens: Sendable, Hashable {
+        public var cacheRead: Int
+        public var cacheWrite: Int
+        public var input: Int
+        public var output: Int
+        public init(cacheRead: Int, cacheWrite: Int, input: Int, output: Int) {
+            self.cacheRead = cacheRead; self.cacheWrite = cacheWrite; self.input = input; self.output = output
+        }
+    }
+
+    public struct SessionCost: Sendable, Hashable {
+        public var usd: Double?
+        public var durationMs: Int?
+        public var apiDurationMs: Int?
+        public var linesAdded: Int?
+        public var linesRemoved: Int?
+        public init(usd: Double? = nil, durationMs: Int? = nil, apiDurationMs: Int? = nil, linesAdded: Int? = nil, linesRemoved: Int? = nil) {
+            self.usd = usd; self.durationMs = durationMs; self.apiDurationMs = apiDurationMs
+            self.linesAdded = linesAdded; self.linesRemoved = linesRemoved
+        }
+    }
 
     /// One plan window as the status line states it.
     public struct RateWindow: Sendable, Hashable {
@@ -248,11 +276,19 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
         self.fiveHour = fiveHour; self.sevenDay = sevenDay
     }
 
-    private enum Keys: String, CodingKey { case contextWindow = "context_window", model, effort, rateLimits = "rate_limits" }
+    private enum Keys: String, CodingKey { case contextWindow = "context_window", model, effort, rateLimits = "rate_limits", cost }
+    private enum UsageKeys: String, CodingKey {
+        case cacheRead = "cache_read_input_tokens", cacheWrite = "cache_creation_input_tokens", input = "input_tokens", output = "output_tokens"
+    }
+    private enum CostKeys: String, CodingKey {
+        case usd = "total_cost_usd", duration = "total_duration_ms", apiDuration = "total_api_duration_ms"
+        case added = "total_lines_added", removed = "total_lines_removed"
+    }
     private enum RateLimitKeys: String, CodingKey { case fiveHour = "five_hour", sevenDay = "seven_day" }
     private enum WindowKeys: String, CodingKey { case usedPercentage = "used_percentage", resetsAt = "resets_at" }
     private enum ContextKeys: String, CodingKey {
         case usedPercentage = "used_percentage", contextWindowSize = "context_window_size", totalInputTokens = "total_input_tokens"
+        case currentUsage = "current_usage"
     }
     private enum ModelKeys: String, CodingKey { case id, displayName = "display_name" }
     private enum EffortKeys: String, CodingKey { case level }
@@ -263,6 +299,17 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
             contextUsedPercentage = try? w.decodeIfPresent(Double.self, forKey: .usedPercentage)
             contextWindowSize = try? w.decodeIfPresent(Int.self, forKey: .contextWindowSize)
             contextTokens = try? w.decodeIfPresent(Int.self, forKey: .totalInputTokens)
+            if let u = try? w.nestedContainer(keyedBy: UsageKeys.self, forKey: .currentUsage) {
+                let n = { (k: UsageKeys) in ((try? u.decodeIfPresent(Int.self, forKey: k)) ?? nil) ?? 0 }
+                lastRequest = RequestTokens(cacheRead: n(.cacheRead), cacheWrite: n(.cacheWrite), input: n(.input), output: n(.output))
+            }
+        }
+        if let k = try? c.nestedContainer(keyedBy: CostKeys.self, forKey: .cost) {
+            cost = SessionCost(usd: (try? k.decodeIfPresent(Double.self, forKey: .usd)) ?? nil,
+                               durationMs: (try? k.decodeIfPresent(Int.self, forKey: .duration)) ?? nil,
+                               apiDurationMs: (try? k.decodeIfPresent(Int.self, forKey: .apiDuration)) ?? nil,
+                               linesAdded: (try? k.decodeIfPresent(Int.self, forKey: .added)) ?? nil,
+                               linesRemoved: (try? k.decodeIfPresent(Int.self, forKey: .removed)) ?? nil)
         }
         if let m = try? c.nestedContainer(keyedBy: ModelKeys.self, forKey: .model) {
             modelId = try? m.decodeIfPresent(String.self, forKey: .id)
@@ -291,6 +338,21 @@ public struct StatusLineReport: Codable, Sendable, Hashable {
         try w.encodeIfPresent(contextUsedPercentage, forKey: .usedPercentage)
         try w.encodeIfPresent(contextWindowSize, forKey: .contextWindowSize)
         try w.encodeIfPresent(contextTokens, forKey: .totalInputTokens)
+        if let lastRequest {
+            var u = w.nestedContainer(keyedBy: UsageKeys.self, forKey: .currentUsage)
+            try u.encode(lastRequest.cacheRead, forKey: .cacheRead)
+            try u.encode(lastRequest.cacheWrite, forKey: .cacheWrite)
+            try u.encode(lastRequest.input, forKey: .input)
+            try u.encode(lastRequest.output, forKey: .output)
+        }
+        if let cost {
+            var k = c.nestedContainer(keyedBy: CostKeys.self, forKey: .cost)
+            try k.encodeIfPresent(cost.usd, forKey: .usd)
+            try k.encodeIfPresent(cost.durationMs, forKey: .duration)
+            try k.encodeIfPresent(cost.apiDurationMs, forKey: .apiDuration)
+            try k.encodeIfPresent(cost.linesAdded, forKey: .added)
+            try k.encodeIfPresent(cost.linesRemoved, forKey: .removed)
+        }
         var m = c.nestedContainer(keyedBy: ModelKeys.self, forKey: .model)
         try m.encodeIfPresent(modelId, forKey: .id)
         try m.encodeIfPresent(modelDisplayName, forKey: .displayName)

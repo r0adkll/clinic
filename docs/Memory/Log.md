@@ -5292,3 +5292,12 @@ across the bottom of the session, under both areas: model ▾, effort ▾ and di
 the trailing end. Checked in a Clinic Dev screenshot with a Haiku session and a shell in the right panel.
 The user had their own Clinic Dev open (started 21:55) when I launched mine. They shared its data directory, so
 my Haiku session landed in theirs. I stopped only my instance.
+
+## 2026-10-15 — The context meter explains itself (ADR-217)
+
+User asked for a taller footer and a bigger context indicator with a hover card, unsure what Claude reports.
+Read the CLI's bundle: the status line carries the last request's cache split and the session's cost, time and
+lines, but not what fills the context (only `/context` has that). The footer is back to 32 pt. `ContextMeter`
+shows bar · % · used / window, and hovering (350 ms) or clicking opens the card. `StatusLineReport` reads the new
+fields, with 2 tests. Checked in Clinic Dev with a Haiku session, the card opened through its accessibility
+action.
