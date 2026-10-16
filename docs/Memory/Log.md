@@ -5234,3 +5234,19 @@ to the previous draft. A switch to a project that isn't a repo also kept the las
 
 **Fixed.** `.id(draft.id)` on the screen, so each draft gets its own view. `make build` passes. Left for the
 user to hand check in Clinic Dev.
+
+## 2026-10-15 — A session is a workspace of tabs (ADR-212)
+
+User asked to replace the all-sessions tab bar plus per-session side panel with a per-session workspace: the
+selected session in the main area as its own tab, any number of session tabs there and in a right panel, and the
+sidebar holding every other session's status.
+
+**Designed, not built.** Three directions mocked on a design canvas from the user's real projects
+(https://claude.ai/artifact/8wdUwg5txLLLaMCd7nEeQM): A, a workspace strip; B, a session header; C, two equal
+groups with a triage sidebar. Two Grill rounds settled it. The user chose B's header, but kept sessions in place
+under projects (not an Open shelf), Claude pinned (not movable) and terminals only inside sessions, against my
+recommendations. Round 2 accepted every recommendation: chord- and agent-opened views go to the right panel, ⌘W
+on Claude closes the session, click still resumes while Replay… opens a session not running, New Shell becomes
+New Terminal Tab, glyph rows on cards, per-session panel visibility with a shared width, and the footer folded
+into the header and tab row. An *After round 1* artboard holds the result. ADR-212 records it with a five-step
+build order.
