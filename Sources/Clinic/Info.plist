@@ -32,5 +32,18 @@
 	<string>© 2026 Drew Heavner. MIT.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Clinic Tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.r0adkll.clinic.pane</string>
+		</dict>
+	</array>
 </dict>
 </plist>

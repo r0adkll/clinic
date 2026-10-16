@@ -5301,3 +5301,12 @@ lines, but not what fills the context (only `/context` has that). The footer is 
 shows bar · % · used / window, and hovering (350 ms) or clicking opens the card. `StatusLineReport` reads the new
 fields, with 2 tests. Checked in Clinic Dev with a Haiku session, the card opened through its accessibility
 action.
+
+## 2026-10-15 — A tab dropped on an area goes there (ADR-218)
+
+User asked for a drop zone at the right edge that shows a drop will open the tab in the right panel. Found that
+ADR-215's text payload would have been pasted into a terminal (surfaces take `.string`). The drag now carries
+`com.r0adkll.clinic.pane`, declared in `project.yml`; editing `Info.plist` directly is undone, because XcodeGen
+writes it. `TabContentView` takes the drop. `PaneDropZones` (ClinicCore, 5 tests) decides between the right edge
+(panel hidden), the panel and the main area. A labelled accent highlight shows the zone. The drag needs a check by
+hand. `make test` 721 pass.

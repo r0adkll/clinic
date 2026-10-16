@@ -777,6 +777,7 @@ final class TabStore {
             tab.pwd = cwd
             tab.pendingInput = initialInput
             surface.delegate = self
+            wirePaneDrops(tab)
             tabs.append(tab)
             refreshFooter(tab)
             if initialInput != nil {
@@ -790,6 +791,20 @@ final class TabStore {
             Self.log.error("surface creation failed: \(error, privacy: .public)")
             lastSurfaceError = "\(error)"
             return nil
+        }
+    }
+
+    /// A tab dropped on an area's content goes there, opening a hidden right panel (ADR-218). Only this
+    /// session's tabs: one dragged from another window's session is refused.
+    private func wirePaneDrops(_ tab: Tab) {
+        tab.contentView.paneArea = { [weak tab] id in
+            guard let tab, let pane = tab.allPanes.first(where: { $0.id == id }) else { return nil }
+            return tab.area(of: pane) == .main ? .main : .right
+        }
+        tab.contentView.onPaneDrop = { [weak self, weak tab] id, area in
+            guard let self, let tab, let pane = tab.allPanes.first(where: { $0.id == id }) else { return false }
+            self.movePane(pane, in: tab, to: area == .main ? .main : .right)
+            return true
         }
     }
 

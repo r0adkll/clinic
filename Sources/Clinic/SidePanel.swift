@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 import ClinicCore
 import GhosttyBridge
 
@@ -300,7 +301,7 @@ struct PaneTabStrip: View {
         // A tab dropped on the strip but not on a chip goes to the end of this area (ADR-215). A chip's
         // own drop target, which puts it before that chip, wins over this one.
         .overlay { if dropTargeted { Color.accent.opacity(0.08).allowsHitTesting(false) } }
-        .dropDestination(for: String.self) { items, _ in
+        .dropDestination(for: PaneDragItem.self) { items, _ in
             PaneDrag.drop(items, in: tab, area: area, before: nil, tabs: tabs)
         } isTargeted: { dropTargeted = $0 }
         .contentShape(Rectangle())
@@ -391,20 +392,27 @@ struct PaneTabStrip: View {
     }
 }
 
-/// Dragging a tab between and within the strips (ADR-215). The payload is the pane's id as text, marked so
-/// that text dragged in from elsewhere is refused rather than read as a tab, and a pane from another
-/// session's workspace is refused too.
-enum PaneDrag {
-    private static let prefix = "clinic-pane:"
+extension UTType {
+    /// A dragged tab (ADR-218). Clinic's own type, so a terminal, which takes dropped text and files, never
+    /// receives one: as text, a tab released over a shell was pasted into it.
+    static let clinicPane = UTType(exportedAs: "com.r0adkll.clinic.pane")
+}
 
-    static func payload(_ pane: PanelPane) -> String { prefix + pane.id.uuidString }
+/// What a dragged tab carries: its pane's id.
+struct PaneDragItem: Codable, Transferable {
+    let id: UUID
+    static var transferRepresentation: some TransferRepresentation { CodableRepresentation(contentType: .clinicPane) }
+}
+
+/// Dragging a tab between and within the strips (ADR-215), and onto an area's content (ADR-218). A pane from
+/// another session's workspace is refused.
+enum PaneDrag {
+    static func payload(_ pane: PanelPane) -> PaneDragItem { PaneDragItem(id: pane.id) }
 
     /// Moves the dragged tab to `area`, before `before` or at the end. True when it was a tab of this session.
     @MainActor
-    static func drop(_ items: [String], in tab: Tab, area: Tab.Area, before: PanelPane?, tabs: TabStore) -> Bool {
-        guard let item = items.first, item.hasPrefix(prefix),
-              let id = UUID(uuidString: String(item.dropFirst(prefix.count))),
-              let pane = tab.allPanes.first(where: { $0.id == id }) else { return false }
+    static func drop(_ items: [PaneDragItem], in tab: Tab, area: Tab.Area, before: PanelPane?, tabs: TabStore) -> Bool {
+        guard let id = items.first?.id, let pane = tab.allPanes.first(where: { $0.id == id }) else { return false }
         tabs.movePane(pane, in: tab, to: area, before: before)
         return true
     }
@@ -482,7 +490,7 @@ struct ClaudeTabChip: View {
         .modifier(TabChipChrome(selected: selected, compact: compact, hovering: $hovering))
         // Claude is pinned: a tab dropped on it lands right after it, first among the others (ADR-215).
         .overlay(alignment: .trailing) { DropMarker(visible: dropTargeted).offset(x: 3) }
-        .dropDestination(for: String.self) { items, _ in
+        .dropDestination(for: PaneDragItem.self) { items, _ in
             PaneDrag.drop(items, in: tab, area: .main, before: tab.main.panes.first, tabs: tabs)
         } isTargeted: { dropTargeted = $0 }
         .onTapGesture { tabs.selectClaude(in: tab) }
@@ -547,7 +555,7 @@ struct SidePanelTabChip: View {
             .background(Color.accent.opacity(0.20), in: RoundedRectangle(cornerRadius: 6))
         }
         .overlay(alignment: .leading) { DropMarker(visible: dropTargeted).offset(x: -3) }
-        .dropDestination(for: String.self) { items, _ in
+        .dropDestination(for: PaneDragItem.self) { items, _ in
             guard let area = tab.area(of: pane) else { return false }
             return PaneDrag.drop(items, in: tab, area: area, before: pane, tabs: tabs)
         } isTargeted: { dropTargeted = $0 }

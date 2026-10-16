@@ -104,6 +104,11 @@ targets:
         NSHumanReadableCopyright: "© 2026 Drew Heavner. MIT."
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleIconName: AppIcon
+        # A dragged tab's own type, so a terminal never takes one as text (ADR-218).
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.r0adkll.clinic.pane
+            UTTypeDescription: Clinic Tab
+            UTTypeConformsTo: [public.data]
   clinic-wake:
     type: tool
     platform: macOS

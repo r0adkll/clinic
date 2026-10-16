@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import ClinicCore
 import GhosttyBridge
+import UniformTypeIdentifiers
 
 /// Persistent AppKit content for one tab (ADR-019 refined): the agent surface lives here for the tab's
 /// whole life and is never re-parented by SwiftUI. The workspace's two areas (ADR-212) — the main area,
@@ -64,9 +65,18 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         set { UserDefaults.standard.set(Double(newValue), forKey: widthKey) }
     }
 
+    /// A dragged tab over the content (ADR-218): which area holds it now, nil for another session's, and the
+    /// move a drop makes. Set by `TabStore`, which owns the panes.
+    var paneArea: ((UUID) -> PaneDropZones.Area?)?
+    var onPaneDrop: ((UUID, PaneDropZones.Area) -> Bool)?
+    private let dropHighlight = DropZoneHighlightView()
+
     init(surface: GhosttySurfaceView) {
         main = PaneHostView(agent: surface)
         super.init(frame: .zero)
+        // The strips take a tab dropped on them; this takes one dropped on an area's content. The surfaces take
+        // text and files, not this type, so the drag passes them up to here.
+        registerForDraggedTypes([NSPasteboard.PasteboardType(UTType.clinicPane.identifier)])
         outer.isVertical = true
         outer.dividerStyle = .thin
         outer.delegate = self
@@ -205,6 +215,43 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         guard outer.arrangedSubviews.count == 2, outer.bounds.width > 0 else { return }
         outer.setPosition(max(leftMin, outer.bounds.width - width - outer.dividerThickness), ofDividerAt: 0)
     }
+
+    // MARK: Dropping a tab on an area (ADR-218)
+
+    private func dragTarget(_ info: NSDraggingInfo) -> (id: UUID, target: PaneDropZones.Target)? {
+        guard let data = info.draggingPasteboard.data(forType: NSPasteboard.PasteboardType(UTType.clinicPane.identifier)),
+              let item = try? JSONDecoder().decode(PaneDragItem.self, from: data),
+              let from = paneArea?(item.id) else { return nil }
+        let p = convert(info.draggingLocation, from: nil)
+        let rect = { (v: NSView) -> PaneDropZones.Rect in
+            let r = v.convert(v.bounds, to: self)
+            return .init(x: r.minX, y: r.minY, width: r.width, height: r.height)
+        }
+        let mainRect = isZoomed ? PaneDropZones.Rect(x: 0, y: 0, width: 0, height: 0) : rect(main)
+        let panelRect = panel.superview != nil ? rect(panel) : nil
+        guard let target = PaneDropZones.target(x: p.x, y: p.y, main: mainRect, panel: panelRect, from: from) else { return nil }
+        return (item.id, target)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let hit = dragTarget(sender) else { dropHighlight.removeFromSuperview(); return [] }
+        let h = hit.target.highlight
+        dropHighlight.show(hit.target.area == .right ? "Open in Right Panel" : "Move Beside Claude",
+                           in: NSRect(x: h.x, y: h.y, width: h.width, height: h.height).insetBy(dx: 6, dy: 6), over: self)
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { dropHighlight.removeFromSuperview() }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { dropHighlight.removeFromSuperview() }
+        guard let hit = dragTarget(sender) else { return false }
+        return onPaneDrop?(hit.id, hit.target.area) ?? false
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) { dropHighlight.removeFromSuperview() }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         max(proposedMinimumPosition, leftMin)
@@ -365,3 +412,38 @@ final class SurfaceHostView: NSView {
         for v in subviews { v.frame = bounds }
     }
 }
+
+/// The zone a dragged tab would drop into (ADR-218): an accent wash with an accent border and what the drop
+/// does, in the middle. It never takes the mouse, so it cannot get in the way of the drag it describes.
+@MainActor
+final class DropZoneHighlightView: NSView {
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.borderWidth = 2
+        label.font = .systemFont(ofSize: 15, weight: .semibold)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: centerXAnchor),
+                                     label.centerYAnchor.constraint(equalTo: centerYAnchor)])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(_ text: String, in rect: NSRect, over host: NSView) {
+        let accent = NSColor.controlAccentColor
+        layer?.backgroundColor = accent.withAlphaComponent(0.14).cgColor
+        layer?.borderColor = accent.withAlphaComponent(0.7).cgColor
+        label.stringValue = text
+        label.textColor = accent
+        frame = rect
+        if superview !== host { host.addSubview(self, positioned: .above, relativeTo: nil) }
+    }
+}
+
