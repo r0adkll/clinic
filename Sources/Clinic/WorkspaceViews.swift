@@ -5,8 +5,9 @@ import ClinicCore
 // MARK: - The main area's strip (ADR-212)
 
 /// The main area's tab row: Claude pinned first, then the tabs the reader added beside it, a `+` that adds
-/// here, and at the trailing end the openers, the zoom and the panel toggle that the footer and the
-/// session tab bar used to carry (ADR-212, over ADR-049 and ADR-079).
+/// here or jumps to any open tab, and at the trailing end the zoom and the panel toggle that the session
+/// tab bar used to carry (ADR-212, over ADR-049 and ADR-079). The footer's openers are not repeated: the
+/// `+` and the chords reach every view (ADR-213).
 struct MainTabStrip: View {
     @Environment(TabStore.self) private var tabs
     @Environment(KeyBindings.self) private var bindings
@@ -35,8 +36,6 @@ struct MainTabStrip: View {
             }
             Spacer(minLength: 8)
             if !tab.isReplay {
-                WorkspaceOpeners(tab: tab)
-                Divider().frame(height: 18).padding(.horizontal, 6)
                 PaneIconButton(symbol: tab.panel.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                help: tab.panel.isZoomed ? "Shrink the panel back beside the session" + bindings.hint(.zoomPanel)
                                                         : "Expand the panel to fill the window" + bindings.hint(.zoomPanel),
@@ -53,7 +52,8 @@ struct MainTabStrip: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// Adds a view beside Claude, or jumps to one already open here.
+    /// Adds a view beside Claude, or jumps to any tab already open, in either area — the one place in
+    /// the main area that lists every view, now that the openers are gone (ADR-213).
     private var addMenu: some View {
         PaneIconMenu(symbol: "plus", help: "Open a view beside Claude") {
             let available = tabs.availablePanes(for: tab)
@@ -70,6 +70,15 @@ struct MainTabStrip: View {
                 Section("Open") {
                     Button { tabs.selectClaude(in: tab) } label: { Label("Claude", systemImage: "sparkle") }
                     ForEach(tab.main.panes) { pane in
+                        Button { tabs.selectPane(pane, in: tab) } label: {
+                            Label { Text(tabs.paneTitle(pane, in: tab)) } icon: { pane.kind.icon }
+                        }
+                    }
+                }
+            }
+            if !tab.panel.panes.isEmpty {
+                Section("In the Right Panel") {
+                    ForEach(tab.panel.panes) { pane in
                         Button { tabs.selectPane(pane, in: tab) } label: {
                             Label { Text(tabs.paneTitle(pane, in: tab)) } icon: { pane.kind.icon }
                         }
@@ -216,78 +225,6 @@ struct PaneGlyph: View {
         } else {
             Image(systemName: pane.kind.symbol).font(.system(size: pane.kind.glyphSize(compact: compact)))
         }
-    }
-}
-
-// MARK: - Openers (ADR-212, the footer's quick actions moved)
-
-/// Terminal, Files and Diff always, then Media, Grill and each pull request once the session has some,
-/// as the footer showed them (ADR-079, ADR-131). Each fronts its view wherever it is open, else opens
-/// it in the right panel. Filled: on screen. Outlined: open behind another tab. Plain: not open.
-struct WorkspaceOpeners: View {
-    @Environment(TabStore.self) private var tabs
-    @Environment(SessionStore.self) private var sessions
-    @Environment(PRStore.self) private var prs
-    @Environment(KeyBindings.self) private var bindings
-    let tab: Tab
-
-    var body: some View {
-        HStack(spacing: 2) {
-            opener(.terminal, "Terminal", .togglePanel)
-            opener(.files, "Files", .toggleEditor)
-            opener(.diff, "Diff", .toggleDiffPage)
-            if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
-                opener(.attachments, "Media", .toggleAttachments)
-            }
-            if let id = tab.sessionId, !sessions.grillRounds(for: id).isEmpty {
-                OpenerButton(help: "Grill — the agent's questions" + bindings.hint(.toggleGrill),
-                             front: tab.isFront(.grill), open: tab.isOpen(.grill), action: { tabs.toggleGrill(tab) }) {
-                    Image(systemName: PanelPane.Kind.grill.symbol).font(.system(size: 12))
-                }
-            }
-            ForEach(prs.ordered(tabs.pullRequests(for: tab))) { ref in
-                OpenerButton(help: "Pull request " + ref.codeHost.reference(ref.number), front: tab.isFront(.pr(ref)),
-                             open: tab.isOpen(.pr(ref)), action: { tabs.togglePRPage(tab, ref: ref) }) {
-                    HStack(spacing: 3) {
-                        PRTabGlyph(ref: ref, size: PRStyle.glyphSize.tab)
-                        Text(ref.codeHost.reference(ref.number)).font(.callout).monospacedDigit()
-                    }
-                }
-            }
-        }
-    }
-
-    private func opener(_ kind: PanelPane.Kind, _ title: String, _ action: ShortcutAction) -> some View {
-        OpenerButton(help: title + bindings.hint(action), front: tab.isFront(kind), open: tab.isOpen(kind),
-                     action: { tabs.showPane(kind, in: tab) }) {
-            Image(systemName: kind.symbol).font(.system(size: 12))
-        }
-    }
-}
-
-/// One opener: glyph-sized, with ADR-079's three states.
-private struct OpenerButton<Label: View>: View {
-    let help: String
-    let front: Bool
-    let open: Bool
-    let action: () -> Void
-    @ViewBuilder let label: Label
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            label
-                .padding(.horizontal, 6)
-                .frame(minWidth: 26, minHeight: 24)
-                .background(front ? Color.accent.opacity(0.18) : hovering ? Color.primary.opacity(0.08) : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !front ? Color.accent.opacity(0.4) : .clear))
-                .foregroundStyle(front ? Color.accent : Color.secondary)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(help)
     }
 }
 

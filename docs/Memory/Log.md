@@ -5263,3 +5263,9 @@ launch crash); an `@Observable` property assigned its own value in `didSet` recu
 `.toolbar(removing: .title)` left-aligns every control; a set window title is drawn whatever `titleVisibility`
 says; and a wide header pushes the controls into overflow. All are fixed and recorded in ADR-212's *as built*
 section. `make test` passes. Checks that need several sessions, windows, runs or PRs are left for the user.
+
+## 2026-10-15 — The `+` menu replaces the openers (ADR-213)
+
+After trying step 1, the user asked to drop the Terminal / Files / Diff openers from the end of the main tab
+row and reach every view from `+`. Done. The main `+` also lists the right panel's tabs, so it can jump to a
+view that is already open there. Zoom and the panel toggle stay.
