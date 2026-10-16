@@ -5222,3 +5222,15 @@ actions' clicks are left to a manual check.
 
 **Follow-up.** User checked the actions' clicks and the Run and Move to Group menus by hand: *"Okay, that all
 checked out"*.
+
+## 2026-10-15 — New-session screen sent to the wrong project
+
+User reported that hopping between projects' new-session screens sometimes started the typed prompt in the
+other project.
+
+**Cause.** `RootView` hosted `NewSessionScreen(draft:)` in one place for every draft, so SwiftUI kept one view
+across projects. The `TextEditor`'s text view, the ⌘↩ handler and the screen's git `@State` could stay bound
+to the previous draft. A switch to a project that isn't a repo also kept the last repo's branches.
+
+**Fixed.** `.id(draft.id)` on the screen, so each draft gets its own view. `make build` passes. Left for the
+user to hand check in Clinic Dev.

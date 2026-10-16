@@ -159,7 +159,10 @@ struct DetailView: View {
                 MCPServersScreen()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let draft = window.editingDraft {
+                // One view per draft: reused across projects, the editor and ⌘↩ kept writing to and
+                // sending the previous project's draft, and its git state outlived a switch to a non-repo.
                 NewSessionScreen(draft: draft)
+                    .id(draft.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
             } else if mine.isEmpty {
                 HomeScreen()
