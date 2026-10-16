@@ -5332,3 +5332,9 @@ Step 3 of ADR-212. The shell tab kind is removed. ⌘T is New Terminal Tab in th
 there is none, and the clone sheet always hands off. A run with no session runs without a pane. Replays are hosted
 as workspaces, the transcript in the main area, with a Resume button in the header that swaps in the running
 session. Checked in Clinic Dev: replay, Resume and New Terminal Tab.
+
+## 2026-10-16 — A card shows its workspace (ADR-222)
+
+Step 4 of ADR-212. Open cards gain `WorkspaceGlyphs`, the main area's tabs, a divider, then the panel's, each
+clickable, and nothing while Claude is alone. The existing hover ✕ is relabelled *Close Session*. Checked in Clinic
+Dev.

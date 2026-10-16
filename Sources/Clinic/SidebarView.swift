@@ -565,7 +565,7 @@ struct SessionHoverActions: View {
         let archived = sessions.isArchived(summary.id), starred = sessions.isFavorite(summary.id)
         HStack(spacing: 0) {
             if let tab, tab.isRunningClaude { RowAction("stop.fill", help: "Stop") { tabs.stopSession(tab) } }
-            if let tab { RowAction("xmark", help: "Close Tab") { tabs.close(tab) } }
+            if let tab { RowAction("xmark", help: tab.isReplay ? "Close Replay" : "Close Session") { tabs.close(tab) } }
             RowAction(starred ? "star.slash" : "star", help: starred ? "Remove from Favorites" : "Add to Favorites") {
                 sessions.toggleFavorite(summary.id)
             }

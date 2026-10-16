@@ -252,6 +252,7 @@ struct SessionCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 header
                 meta
+                if let tab { WorkspaceGlyphs(tab: tab).padding(.leading, Self.textInset) }
                 nowLine
                 children
             }
@@ -658,3 +659,44 @@ struct ContextGauge: View {
         .accessibilityLabel("Context \(shown)% used")
     }
 }
+
+/// What an open session's workspace holds, on its card (ADR-222): a glyph per tab beside Claude, a divider, then
+/// the right panel's while it shows. The tab in front of each area is drawn in the label colour, the rest
+/// dimmer. A glyph goes to its tab. Nothing is drawn while Claude is alone.
+struct WorkspaceGlyphs: View {
+    @Environment(TabStore.self) private var tabs
+    let tab: Tab
+
+    var body: some View {
+        let main = tab.main.panes
+        let right = tab.panel.isVisible ? tab.panel.panes : []
+        if !main.isEmpty || !right.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(main) { glyph($0, front: $0.id == tab.main.selectedId) }
+                if !main.isEmpty, !right.isEmpty {
+                    Rectangle().fill(.quaternary).frame(width: 1, height: 10)
+                }
+                ForEach(right) { glyph($0, front: $0.id == tab.panel.selectedId) }
+            }
+            .font(.caption)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Tabs")
+        }
+    }
+
+    private func glyph(_ pane: PanelPane, front: Bool) -> some View {
+        Button {
+            tabs.select(tab)
+            tabs.selectPane(pane, in: tab)
+        } label: {
+            PaneGlyph(tab: tab, pane: pane, compact: false)
+                .foregroundStyle(front ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                .frame(minWidth: 12, minHeight: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tabs.paneTitle(pane, in: tab) + (tab.area(of: pane) == .right ? " · right panel" : ""))
+        .accessibilityLabel(tabs.paneTitle(pane, in: tab))
+    }
+}
+
