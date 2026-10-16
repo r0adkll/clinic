@@ -1230,13 +1230,15 @@ final class TabStore {
         for pane in tab.group(area).panes where pane.id != keep.id { closePane(pane, in: tab) }
     }
 
-    /// A tab's move button or *Move to …*: the same pane, with its state, in the other area (ADR-212).
-    func movePane(_ pane: PanelPane, in tab: Tab) {
-        guard let from = tab.area(of: pane) else { return }
-        let to: Tab.Area = from == .main ? .right : .main
+    /// *Move to …* or a drop (ADR-212, ADR-215): the same pane, with its state, in `area` — the other one when
+    /// none is given — before `before`, or at the end. Dropped within its own strip, this reorders it.
+    func movePane(_ pane: PanelPane, in tab: Tab, to area: Tab.Area? = nil, before: PanelPane? = nil) {
+        guard let from = tab.area(of: pane), before?.id != pane.id else { return }
+        let to = area ?? (from == .main ? .right : .main)
         tab.group(from).detach(pane)
-        tab.group(to).append(pane)
-        tab.group(to).isVisible = true
+        let target = tab.group(to)
+        target.insert(pane, at: before.flatMap { b in target.panes.firstIndex { $0.id == b.id } } ?? target.panes.count)
+        target.isVisible = true
         tab.focusedArea = to
         focusPanel(tab)
     }

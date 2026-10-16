@@ -180,6 +180,12 @@ final class SidePanel {
         return pane
     }
 
+    /// Puts a pane at a position in the strip, for a drop between two tabs (ADR-215).
+    func insert(_ pane: PanelPane, at index: Int, select: Bool = true) {
+        panes.insert(pane, at: min(max(0, index), panes.count))
+        if select { selectedId = pane.id }
+    }
+
     func select(_ pane: PanelPane) {
         selectedId = pane.id
         isVisible = true
@@ -258,6 +264,7 @@ struct PaneTabStrip: View {
     @Environment(KeyBindings.self) private var bindings
     let tab: Tab
     let area: Tab.Area
+    @State private var dropTargeted = false
 
     private var group: SidePanel { tab.group(area) }
 
@@ -290,6 +297,12 @@ struct PaneTabStrip: View {
         .padding(.horizontal, PaneMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(.bar)
+        // A tab dropped on the strip but not on a chip goes to the end of this area (ADR-215). A chip's
+        // own drop target, which puts it before that chip, wins over this one.
+        .overlay { if dropTargeted { Color.accent.opacity(0.08).allowsHitTesting(false) } }
+        .dropDestination(for: String.self) { items, _ in
+            PaneDrag.drop(items, in: tab, area: area, before: nil, tabs: tabs)
+        } isTargeted: { dropTargeted = $0 }
         .contentShape(Rectangle())
         // ⇧-click anywhere the chips are not hides the panel (ADR-130): the same gesture that closes
         // a tab, aimed at the strip, closes the thing the strip belongs to. A plain click on the bar
@@ -378,6 +391,37 @@ struct PaneTabStrip: View {
     }
 }
 
+/// Dragging a tab between and within the strips (ADR-215). The payload is the pane's id as text, marked so
+/// that text dragged in from elsewhere is refused rather than read as a tab, and a pane from another
+/// session's workspace is refused too.
+enum PaneDrag {
+    private static let prefix = "clinic-pane:"
+
+    static func payload(_ pane: PanelPane) -> String { prefix + pane.id.uuidString }
+
+    /// Moves the dragged tab to `area`, before `before` or at the end. True when it was a tab of this session.
+    @MainActor
+    static func drop(_ items: [String], in tab: Tab, area: Tab.Area, before: PanelPane?, tabs: TabStore) -> Bool {
+        guard let item = items.first, item.hasPrefix(prefix),
+              let id = UUID(uuidString: String(item.dropFirst(prefix.count))),
+              let pane = tab.allPanes.first(where: { $0.id == id }) else { return false }
+        tabs.movePane(pane, in: tab, to: area, before: before)
+        return true
+    }
+}
+
+/// Where a dragged tab will land: a short accent bar at the edge of the chip it would go beside.
+private struct DropMarker: View {
+    let visible: Bool
+
+    var body: some View {
+        Capsule().fill(Color.accent)
+            .frame(width: 2, height: 18)
+            .opacity(visible ? 1 : 0)
+            .allowsHitTesting(false)
+    }
+}
+
 /// The chip every tab strip draws (ADR-104): a resting fill on every chip, hover a shade deeper, the
 /// selected one in the accent with an accent border. In the compact form a chip without its fill is
 /// indistinguishable from a toolbar glyph, and the strip stops reading as a row of tabs at all.
@@ -416,6 +460,7 @@ struct ClaudeTabChip: View {
     let selected: Bool
     var compact = false
     @State private var hovering = false
+    @State private var dropTargeted = false
 
     private var title: String {
         if tab.isReplay { return "Replay" }
@@ -435,6 +480,11 @@ struct ClaudeTabChip: View {
             }
         }
         .modifier(TabChipChrome(selected: selected, compact: compact, hovering: $hovering))
+        // Claude is pinned: a tab dropped on it lands right after it, first among the others (ADR-215).
+        .overlay(alignment: .trailing) { DropMarker(visible: dropTargeted).offset(x: 3) }
+        .dropDestination(for: String.self) { items, _ in
+            PaneDrag.drop(items, in: tab, area: .main, before: tab.main.panes.first, tabs: tabs)
+        } isTargeted: { dropTargeted = $0 }
         .onTapGesture { tabs.selectClaude(in: tab) }
         .help(compact ? title : "")
         .accessibilityElement(children: .ignore)
@@ -457,9 +507,10 @@ struct SidePanelTabChip: View {
     let selected: Bool
     var compact = false
     @State private var hovering = false
+    @State private var dropTargeted = false
 
     private var title: String { tabs.paneTitle(pane, in: tab) }
-    /// Whether this tab is in the main area, which decides which way its move button points (ADR-212).
+    /// Whether this tab is in the main area, which names its menu's *Move to …* (ADR-212).
     private var inMain: Bool { tab.area(of: pane) == .main }
 
     var body: some View {
@@ -468,26 +519,38 @@ struct SidePanelTabChip: View {
                 .frame(width: 16)
             if !compact {
                 Text(title).font(.callout).lineLimit(1)
-                // Always laid out, only faded in: buttons that appear on hover must not reflow the chip
-                // they belong to.
-                Group {
-                    TabMoveButton(toRight: inMain) { tabs.movePane(pane, in: tab) }
-                    Button { tabs.closePane(pane, in: tab) } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .frame(width: 18, height: 18)
-                            .contentShape(Rectangle())
-                            .background(hovering ? Color.primary.opacity(0.10) : .clear,
-                                        in: RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close \(title)")
-                    .help("Close this tab" + (selected && !inMain ? " (⌘⌃W)" : "") + ", or ⇧-click the tab")
+                // Always laid out, only faded in: a close button that appears on hover must not reflow
+                // the chip it belongs to.
+                Button { tabs.closePane(pane, in: tab) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                        .background(hovering ? Color.primary.opacity(0.10) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 4))
                 }
+                .buttonStyle(.plain)
                 .opacity(hovering || selected ? 1 : 0)
+                .accessibilityLabel("Close \(title)")
+                .help("Close this tab" + (selected && !inMain ? " (⌘⌃W)" : "") + ", or ⇧-click the tab")
             }
         }
         .modifier(TabChipChrome(selected: selected, compact: compact, hovering: $hovering))
+        // Dragged to another place in this strip, or to the other area's strip, the tab moves there with
+        // its state; dropped on this chip, a tab lands before it (ADR-215).
+        .draggable(PaneDrag.payload(pane)) {
+            HStack(spacing: 5) {
+                PaneGlyph(tab: tab, pane: pane, compact: false)
+                Text(title).font(.callout).lineLimit(1)
+            }
+            .padding(.horizontal, 8).frame(height: 24)
+            .background(Color.accent.opacity(0.20), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .overlay(alignment: .leading) { DropMarker(visible: dropTargeted).offset(x: -3) }
+        .dropDestination(for: String.self) { items, _ in
+            guard let area = tab.area(of: pane) else { return false }
+            return PaneDrag.drop(items, in: tab, area: area, before: pane, tabs: tabs)
+        } isTargeted: { dropTargeted = $0 }
         // ⇧-click closes (ADR-130). A pane closes without asking — nothing is running in it that the
         // tab does not already own — and this is the compact chip's only pointer-driven close, since
         // there is no room there for an ✕.
@@ -498,7 +561,7 @@ struct SidePanelTabChip: View {
         // The compact chip has no room for its name, so the tooltip is where the name lives.
         .help(compact ? title + " — ⇧-click to close" : "")
         .contextMenu {
-            // Any tab can sit in either area (ADR-212).
+            // Any tab can sit in either area (ADR-212). The menu is the way there without dragging (ADR-215).
             Button(inMain ? "Move to Right Panel" : "Move to Main Area") { tabs.movePane(pane, in: tab) }
             Divider()
             Button("Close") { tabs.closePane(pane, in: tab) }

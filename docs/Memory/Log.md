@@ -5276,3 +5276,11 @@ User found the main area's underlined tabs inconsistent with the panel's chips, 
 Terminal row doing nothing while a terminal was open beside Claude. Both areas now share `PaneTabStrip` and one
 chip (`TabChipChrome`), with Claude as a pinned chip. The empty panel's rows add into the panel. Checked in
 Clinic Dev: with Terminal and Files beside Claude, the empty panel's Terminal opened *Terminal 2* in the panel.
+
+## 2026-10-15 — Tabs move by dragging (ADR-215)
+
+User found the per-tab move buttons bloated the chips and asked for drag and drop. The buttons are gone. A chip
+drags onto another chip (lands before it), onto a strip's empty space (goes to the end) or onto Claude's chip
+(goes first). That covers moving between the areas and reordering. *Move to …* stays in the chip's menu.
+Could not be driven: `CGPreflightPostEventAccess()` is false for this session, so synthetic clicks and drags
+were dropped silently. A hand check is written into the ADR.

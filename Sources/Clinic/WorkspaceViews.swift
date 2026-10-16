@@ -4,25 +4,6 @@ import ClinicCore
 
 // MARK: - Tab pieces shared by the strips (ADR-212)
 
-/// A tab's own move button (ADR-212): the same pane, with its state, in the other area.
-struct TabMoveButton: View {
-    /// From the main area to the right panel, or back.
-    let toRight: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: toRight ? "arrow.right.to.line" : "arrow.left.to.line")
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: 16, height: 16)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(toRight ? "Move to Right Panel" : "Move to Main Area")
-        .help(toRight ? "Move this tab to the right panel" : "Move this tab beside Claude")
-    }
-}
-
 /// A pane's glyph in a strip: a PR's service glyph with its state, a run's status, else its symbol.
 struct PaneGlyph: View {
     @Environment(TabStore.self) private var tabs
