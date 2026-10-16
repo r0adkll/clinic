@@ -5269,3 +5269,10 @@ section. `make test` passes. Checks that need several sessions, windows, runs or
 After trying step 1, the user asked to drop the Terminal / Files / Diff openers from the end of the main tab
 row and reach every view from `+`. Done. The main `+` also lists the right panel's tabs, so it can jump to a
 view that is already open there. Zoom and the panel toggle stay.
+
+## 2026-10-15 — Every area draws the panel's tab chips (ADR-214)
+
+User found the main area's underlined tabs inconsistent with the panel's chips, and the empty panel's
+Terminal row doing nothing while a terminal was open beside Claude. Both areas now share `PaneTabStrip` and one
+chip (`TabChipChrome`), with Claude as a pinned chip. The empty panel's rows add into the panel. Checked in
+Clinic Dev: with Terminal and Files beside Claude, the empty panel's Terminal opened *Terminal 2* in the panel.

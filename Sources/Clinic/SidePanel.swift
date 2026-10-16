@@ -249,12 +249,17 @@ private extension Array {
 
 // MARK: - Chrome
 
-/// Tab strip above the right panel's content: one chip per pane and a menu of everything else (ADR-079,
-/// sized and made adaptive by ADR-104). The panel's show/hide lives in the main area's strip (ADR-212).
-struct SidePanelTabBar: View {
+/// Tab strip above one of the workspace's areas (ADR-212): one chip per pane and a menu of everything else
+/// (ADR-079, sized and made adaptive by ADR-104). Every area draws the same strip (ADR-214). The main area's
+/// pins Claude first and carries the zoom and the panel toggle at its trailing end; the right panel's
+/// carries the unzoom while it is zoomed over the main area.
+struct PaneTabStrip: View {
     @Environment(TabStore.self) private var tabs
     @Environment(KeyBindings.self) private var bindings
     let tab: Tab
+    let area: Tab.Area
+
+    private var group: SidePanel { tab.group(area) }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -270,23 +275,17 @@ struct SidePanelTabBar: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         chips(compact: true)
                     }
-                    // ⌘⌃] and the footer quick actions change the selection from outside the strip;
-                    // without this the tab they select can be off the end of a scrolled strip.
-                    .onChange(of: tab.panel.selectedId) {
-                        guard let id = tab.panel.selectedId else { return }
+                    // Chords and the other strip's move button change the selection from outside this
+                    // strip; without this the tab they select can be off the end of a scrolled strip.
+                    .onChange(of: group.selectedId) {
+                        guard let id = group.selectedId else { return }
                         withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             addMenu
-            // Zoomed, the panel covers the main area and its strip, where the zoom button lives, so the
-            // way back is here too (ADR-212).
-            if tab.panel.isZoomed {
-                PaneIconButton(symbol: "arrow.down.right.and.arrow.up.left",
-                               help: "Shrink the panel back beside the session" + bindings.hint(.zoomPanel),
-                               isOn: true) { tabs.togglePanelZoom(tab) }
-            }
+            trailing
         }
         .padding(.horizontal, PaneMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -294,15 +293,17 @@ struct SidePanelTabBar: View {
         .contentShape(Rectangle())
         // ⇧-click anywhere the chips are not hides the panel (ADR-130): the same gesture that closes
         // a tab, aimed at the strip, closes the thing the strip belongs to. A plain click on the bar
-        // still does nothing. The strip only exists while the panel shows, so this is hide, not toggle.
-        .onTapGesture { if NSEvent.modifierFlags.contains(.shift) { tabs.hidePanel(tab) } }
+        // still does nothing. The main area does not hide, so its strip ignores the gesture.
+        .onTapGesture { if area == .right, NSEvent.modifierFlags.contains(.shift) { tabs.hidePanel(tab) } }
     }
 
     private func chips(compact: Bool) -> some View {
         HStack(spacing: 4) {
-            ForEach(tab.panel.panes) { pane in
-                SidePanelTabChip(tab: tab, pane: pane,
-                                 selected: pane.id == tab.panel.selectedId, compact: compact)
+            if area == .main {
+                ClaudeTabChip(tab: tab, selected: group.selectedId == nil, compact: compact)
+            }
+            ForEach(group.panes) { pane in
+                SidePanelTabChip(tab: tab, pane: pane, selected: pane.id == group.selectedId, compact: compact)
                     .id(pane.id)
             }
         }
@@ -312,43 +313,143 @@ struct SidePanelTabBar: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    /// Add a view, or jump to one that is already open.
+    @ViewBuilder
+    private var trailing: some View {
+        if area == .main, !tab.isReplay {
+            Divider().frame(height: 16)
+            PaneIconButton(symbol: tab.panel.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                           help: tab.panel.isZoomed ? "Shrink the panel back beside the session" + bindings.hint(.zoomPanel)
+                                                    : "Expand the panel to fill the window" + bindings.hint(.zoomPanel),
+                           isOn: tab.panel.isZoomed) { tabs.togglePanelZoom(tab) }
+            PaneIconButton(symbol: "sidebar.right",
+                           help: tab.panel.isVisible ? "Hide the right panel" + bindings.hint(.togglePanelVisibility) + ", or ⇧-click its tab bar"
+                                                     : "Show the right panel" + bindings.hint(.togglePanelVisibility),
+                           isOn: tab.panel.isVisible) { tabs.togglePanelVisibility(tab) }
+        } else if area == .right, tab.panel.isZoomed {
+            // Zoomed, the panel covers the main area and its strip, where the zoom button lives, so the
+            // way back is here too (ADR-212).
+            PaneIconButton(symbol: "arrow.down.right.and.arrow.up.left",
+                           help: "Shrink the panel back beside the session" + bindings.hint(.zoomPanel),
+                           isOn: true) { tabs.togglePanelZoom(tab) }
+        }
+    }
+
+    /// Add a view to this area, or jump to a tab already open in either.
     ///
-    /// It lists the open panes as well as the addable kinds, which makes it the strip's overflow
-    /// list: in the compact form the chips are glyphs, and this is where their names are. It is
-    /// therefore never disabled — the old menu emptied itself once all five kinds were open and sat
-    /// there greyed out, explaining nothing (ADR-104).
+    /// It lists the open tabs as well as the addable kinds, which makes it the strip's overflow list:
+    /// in the compact form the chips are glyphs, and this is where their names are. It is therefore
+    /// never disabled (ADR-104). The main area's is also where every view is reached, now that the
+    /// openers are gone (ADR-213).
     private var addMenu: some View {
-        PaneIconMenu(symbol: "plus", help: "Open a view in this panel") {
+        PaneIconMenu(symbol: "plus", help: area == .main ? "Open a view beside Claude" : "Open a view in this panel") {
             let available = tabs.availablePanes(for: tab)
             if !available.isEmpty {
                 Section("Add") {
                     ForEach(available, id: \.self) { kind in
-                        // A kind already open here that allows several adds another, named as such (ADR-198).
-                        Button { tabs.addPane(kind, in: tab) } label: {
+                        // A kind already open that allows several adds another, named as such (ADR-198).
+                        Button { tabs.addPane(kind, in: tab, area: area) } label: {
                             Label { Text(tab.isOpen(kind) ? "New " + kind.defaultTitle + " Tab" : tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
                         }
                     }
                 }
             }
-            if !tab.panel.panes.isEmpty {
+            let here = group.panes
+            if area == .main || !here.isEmpty {
                 Section("Open") {
-                    ForEach(tab.panel.panes) { pane in
-                        Button { tabs.selectPane(pane, in: tab) } label: {
-                            Label { Text(tabs.paneTitle(pane, in: tab)) } icon: { pane.kind.icon }
-                        }
+                    if area == .main {
+                        Button { tabs.selectClaude(in: tab) } label: { Label("Claude", systemImage: "sparkle") }
                     }
+                    paneButtons(here)
                 }
+            }
+            let other = tab.group(area == .main ? .right : .main).panes
+            if !other.isEmpty {
+                Section(area == .main ? "In the Right Panel" : "In the Main Area") { paneButtons(other) }
+            }
+        }
+    }
+
+    private func paneButtons(_ panes: [PanelPane]) -> some View {
+        ForEach(panes) { pane in
+            Button { tabs.selectPane(pane, in: tab) } label: {
+                Label { Text(tabs.paneTitle(pane, in: tab)) } icon: { pane.kind.icon }
             }
         }
     }
 }
 
-/// One tab in the strip. Two forms of the same chip: labelled, and glyph-only for a narrow panel.
-///
-/// Every chip carries a resting fill, not only the selected one. In the compact form a chip without
-/// one is indistinguishable from a toolbar glyph, and the strip stops reading as a row of tabs at all
-/// (ADR-104).
+/// The chip every tab strip draws (ADR-104): a resting fill on every chip, hover a shade deeper, the
+/// selected one in the accent with an accent border. In the compact form a chip without its fill is
+/// indistinguishable from a toolbar glyph, and the strip stops reading as a row of tabs at all.
+private struct TabChipChrome: ViewModifier {
+    let selected: Bool
+    let compact: Bool
+    @Binding var hovering: Bool
+
+    private var fill: Color {
+        if selected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }
+        if hovering { return Color.primary.opacity(0.11) }
+        return Color.primary.opacity(0.05)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.leading, compact ? 6 : 8)
+            .padding(.trailing, compact ? 6 : 4)
+            .frame(height: 24)
+            .frame(maxWidth: compact ? nil : 200)
+            .background(fill, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? Color.accent.opacity(0.55) : .clear))
+            .foregroundStyle(selected ? Color.accent : Color.primary)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.1), value: hovering)
+    }
+}
+
+/// The main area's pinned Claude chip (ADR-212): the session's state glyph and *Claude*. It has no close
+/// button, because closing it is closing the session, which the header's menu and ⌘W do through the close
+/// sheet.
+struct ClaudeTabChip: View {
+    @Environment(TabStore.self) private var tabs
+    let tab: Tab
+    let selected: Bool
+    var compact = false
+    @State private var hovering = false
+
+    private var title: String {
+        if tab.isReplay { return "Replay" }
+        return tab.sessionId == nil ? "Shell" : "Claude"
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Group {
+                if tab.sessionId == nil { Image(systemName: "terminal").font(.system(size: compact ? 13 : 11)) }
+                else { StateGlyph(tab: tab) }
+            }
+            .frame(width: 16)
+            if !compact {
+                // Pinned: no close button, so the title gets the chip's trailing inset to itself.
+                Text(title).font(.callout).lineLimit(1).padding(.trailing, 4)
+            }
+        }
+        .modifier(TabChipChrome(selected: selected, compact: compact, hovering: $hovering))
+        .onTapGesture { tabs.selectClaude(in: tab) }
+        .help(compact ? title : "")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default) { tabs.selectClaude(in: tab) }
+        .contextMenu {
+            Button("Close Session…") { tabs.close(tab) }
+            Divider()
+            MoveToWindowMenu(tab: tab)
+        }
+    }
+}
+
+/// One tab in a strip. Two forms of the same chip: labelled, and glyph-only for a narrow area.
 struct SidePanelTabChip: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
@@ -358,12 +459,8 @@ struct SidePanelTabChip: View {
     @State private var hovering = false
 
     private var title: String { tabs.paneTitle(pane, in: tab) }
-
-    private var fill: Color {
-        if selected { return Color.accent.opacity(hovering ? 0.26 : 0.20) }
-        if hovering { return Color.primary.opacity(0.11) }
-        return Color.primary.opacity(0.05)
-    }
+    /// Whether this tab is in the main area, which decides which way its move button points (ADR-212).
+    private var inMain: Bool { tab.area(of: pane) == .main }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -371,50 +468,42 @@ struct SidePanelTabChip: View {
                 .frame(width: 16)
             if !compact {
                 Text(title).font(.callout).lineLimit(1)
-                // Always laid out, only faded in: a close button that appears on hover must not
-                // reflow the chip it belongs to. The move button beside it likewise (ADR-212).
-                TabMoveButton(toRight: false) { tabs.movePane(pane, in: tab) }
-                    .opacity(hovering || selected ? 1 : 0)
-                Button { tabs.closePane(pane, in: tab) } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 18, height: 18)
-                        .contentShape(Rectangle())
-                        .background(hovering ? Color.primary.opacity(0.10) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 4))
+                // Always laid out, only faded in: buttons that appear on hover must not reflow the chip
+                // they belong to.
+                Group {
+                    TabMoveButton(toRight: inMain) { tabs.movePane(pane, in: tab) }
+                    Button { tabs.closePane(pane, in: tab) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                            .background(hovering ? Color.primary.opacity(0.10) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close \(title)")
+                    .help("Close this tab" + (selected && !inMain ? " (⌘⌃W)" : "") + ", or ⇧-click the tab")
                 }
-                .buttonStyle(.plain)
                 .opacity(hovering || selected ? 1 : 0)
-                .help("Close this panel tab" + (selected ? " (⌘⌃W)" : "") + ", or ⇧-click the tab")
             }
         }
-        .padding(.leading, compact ? 6 : 8)
-        .padding(.trailing, compact ? 6 : 4)
-        .frame(height: 24)
-        .frame(maxWidth: compact ? nil : 200)
-        .background(fill, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(selected ? Color.accent.opacity(0.55) : .clear))
-        .foregroundStyle(selected ? Color.accent : Color.primary)
-        .contentShape(Rectangle())
-        // ⇧-click closes (ADR-130). A panel pane closes without asking — nothing is running in it
-        // that the tab does not already own — and this is the compact chip's only pointer-driven
-        // close, since there is no room there for an ✕.
+        .modifier(TabChipChrome(selected: selected, compact: compact, hovering: $hovering))
+        // ⇧-click closes (ADR-130). A pane closes without asking — nothing is running in it that the
+        // tab does not already own — and this is the compact chip's only pointer-driven close, since
+        // there is no room there for an ✕.
         .onTapGesture {
             if NSEvent.modifierFlags.contains(.shift) { tabs.closePane(pane, in: tab) }
             else { tabs.selectPane(pane, in: tab) }
         }
-        .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.1), value: hovering)
         // The compact chip has no room for its name, so the tooltip is where the name lives.
         .help(compact ? title + " — ⇧-click to close" : "")
         .contextMenu {
-            // Any tab can sit beside Claude instead (ADR-212).
-            Button("Move to Main Area") { tabs.movePane(pane, in: tab) }
+            // Any tab can sit in either area (ADR-212).
+            Button(inMain ? "Move to Right Panel" : "Move to Main Area") { tabs.movePane(pane, in: tab) }
             Divider()
             Button("Close") { tabs.closePane(pane, in: tab) }
             Button("Close Others") { tabs.closeOtherPanes(pane, in: tab) }
-                .disabled(tab.panel.panes.count < 2)
+                .disabled((tab.area(of: pane).map { tab.group($0).panes.count } ?? 0) < 2)
         }
     }
 }
@@ -458,14 +547,14 @@ struct SidePanelEmptyState: View {
                             ForEach(Array(refs.enumerated()), id: \.element) { index, ref in
                                 EmptyPanelRow(title: prTitle(ref), detail: prDetail(ref),
                                               chord: index == 0 ? bindings.chord(for: .togglePRPage)?.display : nil,
-                                              open: { tabs.togglePRPage(tab, ref: ref) }) {
+                                              open: { tabs.addPane(.pr(ref), in: tab, area: .right) }) {
                                     PRTabGlyph(ref: ref, size: 15).frame(width: 26, height: 26)
                                 }
                             }
                             ForEach(runs, id: \.self) { key in
                                 let run = tabs.runs.run(forKey: key)
                                 EmptyPanelRow(title: run?.name ?? key.configId, detail: "Run output · " + RunText.status(run),
-                                              open: { tabs.showPane(.run(key), in: tab) }) {
+                                              open: { tabs.addPane(.run(key), in: tab, area: .right) }) {
                                     RunStatusGlyph(run: run, size: 13).frame(width: 26, height: 26)
                                 }
                             }
@@ -580,9 +669,11 @@ struct SidePanelEmptyState: View {
         }
     }
 
-    /// Through the same openers as the menu and the chords, so Grill takes the keyboard as it does there.
+    /// Into this panel, as the header says: a shell or Files opens another here even when one is open
+    /// in the main area, rather than fronting that one. Grill takes the keyboard as it does from its chord.
     private func open(_ kind: PanelPane.Kind) {
-        if kind == .grill { tabs.toggleGrill(tab) } else { tabs.showPane(kind, in: tab) }
+        tabs.addPane(kind, in: tab, area: .right)
+        if kind == .grill { tabs.grillKeyboardRequests.insert(tab.id) }
     }
 }
 

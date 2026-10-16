@@ -185,7 +185,7 @@ struct TerminalStack: NSViewRepresentable {
 
     /// The main area (ADR-212): its strip, over Claude while the pinned tab is in front, or the pane that is.
     private func mainContent(_ tab: Tab) -> TabContentView.PanelContent {
-        let chrome = inject(MainTabStrip(tab: tab))
+        let chrome = inject(PaneTabStrip(tab: tab, area: .main))
         guard let pane = tab.main.selected else {
             return TabContentView.PanelContent(chrome: chrome, page: nil, terminal: nil, showsAgent: true,
                                                minWidth: 360, zoomed: false)
@@ -196,7 +196,7 @@ struct TerminalStack: NSViewRepresentable {
     /// The chrome and the front pane's content for one tab's panel (ADR-079); nil when the panel is hidden.
     private func panelContent(_ tab: Tab) -> TabContentView.PanelContent? {
         guard tab.panel.isVisible else { return nil }
-        let chrome = inject(SidePanelTabBar(tab: tab))
+        let chrome = inject(PaneTabStrip(tab: tab, area: .right))
         guard let pane = tab.panel.selected else {
             return TabContentView.PanelContent(chrome: chrome, page: page(SidePanelEmptyState(tab: tab)),
                                                terminal: nil, minWidth: 320, zoomed: tab.panel.isZoomed)
