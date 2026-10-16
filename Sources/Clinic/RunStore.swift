@@ -351,7 +351,7 @@ final class RunStore {
             old?.free()
             // A run that waited for a device had its pane opened before there was a surface to hold.
             if run.hostTabId == nil, let tabs,
-               let fronting = tabs.tabs.first(where: { tabs.window(of: $0).selectedTabId == $0.id && $0.panel.isFront(.run(run.key)) }) {
+               let fronting = tabs.tabs.first(where: { tabs.window(of: $0).selectedTabId == $0.id && $0.isFront(.run(run.key)) }) {
                 run.hostTabId = fronting.id
             }
             syncOcclusion()
@@ -444,7 +444,7 @@ final class RunStore {
 
     private func isOnScreen(_ run: Run) -> Bool {
         guard let tabs, let host = run.hostTabId, let tab = tabs.tabs.first(where: { $0.id == host }) else { return false }
-        return tabs.isFrontAndSelected(tab) && tab.panel.isFront(.run(run.key))
+        return tabs.isFrontAndSelected(tab) && tab.isFront(.run(run.key))
     }
 
     // MARK: Hosting (ADR-122)
@@ -452,8 +452,10 @@ final class RunStore {
     /// The tab now fronting a run takes its surface. Called when a tab is selected, a pane is fronted or
     /// the panel is shown — user actions only, never from a view update.
     func claim(for tab: Tab) {
-        guard let tabs, tabs.window(of: tab).selectedTabId == tab.id, tab.panel.isVisible,
-              case .run(let key)? = tab.panel.selected?.kind, let run = runs[key], run.surface != nil else { return }
+        guard let tabs, tabs.window(of: tab).selectedTabId == tab.id else { return }
+        // The run in front of the area the reader is in wins when both areas front one (ADR-212).
+        let keys = tab.frontPanes.compactMap { pane -> RunKey? in if case .run(let key) = pane.kind { key } else { nil } }
+        guard let key = keys.first, let run = runs[key], run.surface != nil else { return }
         if run.hostTabId != tab.id { run.hostTabId = tab.id }
         syncOcclusion()
     }
@@ -469,7 +471,7 @@ final class RunStore {
         for run in runs.values {
             guard let surface = run.surface else { continue }
             let host = run.hostTabId.flatMap { id in tabs.tabs.first { $0.id == id } }
-            let visible = host.map { tabs.window(of: $0).selectedTabId == $0.id && $0.panel.isFront(.run(run.key)) } ?? false
+            let visible = host.map { tabs.window(of: $0).selectedTabId == $0.id && $0.isFront(.run(run.key)) } ?? false
             surface.isOccluded = !visible
         }
     }
@@ -485,12 +487,12 @@ final class RunStore {
 
     /// A tab closed: the same, for every run pane it had.
     func tabClosed(_ tab: Tab) {
-        for pane in tab.panel.panes { if case .run(let key) = pane.kind { paneClosed(key, in: tab) } }
+        for pane in tab.allPanes { if case .run(let key) = pane.kind { paneClosed(key, in: tab) } }
     }
 
     private func disposeIfUnseen(_ run: Run, ignoring closing: Tab? = nil) {
         guard !run.status.isRunning, let surface = run.surface, let tabs else { return }
-        let shown = tabs.tabs.contains { $0.id != closing?.id && $0.panel.isOpen(.run(run.key)) }
+        let shown = tabs.tabs.contains { $0.id != closing?.id && $0.isOpen(.run(run.key)) }
         guard !shown else { return }
         run.retainedOutput = surface.screenText
         run.surface = nil
@@ -556,7 +558,7 @@ final class RunStore {
     /// Hosting and state facts for `TerminalStack`'s render key: a restart or a change of host must
     /// re-install the panel's surface.
     func renderKey(for tab: Tab) -> String {
-        tab.panel.panes.compactMap { pane -> String? in
+        tab.allPanes.compactMap { pane -> String? in
             guard case .run(let key) = pane.kind, let run = runs[key] else { return nil }
             return "\(run.generation)\(run.hostTabId == tab.id)\(run.surface != nil)\(run.status.isFailure)\(run.preparing != nil)\(run.problem != nil)"
         }.joined(separator: ",")

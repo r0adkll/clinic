@@ -1,5 +1,5 @@
 ---
-status: accepted (designed 2026-10-15, not built)
+status: accepted (designed 2026-10-15; step 1 built 2026-10-15)
 date: 2026-10-15
 supersedes: "[[ADR-049 Tab Bar]] (the session tab bar), [[ADR-079 Panel Tabs]] (one panel beside the agent, footer quick actions, panels not persisted), [[ADR-059 Replay and Session Details]] (replay as its own tab)"
 amends: "[[ADR-041 One Tab Per Session]] (a session is open in one window's workspace), [[ADR-042 Launch Restoration]] (a session's layout is restored when it is reopened), [[ADR-130 Shift-Click Closes A Tab]] (no session tab to ⇧-click), [[ADR-198 The Panel Holds Several Terminals]] (Files may hold several too), [[ADR-197 Only The Tab On Screen Takes The Keyboard]] (on screen = the selected session's front panes), [[ADR-120 The Empty Screen Is A Home]] (no New Shell card), [[ADR-036 Keyboard Shortcuts]] (⌘1–9 pick tabs)"
@@ -112,3 +112,43 @@ divider.
 3. Shell and replay tabs removed and their entry points rehomed. Replay in the Claude tab.
 4. Sidebar card glyphs and the hover ✕.
 5. Saved layouts.
+
+## Step 1, as built (2026-10-15)
+- **Model.** `SidePanel` is now one tab area: `Tab.main` (`isMain`, always visible, no selection = Claude) and
+  `Tab.panel`. `Tab` answers for the whole workspace: `pane(kind)`, `isOpen`, `isFront`, `frontPanes`,
+  `area(of:)`, `syncOcclusion(hidden:)`, and `focusedArea`, the area the reader last acted in. "The one used
+  last" spans both areas through `PanelPane.frontedAt`, one clock for every pane. `TabStore` gains `movePane`,
+  `selectClaude` and an `area:` on `showPane` / `addPane`. Every opener still defaults to the right panel.
+- **Host.** `TabContentView` splits two `PaneHostView`s (formerly `SidePanelHostView`). The main one holds
+  Claude's surface for the tab's life in a layer of its own, shown while the pinned tab is in front and
+  occluded otherwise. It is never handed to `SurfaceHostView.show`, which would re-parent it.
+- **Chrome.** `MainTabStrip` (underlined tabs, a `+` that adds beside Claude, then the openers, zoom and the
+  panel toggle) and `WorkspaceHeader` / `SessionHeader` in the toolbar's `.navigation` item
+  (`WorkspaceViews.swift`). `TabBarView`, `TabFooter`'s view, `PaneToggle`, `FooterToggle` and the *Show Tab Bar*
+  menu item and setting are gone. Every tab has a move button beside its ✕ (`TabMoveButton`) as well as
+  *Move to …* in its menu.
+- **Files allows several**, as ADR-198 anticipated. A Files tab is named by the file it has open.
+- **The window has no title.** The toolbar draws the window's title whatever its `titleVisibility`, and
+  `.toolbar(removing: .title)` also takes away the flexible space that keeps the controls at the trailing
+  edge. So `.navigationTitle("")`, and `WindowState.title` is computed from the model for *Move to Window ▸*.
+  The Window menu lists these windows without a name.
+- **The header is capped at 290 pt.** A toolbar item is as wide as it asks to be, and the controls after it
+  overflow into a » menu rather than squeeze it. The meta line shows the branch, not the project, beside the
+  project's icon.
+- **Zoomed, the right panel's strip shows the unzoom button**, since zoom hides the main strip that holds it.
+- **Until step 3**, shell and replay tabs have no row anywhere. They are still reached through the Tabs menu,
+  ⌘1–9 and ⌃⇥.
+
+### Verification
+`make test` passes (714 ClinicCore, 7 GhosttyBridge). Driven in Clinic Dev through the accessibility API,
+with screenshots of each step: a shell tab and a Haiku session (`-ClinicSessionOnLaunch`). The header shows
+the title, a *Finished* pill, the branch, Haiku 5.5 ▾, Medium ▾ and 4 %, and the toolbar fits a 1440 pt window
+with nothing in overflow. The openers open Files, Diff and Terminal in the right panel and show their state.
+The `+` adds Diff, Files and a terminal beside Claude, with a second Files tab as *Files 2*. A Diff and a live
+shell moved from the right panel to the main area keep their state, and the panel hides when emptied. The Claude
+tab brings the session back. Zoom and unzoom work from both strips. After the panel is shown and hidden, the
+keyboard is in the main area's front shell.
+
+Not checked: two sessions with different workspaces in one window, multiple windows, runs, PR panes, Grill
+rounds arriving in a background tab (ADR-197), file links from the terminal (ADR-192), and the Media pane.
+

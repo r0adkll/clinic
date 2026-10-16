@@ -4,8 +4,9 @@ import SwiftUI
 import ClinicCore
 import GhosttyBridge
 
-/// One tab in a session tab's right-hand panel (ADR-079). Owns whatever long-lived state its content
-/// needs — a git model, an editor model, a shell surface — so switching panel tabs never rebuilds it.
+/// One tab in a session's workspace (ADR-079, ADR-212), in its main area or its right panel. Owns whatever
+/// long-lived state its content needs — a git model, an editor model, a shell surface — so switching tabs,
+/// or moving one between the areas, never rebuilds it.
 @MainActor
 @Observable
 final class PanelPane: Identifiable {
@@ -20,10 +21,9 @@ final class PanelPane: Identifiable {
         /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
         case run(RunKey)
 
-        /// Whether a tab may hold more than one pane of this kind (ADR-198). The quick action still
-        /// fronts the one used last; *New …* adds another. Only shells for now — Files is the next
-        /// candidate, and needs nothing here but its case added.
-        var allowsSeveral: Bool { self == .terminal }
+        /// Whether a session may hold more than one pane of this kind (ADR-198). The quick action still
+        /// fronts the one used last; *New …* adds another. Shells, and Files since ADR-212.
+        var allowsSeveral: Bool { self == .terminal || self == .files }
 
         var symbol: String {
             switch self {
@@ -102,6 +102,12 @@ final class PanelPane: Identifiable {
     /// never loses a half-typed answer.
     var grill: GrillPaneModel?
 
+    /// When this pane was last fronted, on one clock for every pane in every area, so "the one used
+    /// last" holds across the main area and the right panel (ADR-198, ADR-212). Zero: never fronted.
+    private(set) var frontedAt = 0
+    private static var clock = 0
+    func markFronted() { Self.clock += 1; frontedAt = Self.clock }
+
     init(kind: Kind) { self.kind = kind }
 
     /// Releases the pane's resources; called when the pane or its tab closes.
@@ -113,45 +119,57 @@ final class PanelPane: Identifiable {
     }
 }
 
-/// The right-hand panel of one session tab (ADR-079): an ordered strip of panes with one selected,
-/// plus a visibility flag the footer quick actions drive.
+/// One of a session's two tab areas (ADR-212): the main area, where Claude is pinned first, or the right
+/// panel (ADR-079). An ordered strip of panes with one selected. In the main area no selection means
+/// Claude is in front; the right panel also shows and hides, and can zoom over the whole session.
 @MainActor
 @Observable
 final class SidePanel {
+    /// The main area, which always shows (Claude when no pane is selected) and never zooms.
+    let isMain: Bool
     private(set) var panes: [PanelPane] = []
     var selectedId: UUID? {
         didSet {
-            if let selectedId { recency.removeAll { $0 == selectedId }; recency.append(selectedId) }
+            selected?.markFronted()
             syncWatchers()
         }
     }
-    /// Pane ids, least recently fronted first: which of several same-kind panes a quick action means (ADR-198).
-    private var recency: [UUID] = []
     /// Hiding the panel un-zooms it, so the two controls can never leave a tab with no way back (ADR-081).
-    var isVisible = false { didSet { if !isVisible { isZoomed = false }; syncWatchers() } }
-    /// The panel fills the tab, with the agent surface hidden behind it (ADR-081).
+    /// The main area is always visible.
+    var isVisible: Bool {
+        didSet {
+            // Only ever put back, never re-set to what it is: an observed property assigned in its own
+            // didSet recurses until the stack runs out.
+            if isMain && !isVisible { isVisible = true; return }
+            if !isVisible { isZoomed = false }
+            syncWatchers()
+        }
+    }
+    /// The panel fills the tab, with the main area hidden behind it (ADR-081).
     var isZoomed = false
+
+    init(isMain: Bool = false) {
+        self.isMain = isMain
+        self.isVisible = isMain
+    }
 
     var selected: PanelPane? { panes.first { $0.id == selectedId } }
     var isEmpty: Bool { panes.isEmpty }
 
     /// The pane of this kind a quick action means: the only one, or of several, the one fronted last (ADR-198).
-    func pane(_ kind: PanelPane.Kind) -> PanelPane? { mostRecent(of: panes(kind)) }
+    func pane(_ kind: PanelPane.Kind) -> PanelPane? { SidePanel.mostRecent(of: panes(kind)) }
     /// Of these panes, the one fronted last; one never fronted counts as older than any that was.
-    func mostRecent(of candidates: [PanelPane]) -> PanelPane? {
-        candidates.max { (recency.lastIndex(of: $0.id) ?? -1) < (recency.lastIndex(of: $1.id) ?? -1) }
+    static func mostRecent(of candidates: [PanelPane]) -> PanelPane? {
+        candidates.max { $0.frontedAt < $1.frontedAt }
     }
     func panes(_ kind: PanelPane.Kind) -> [PanelPane] { panes.filter { $0.kind == kind } }
-    /// The lowest number no open pane of this kind holds (ADR-198).
-    func nextOrdinal(for kind: PanelPane.Kind) -> Int {
-        let taken = Set(panes(kind).map(\.ordinal))
-        return (1...).first { !taken.contains($0) }!
-    }
+    func contains(_ pane: PanelPane) -> Bool { panes.contains { $0.id == pane.id } }
     /// Each shell pane is drawn only while it is the one on screen, in a tab on screen (ADR-019, ADR-198).
-    func occludeShells(tabHidden: Bool) {
-        for pane in panes(.terminal) { pane.terminal?.isOccluded = tabHidden || !isVisible || pane.id != selectedId }
+    /// A zoomed right panel covers the main area, so the main area's shells stop too (ADR-081).
+    func occludeShells(tabHidden: Bool, covered: Bool = false) {
+        for pane in panes(.terminal) { pane.terminal?.isOccluded = tabHidden || covered || !isVisible || pane.id != selectedId }
     }
-    /// The pane is open, the panel is showing, and this pane is the one on screen.
+    /// The pane is open, the area is showing, and this pane is the one on screen.
     func isFront(_ kind: PanelPane.Kind) -> Bool { isVisible && selected?.kind == kind }
     func isOpen(_ kind: PanelPane.Kind) -> Bool { pane(kind) != nil }
 
@@ -167,34 +185,40 @@ final class SidePanel {
         isVisible = true
     }
 
-    /// Closes a pane, selecting its neighbour; the panel hides when the last one goes.
-    func close(_ pane: PanelPane) {
-        guard let index = panes.firstIndex(where: { $0.id == pane.id }) else { return }
+    /// Takes a pane out of the strip without tearing it down, for a move to the other area (ADR-212).
+    /// Selects its neighbour — in the main area, Claude when it was the last — and the right panel hides
+    /// when the last one goes.
+    @discardableResult
+    func detach(_ pane: PanelPane) -> PanelPane? {
+        guard let index = panes.firstIndex(where: { $0.id == pane.id }) else { return nil }
         panes.remove(at: index)
-        recency.removeAll { $0 == pane.id }
-        pane.tearDown()
         if selectedId == pane.id {
-            selectedId = panes[safe: index]?.id ?? panes.last?.id
+            selectedId = isMain ? panes[safe: index - 1]?.id ?? panes.first?.id : panes[safe: index]?.id ?? panes.last?.id
         }
         // The panel goes with its last pane (ADR-130, over ADR-079): an empty panel is a column of
         // chrome around nothing, and the reader who closed the thing they were reading wants the
         // session back. The empty state is still reachable — showing the panel with no panes.
-        if panes.isEmpty { isVisible = false }
+        if panes.isEmpty && !isMain { isVisible = false }
+        return pane
+    }
+
+    /// Closes a pane, selecting its neighbour.
+    func close(_ pane: PanelPane) {
+        guard detach(pane) != nil else { return }
+        pane.tearDown()
     }
 
     func closeAll(except keep: PanelPane? = nil) {
         for pane in panes where pane.id != keep?.id { pane.tearDown() }
         panes = keep.map { [$0] } ?? []
-        recency = keep.map { [$0.id] } ?? []
         selectedId = keep?.id
     }
 
     func tearDown() {
         for pane in panes { pane.tearDown() }
         panes = []
-        recency = []
         selectedId = nil
-        isVisible = false
+        isVisible = isMain
         isZoomed = false
     }
 
@@ -204,11 +228,11 @@ final class SidePanel {
         for pane in panes where !isVisible || pane.id != selectedId { pane.diff?.stopWatching() }
     }
 
-    /// Cycles the selection; ⌃⇥ inside the panel.
+    /// Cycles the selection; ⌃⇥ inside the panel. In the main area Claude is one of the stops.
     func cycle(by delta: Int) {
-        guard panes.count > 1, let current = panes.firstIndex(where: { $0.id == selectedId }) else { return }
-        let next = (current + delta + panes.count) % panes.count
-        selectedId = panes[next].id
+        let ids: [UUID?] = (isMain ? [nil] : []) + panes.map { Optional($0.id) }
+        guard ids.count > 1, let current = ids.firstIndex(where: { $0 == selectedId }) else { return }
+        selectedId = ids[(current + delta + ids.count) % ids.count]
     }
 
     /// Everything that changes what the AppKit host must show, in one string (see `TerminalStack`).
@@ -225,10 +249,11 @@ private extension Array {
 
 // MARK: - Chrome
 
-/// Tab strip above the panel content: one chip per pane and a menu of everything else (ADR-079,
-/// sized and made adaptive by ADR-104). The panel's show/hide lives in the session tab bar, not here.
+/// Tab strip above the right panel's content: one chip per pane and a menu of everything else (ADR-079,
+/// sized and made adaptive by ADR-104). The panel's show/hide lives in the main area's strip (ADR-212).
 struct SidePanelTabBar: View {
     @Environment(TabStore.self) private var tabs
+    @Environment(KeyBindings.self) private var bindings
     let tab: Tab
 
     var body: some View {
@@ -255,6 +280,13 @@ struct SidePanelTabBar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             addMenu
+            // Zoomed, the panel covers the main area and its strip, where the zoom button lives, so the
+            // way back is here too (ADR-212).
+            if tab.panel.isZoomed {
+                PaneIconButton(symbol: "arrow.down.right.and.arrow.up.left",
+                               help: "Shrink the panel back beside the session" + bindings.hint(.zoomPanel),
+                               isOn: true) { tabs.togglePanelZoom(tab) }
+            }
         }
         .padding(.horizontal, PaneMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -294,7 +326,7 @@ struct SidePanelTabBar: View {
                     ForEach(available, id: \.self) { kind in
                         // A kind already open here that allows several adds another, named as such (ADR-198).
                         Button { tabs.addPane(kind, in: tab) } label: {
-                            Label { Text(tab.panel.isOpen(kind) ? "New " + kind.defaultTitle : tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
+                            Label { Text(tab.isOpen(kind) ? "New " + kind.defaultTitle + " Tab" : tabs.paneTitle(kind, in: tab)) } icon: { kind.icon }
                         }
                     }
                 }
@@ -335,21 +367,14 @@ struct SidePanelTabChip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Group {
-                if case .pr(let ref) = pane.kind {
-                    PRTabGlyph(ref: ref, size: pane.kind.glyphSize(compact: compact))
-                } else if case .run(let key) = pane.kind {
-                    RunStatusGlyph(run: tabs.runs.run(forKey: key), idleSymbol: "play.fill", size: pane.kind.glyphSize(compact: compact) + 1)
-                } else {
-                    Image(systemName: pane.kind.symbol)
-                        .font(.system(size: pane.kind.glyphSize(compact: compact)))
-                }
-            }
-            .frame(width: 16)
+            PaneGlyph(tab: tab, pane: pane, compact: compact)
+                .frame(width: 16)
             if !compact {
                 Text(title).font(.callout).lineLimit(1)
                 // Always laid out, only faded in: a close button that appears on hover must not
-                // reflow the chip it belongs to.
+                // reflow the chip it belongs to. The move button beside it likewise (ADR-212).
+                TabMoveButton(toRight: false) { tabs.movePane(pane, in: tab) }
+                    .opacity(hovering || selected ? 1 : 0)
                 Button { tabs.closePane(pane, in: tab) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
@@ -384,6 +409,9 @@ struct SidePanelTabChip: View {
         // The compact chip has no room for its name, so the tooltip is where the name lives.
         .help(compact ? title + " — ⇧-click to close" : "")
         .contextMenu {
+            // Any tab can sit beside Claude instead (ADR-212).
+            Button("Move to Main Area") { tabs.movePane(pane, in: tab) }
+            Divider()
             Button("Close") { tabs.closePane(pane, in: tab) }
             Button("Close Others") { tabs.closeOtherPanes(pane, in: tab) }
                 .disabled(tab.panel.panes.count < 2)

@@ -5250,3 +5250,16 @@ on Claude closes the session, click still resumes while Replay… opens a sessio
 New Terminal Tab, glyph rows on cards, per-session panel visibility with a shared width, and the footer folded
 into the header and tab row. An *After round 1* artboard holds the result. ADR-212 records it with a five-step
 build order.
+
+## 2026-10-15 — Per-session workspace, step 1 (ADR-212)
+
+On branch `per-session-workspace`, as the user asked. Each session's content is now two tab areas: the main
+area, with Claude pinned first, and the right panel. The session tab bar and the footer are gone. A header in
+the toolbar names the session, with its state, branch, model ▾, effort ▾, context and a ⋯ menu. Tabs move
+between the areas, Files may be open several times, and the zoomed panel carries its own unzoom.
+
+Found while driving it in Clinic Dev: toolbar content does not get the window's `.environment(window)` (a
+launch crash); an `@Observable` property assigned its own value in `didSet` recurses until the stack runs out;
+`.toolbar(removing: .title)` left-aligns every control; a set window title is drawn whatever `titleVisibility`
+says; and a wide header pushes the controls into overflow. All are fixed and recorded in ADR-212's *as built*
+section. `make test` passes. Checks that need several sessions, windows, runs or PRs are left for the user.

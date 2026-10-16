@@ -77,12 +77,49 @@ final class Tab: Identifiable {
     /// The CLI's latest status line input: context percentage, live model and effort (ADR-157). Nil for
     /// an attached session, which `claude attach` launches without Clinic's settings.
     var statusLine: StatusLineReport?
-    /// Right-hand panel: a strip of panes — terminal, git, PRs, files, images — with one on screen (ADR-079).
+    /// The session's two tab areas (ADR-212). `main` holds the tabs added beside Claude, who is pinned
+    /// first and in front whenever no pane is selected there; `panel` is the right panel (ADR-079).
+    let main = SidePanel(isMain: true)
     let panel = SidePanel()
-    /// The panel's shell panes' surfaces — one per Terminal pane, of which there may be several (ADR-198).
-    var panelSurfaces: [GhosttySurfaceView] { panel.panes(.terminal).compactMap(\.terminal) }
-    /// The Terminal pane hosting this surface, if it is one of the panel's shells.
-    func shellPane(for surface: GhosttySurfaceView) -> PanelPane? { panel.panes(.terminal).first { $0.terminal === surface } }
+    enum Area { case main, right }
+    /// The area the reader last acted in: it takes the keyboard when the tab is focused (ADR-212).
+    var focusedArea: Area = .main
+    func group(_ area: Area) -> SidePanel { area == .main ? main : panel }
+    func area(of pane: PanelPane) -> Area? { main.contains(pane) ? .main : panel.contains(pane) ? .right : nil }
+    /// Every pane in the workspace, main area first.
+    var allPanes: [PanelPane] { main.panes + panel.panes }
+    func panes(_ kind: PanelPane.Kind) -> [PanelPane] { allPanes.filter { $0.kind == kind } }
+    /// The pane of this kind a quick action means, in either area: the one fronted last (ADR-198).
+    func pane(_ kind: PanelPane.Kind) -> PanelPane? { SidePanel.mostRecent(of: panes(kind)) }
+    func isOpen(_ kind: PanelPane.Kind) -> Bool { pane(kind) != nil }
+    /// Claude's surface is what the main area shows, and no zoomed panel covers it.
+    var isClaudeInFront: Bool { main.selectedId == nil && !panel.isZoomed }
+    /// On screen in either area: the right panel's front while it shows, or the main area's unless a
+    /// zoomed panel covers it.
+    func isFront(_ kind: PanelPane.Kind) -> Bool { panel.isFront(kind) || (!panel.isZoomed && main.isFront(kind)) }
+    /// The panes on screen, the focused area's first: what the menu's pane verbs act on.
+    var frontPanes: [PanelPane] {
+        let right = panel.isVisible ? panel.selected : nil
+        let left = panel.isZoomed ? nil : main.selected
+        return (focusedArea == .right ? [right, left] : [left, right]).compactMap { $0 }
+    }
+    var frontPane: PanelPane? { frontPanes.first }
+    /// The lowest number no open pane of this kind holds, in either area (ADR-198).
+    func nextOrdinal(for kind: PanelPane.Kind) -> Int {
+        let taken = Set(panes(kind).map(\.ordinal))
+        return (1...).first { !taken.contains($0) }!
+    }
+    /// The workspace's shell panes' surfaces — one per Terminal pane, of which there may be several (ADR-198).
+    var panelSurfaces: [GhosttySurfaceView] { panes(.terminal).compactMap(\.terminal) }
+    /// The Terminal pane hosting this surface, if it is one of the workspace's shells.
+    func shellPane(for surface: GhosttySurfaceView) -> PanelPane? { panes(.terminal).first { $0.terminal === surface } }
+    /// Only what is on screen renders (ADR-019): Claude while the main area shows it, and each area's
+    /// front shell.
+    func syncOcclusion(hidden: Bool) {
+        surface.isOccluded = hidden || !isClaudeInFront
+        main.occludeShells(tabHidden: hidden, covered: panel.isZoomed)
+        panel.occludeShells(tabHidden: hidden)
+    }
 
     /// The store the tab's title comes from (ADR-031). Held strongly: `SessionStore` never refers back.
     @ObservationIgnored private let sessions: SessionStore
@@ -780,9 +817,7 @@ final class TabStore {
     /// Occlusion follows each window's selection (ADR-019); called by `WindowState` when its selection changes.
     func selectionChanged(in window: WindowState) {
         for t in tabs(in: window) {
-            let hidden = (t.id != window.selectedTabId)
-            t.surface.isOccluded = hidden || t.panel.isZoomed
-            t.panel.occludeShells(tabHidden: hidden)
+            t.syncOcclusion(hidden: t.id != window.selectedTabId)
         }
         if let tab = selectedTab(in: window) { runs.claim(for: tab) }
         runs.syncOcclusion()
@@ -854,6 +889,7 @@ final class TabStore {
         if w.selectedTabId == tab.id { w.selectedTabId = tabs(in: w).last?.id }
         tab.surface.free()
         tab.panel.tearDown()
+        tab.main.tearDown()
         if let id = tab.sessionId {
             sessions.removePending(id: id)
             reports?.childEnded(id, reason: "its tab was closed")
@@ -1037,27 +1073,32 @@ final class TabStore {
 
     var canBackgroundSelected: Bool { selectedTab.map { $0.sessionId != nil && $0.isAtPrompt } ?? false }
 
-    // MARK: Right-hand panel (ADR-079)
+    // MARK: The workspace's two areas (ADR-079, ADR-212)
 
-    /// Quick action / shortcut: show the panel with this pane in front — open it if it is not there,
-    /// front it if it is, show the panel if it is hidden. Never a toggle: hiding is its own action.
-    func showPane(_ kind: PanelPane.Kind, in tab: Tab? = nil) {
+    /// Quick action, chord or agent tool: front the pane of this kind wherever it is open, showing the
+    /// panel if it is there and hidden. Otherwise open it in `area` — the right panel unless the caller
+    /// asked for the main area, so nothing but the reader adds a tab beside Claude (ADR-212). Never a
+    /// toggle: hiding is its own action.
+    func showPane(_ kind: PanelPane.Kind, in tab: Tab? = nil, area: Tab.Area = .right) {
         guard let tab = tab ?? selectedTab else { return }
-        if let existing = tab.panel.pane(kind) {
-            tab.panel.select(existing)
+        if let existing = tab.pane(kind), let found = tab.area(of: existing) {
+            tab.group(found).select(existing)
+            tab.focusedArea = found
         } else if let pane = makePane(kind, in: tab) {
-            tab.panel.append(pane)
-            tab.panel.isVisible = true
+            tab.group(area).append(pane)
+            tab.group(area).isVisible = true
+            tab.focusedArea = area
         } else {
             return
         }
         focusPanel(tab)
     }
 
-    /// The one control that hides the panel: the tab bar button, the strip's chevron, ⌘⌥J.
+    /// The one control that hides the panel: the header's button, ⌘⌥J.
     func togglePanelVisibility(_ tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab else { return }
         tab.panel.isVisible.toggle()
+        tab.focusedArea = tab.panel.isVisible ? .right : .main
         focusPanel(tab)
     }
 
@@ -1066,10 +1107,11 @@ final class TabStore {
     func hidePanel(_ tab: Tab) {
         guard tab.panel.isVisible else { return }
         tab.panel.isVisible = false
+        tab.focusedArea = .main
         focusPanel(tab)
     }
 
-    /// ⌘⌥⇧J: the panel fills the tab, with the agent surface hidden behind it (ADR-081). Zooming a
+    /// ⌘⌥⇧J: the panel fills the tab, with the main area hidden behind it (ADR-081). Zooming a
     /// hidden panel shows it, so the action always lands somewhere.
     func togglePanelZoom(_ tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab else { return }
@@ -1078,6 +1120,7 @@ final class TabStore {
         } else {
             tab.panel.isVisible = true
             tab.panel.isZoomed = true
+            tab.focusedArea = .right
         }
         focusPanel(tab)
     }
@@ -1104,7 +1147,7 @@ final class TabStore {
     /// ⌘Y: Quick Look whatever the front Images pane has selected. The pane's own space bar needs
     /// the pane to have the keyboard; this is the path from the menu bar, which never does (ADR-107).
     func quickLookFrontImage() {
-        guard let tab = selectedTab, let gallery = tab.panel.pane(.attachments)?.images,
+        guard let tab = selectedTab, let gallery = tab.pane(.attachments)?.images,
               let id = tab.sessionId else { return }
         let rows = gallery.rows(Array((sessions.state.attachments[id] ?? []).reversed()))
         ImageQuickLook.shared.toggle(paths: rows.map(\.path), showing: gallery.selection(in: rows)?.path)
@@ -1124,12 +1167,12 @@ final class TabStore {
     /// ⌘⌃C: the front Grill pane's newest round as Markdown. Deliberately not ⌘C — that is Edit ▸ Copy,
     /// and claiming it here would shadow copying in the terminal window-wide (ADR-131).
     func copyFrontGrillRound() {
-        guard let tab = selectedTab, tab.panel.isFront(.grill), let id = tab.sessionId else { return }
+        guard let tab = selectedTab, tab.isFront(.grill), let id = tab.sessionId else { return }
         // The round the reader is *looking at*, by the pane's own rule. `rounds.last` copied the newest
         // instead, so picking an older round and pressing ⌘⌃C put a different round on the pasteboard —
         // while the header's copy button, which passes what it shows, was right.
         let rounds = sessions.grillRounds(for: id)
-        guard let model = tab.panel.pane(.grill)?.grill,
+        guard let model = tab.pane(.grill)?.grill,
               let round = model.currentRound(in: rounds) else { return }
         copyGrillRound(round)
     }
@@ -1139,35 +1182,63 @@ final class TabStore {
         NSPasteboard.general.setString(GrillAnswerComposer.markdown(round), forType: .string)
     }
 
-    /// True when a Files pane is the one on screen, so the tree toggle knows whether it applies.
-    var isFilesPaneFront: Bool { selectedTab?.panel.isFront(.files) ?? false }
-    var isImagesPaneFront: Bool { selectedTab?.panel.isFront(.attachments) ?? false }
+    /// The pane the menu's pane verbs act on: on screen, in the area the reader is in first.
+    private func frontPane(_ kind: PanelPane.Kind) -> PanelPane? { selectedTab?.frontPanes.first { $0.kind == kind } }
+    /// True when a Files pane is on screen, so the tree toggle knows whether it applies.
+    var isFilesPaneFront: Bool { selectedTab?.frontPane?.kind == .files }
+    var isImagesPaneFront: Bool { selectedTab?.frontPane?.kind == .attachments }
     /// A Files pane is on screen showing a Markdown file, so the view can be cycled (ADR-191).
-    var isMarkdownFront: Bool { isFilesPaneFront && selectedTab?.panel.pane(.files)?.editor?.isMarkdown == true }
+    var isMarkdownFront: Bool { frontPane(.files)?.editor?.isMarkdown == true }
     /// The diff the reader is looking at: the Diff panel's, or a pull request pane's (ADR-188).
     var frontDiffBrowser: DiffBrowser? {
-        guard let panel = selectedTab?.panel, panel.isVisible, let pane = panel.selected else { return nil }
-        let browser = pane.diff?.browser ?? pane.changes
-        return browser?.isEmpty == false ? browser : nil
+        for pane in selectedTab?.frontPanes ?? [] {
+            if let browser = pane.diff?.browser ?? pane.changes, !browser.isEmpty { return browser }
+        }
+        return nil
     }
 
     var canToggleBrowserList: Bool { isFilesPaneFront || isImagesPaneFront }
     var browserListShown: Bool { isImagesPaneFront ? ImagePrefs.shared.showList : EditorPrefs.shared.showTree }
 
     func selectPane(_ pane: PanelPane, in tab: Tab) {
-        tab.panel.select(pane)
+        guard let area = tab.area(of: pane) else { return }
+        tab.group(area).select(pane)
+        tab.focusedArea = area
+        focusPanel(tab)
+    }
+
+    /// The pinned Claude tab: the main area shows the session again (ADR-212).
+    func selectClaude(in tab: Tab) {
+        tab.main.selectedId = nil
+        tab.panel.isZoomed = false
+        tab.focusedArea = .main
         focusPanel(tab)
     }
 
     func closePane(_ pane: PanelPane, in tab: Tab) {
-        tab.panel.close(pane)
+        guard let area = tab.area(of: pane) else { return }
+        tab.group(area).close(pane)
         if case .run(let key) = pane.kind { runs.paneClosed(key, in: tab) }
+        if area == .right, !tab.panel.isVisible { tab.focusedArea = .main }
         focusPanel(tab)
     }
 
-    /// The strip's *Close Others*: through `closePane`, so a run pane gives its surface back (ADR-122).
+    /// The strip's *Close Others*, within the pane's own area: through `closePane`, so a run pane
+    /// gives its surface back (ADR-122).
     func closeOtherPanes(_ keep: PanelPane, in tab: Tab) {
-        for pane in tab.panel.panes where pane.id != keep.id { closePane(pane, in: tab) }
+        guard let area = tab.area(of: keep) else { return }
+        for pane in tab.group(area).panes where pane.id != keep.id { closePane(pane, in: tab) }
+    }
+
+    /// A tab's move button or *Move to …*: the same pane, with its state, in the other area (ADR-212).
+    func movePane(_ pane: PanelPane, in tab: Tab) {
+        guard let from = tab.area(of: pane) else { return }
+        let to: Tab.Area = from == .main ? .right : .main
+        tab.group(from).detach(pane)
+        tab.group(to).append(pane)
+        tab.group(to).isVisible = true
+        tab.focusedArea = to
+        focusPanel(tab)
     }
 
     /// Opens a run's pane in a tab — fronted, or added behind the pane on screen (a re-run after a turn
@@ -1176,16 +1247,17 @@ final class TabStore {
         if !front {
             // Never shows the panel or moves the keyboard: Claude started this, or a turn ended, and
             // the user may be typing into the session. The toolbar pill and the chip carry the news.
-            if !tab.panel.isOpen(.run(key)) { tab.panel.append(PanelPane(kind: .run(key)), select: tab.panel.isEmpty) }
+            if !tab.isOpen(.run(key)) { tab.panel.append(PanelPane(kind: .run(key)), select: tab.panel.isEmpty) }
             return
         }
-        if front { showPane(.run(key), in: tab) }
+        showPane(.run(key), in: tab)
     }
 
     /// ⌘⌃] / ⌘⌃[: move through the panel's tabs.
     func cyclePanelTab(_ delta: Int, in tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab, tab.panel.isVisible else { return }
         tab.panel.cycle(by: delta)
+        tab.focusedArea = .right
         focusPanel(tab)
     }
 
@@ -1195,17 +1267,18 @@ final class TabStore {
         closePane(pane, in: tab)
     }
 
-    /// The `+` menu's *Add*: a kind that allows several gets another pane even when one is open; any
-    /// other kind is opened or fronted as the quick action would (ADR-198).
-    func addPane(_ kind: PanelPane.Kind, in tab: Tab) {
-        guard kind.allowsSeveral, tab.panel.isOpen(kind) else { showPane(kind, in: tab); return }
+    /// The `+` menus' *Add*, into the area whose menu it is: a kind that allows several gets another pane
+    /// even when one is open; any other kind is fronted where it already is (ADR-198, ADR-212).
+    func addPane(_ kind: PanelPane.Kind, in tab: Tab, area: Tab.Area = .right) {
+        guard kind.allowsSeveral, tab.isOpen(kind) else { showPane(kind, in: tab, area: area); return }
         guard let pane = makePane(kind, in: tab) else { return }
-        tab.panel.append(pane)
-        tab.panel.isVisible = true
+        tab.group(area).append(pane)
+        tab.group(area).isVisible = true
+        tab.focusedArea = area
         focusPanel(tab)
     }
 
-    /// ⌘⇧J: another shell in the panel, beside any already open (ADR-198).
+    /// ⌘⇧J: another shell, beside any already open (ADR-198).
     func newTerminal(_ tab: Tab? = nil) {
         guard let tab = tab ?? selectedTab else { return }
         addPane(.terminal, in: tab)
@@ -1215,13 +1288,13 @@ final class TabStore {
     /// a new one when every shell has a job in the foreground — a command typed into a running dev
     /// server goes to the server, not to a shell. Fronted, as the tool always has.
     func idleShell(in tab: Tab) -> PanelPane? {
-        let idle = tab.panel.mostRecent(of: tab.panel.panes(.terminal).filter { $0.terminal?.foregroundJobName == nil })
+        let idle = SidePanel.mostRecent(of: tab.panes(.terminal).filter { $0.terminal?.foregroundJobName == nil })
         if let idle { selectPane(idle, in: tab); return idle }
-        if tab.panel.isOpen(.terminal) { addPane(.terminal, in: tab) } else { showPane(.terminal, in: tab) }
-        return tab.panel.selected.flatMap { $0.kind == .terminal ? $0 : nil }
+        if tab.isOpen(.terminal) { addPane(.terminal, in: tab) } else { showPane(.terminal, in: tab) }
+        return tab.frontPanes.first { $0.kind == .terminal }
     }
 
-    /// Pane kinds the panel's "+" menu can still add for this tab.
+    /// Pane kinds the `+` menus can still add for this tab.
     func availablePanes(for tab: Tab) -> [PanelPane.Kind] {
         var kinds: [PanelPane.Kind] = [.terminal, .diff, .files]
         if tab.sessionId != nil { kinds += [.attachments, .grill] }
@@ -1229,7 +1302,7 @@ final class TabStore {
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
         }
-        return kinds.filter { $0.allowsSeveral || !tab.panel.isOpen($0) }
+        return kinds.filter { $0.allowsSeveral || !tab.isOpen($0) }
     }
 
     /// Chip and menu label for a pane: live facts (branch, image count) win over the kind's default.
@@ -1251,21 +1324,23 @@ final class TabStore {
         }
     }
 
-    /// A pane's chip and menu label. A shell is named by the title it reports, or *Terminal 2*. Two
-    /// shells reporting the same title — both idle in one folder, which fish calls `~` — fall back to
-    /// their numbers, since a title they share names neither (ADR-198).
+    /// A pane's chip and menu label. A Files pane is named by the file it has open. A shell is named by
+    /// the title it reports, or *Terminal 2*. Two shells reporting the same title — both idle in one
+    /// folder, which fish calls `~` — fall back to their numbers, since a title they share names neither
+    /// (ADR-198).
     func paneTitle(_ pane: PanelPane, in tab: Tab) -> String {
         guard pane.kind.allowsSeveral else { return paneTitle(pane.kind, in: tab) }
         let numbered = pane.ordinal == 1 ? pane.kind.defaultTitle : "\(pane.kind.defaultTitle) \(pane.ordinal)"
+        if pane.kind == .files { return pane.editor?.openPath.map { ($0 as NSString).lastPathComponent } ?? numbered }
         guard let reported = pane.shellTitle else { return numbered }
-        let shared = tab.panel.panes(pane.kind).contains { $0.id != pane.id && $0.shellTitle == reported }
+        let shared = tab.panes(pane.kind).contains { $0.id != pane.id && $0.shellTitle == reported }
         return shared ? numbered : reported
     }
 
     /// Builds a pane's long-lived content; nil when it cannot exist (no runtime, no session).
     private func makePane(_ kind: PanelPane.Kind, in tab: Tab) -> PanelPane? {
         let pane = PanelPane(kind: kind)
-        if kind.allowsSeveral { pane.ordinal = tab.panel.nextOrdinal(for: kind) }
+        if kind.allowsSeveral { pane.ordinal = tab.nextOrdinal(for: kind) }
         switch kind {
         case .terminal:
             guard let runtime else { return nil }
@@ -1299,28 +1374,43 @@ final class TabStore {
         return pane
     }
 
-    /// Keeps both surfaces' occlusion and the first responder in step with what the panel is showing.
-    /// A zoomed panel hides the agent surface, so it stops rendering and must not keep the keyboard.
+    /// The surface that should hold the keyboard in one area: its front shell or run, Claude for a main
+    /// area showing Claude, nil for a page (the page takes it on a click).
+    private func keyboardTarget(_ area: Tab.Area, in tab: Tab) -> GhosttySurfaceView? {
+        let group = tab.group(area)
+        guard group.isVisible else { return nil }
+        guard let pane = group.selected else { return area == .main ? tab.surface : nil }
+        switch pane.kind {
+        case .terminal: return pane.terminal
+        case .run(let key):
+            guard let run = runs.run(forKey: key), run.hostTabId == tab.id else { return nil }
+            return run.surface
+        default: return nil
+        }
+    }
+
+    /// Keeps every surface's occlusion and the first responder in step with what the workspace is
+    /// showing. The keyboard goes to the area the reader acted in: its shell or run, or — for a page in
+    /// the right panel — back to the main area, so reading a diff leaves typing in Claude.
     private func focusPanel(_ tab: Tab) {
-        let unselected = window(of: tab).selectedTabId != tab.id
-        tab.panel.occludeShells(tabHidden: unselected)
-        tab.surface.isOccluded = unselected || tab.panel.isZoomed
+        tab.syncOcclusion(hidden: window(of: tab).selectedTabId != tab.id)
         runs.claim(for: tab)
         runs.syncOcclusion()
-        let frontRun: GhosttySurfaceView? = {
-            guard tab.panel.isVisible, case .run(let key)? = tab.panel.selected?.kind, let run = runs.run(forKey: key),
-                  run.hostTabId == tab.id else { return nil }
-            return run.surface
-        }()
-        let target: GhosttySurfaceView? = if tab.panel.isFront(.terminal) { tab.panel.selected?.terminal }
-                                          else if let frontRun { frontRun }
-                                          else if tab.panel.isZoomed { nil }
-                                          else { tab.surface }
+        let target: GhosttySurfaceView? = if tab.panel.isZoomed { keyboardTarget(.right, in: tab) }
+                                          else if tab.focusedArea == .right, let right = keyboardTarget(.right, in: tab) { right }
+                                          else { keyboardTarget(.main, in: tab) }
         // A pane opened in a tab nobody is looking at — by an agent's `ask_round` or `show_image` —
         // must not move the keyboard: the window has one, and it belongs to whatever is on screen.
         // Doing so put the reader's typing into a hidden terminal (ADR-197).
         guard isOnScreen(tab) else { return }
         let window = tab.surface.window
+        // A page in front of the main area takes the keyboard itself, on a click; leaving the agent's
+        // surface first responder behind it would type into a session that is not on screen.
+        if target == nil, !tab.isClaudeInFront, tab.focusedArea == .main || tab.panel.isZoomed {
+            DispatchQueue.main.async { if window?.firstResponder === tab.surface { window?.makeFirstResponder(nil) } }
+            return
+        }
+        guard let target else { return }
         DispatchQueue.main.async { window?.makeFirstResponder(target) }
     }
 
@@ -1354,7 +1444,7 @@ final class TabStore {
 
     /// Whether a Grill pane is the one on screen — the menu's Grill verbs are enabled only then, the
     /// way ADR-107's image verbs are (ADR-131).
-    var isGrillPaneFront: Bool { selectedTab?.panel.isFront(.grill) ?? false }
+    var isGrillPaneFront: Bool { selectedTab?.isFront(.grill) ?? false }
 
     /// PR refs known for a tab's session (from the transcript).
     func pullRequests(for tab: Tab) -> [PullRequestRef] {
@@ -1362,7 +1452,7 @@ final class TabStore {
         return s.pullRequests
     }
 
-    /// ⌘⇧P: the newest PR's pane; `ref` picks a specific PR (footer chip). Each PR gets its own pane.
+    /// ⌘⇧P: the newest PR's pane; `ref` picks a specific PR (an opener). Each PR gets its own pane.
     func togglePRPage(_ tab: Tab? = nil, ref: PullRequestRef? = nil) {
         guard let tab = tab ?? selectedTab, let target = ref ?? pullRequests(for: tab).last else { return }
         showPane(.pr(target), in: tab)
@@ -1693,7 +1783,7 @@ extension TabStore {
               let link = FileLink.resolve(url, cwd: cwd ?? tab.pwd ?? tab.projectPath, isFile: Self.isRegularFile),
               MediaFile.isMedia(link.path) || Self.isText(link.path) else { return false }
         showPane(.files, in: tab)
-        guard let editor = tab.panel.pane(.files)?.editor else { return false }
+        guard let editor = tab.pane(.files)?.editor else { return false }
         editor.open(absolute: link.path, line: link.line, column: link.column)
         Self.log.info("opened a terminal file link in the Files pane")
         return true

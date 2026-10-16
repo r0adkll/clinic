@@ -210,7 +210,6 @@ private struct GeneralPane: View {
     @Environment(UsageService.self) private var usage
     @AppStorage(Prefs.reopenLastSession) private var reopenLastSession = false
     @AppStorage("ClinicCheckForUpdates") private var checkForUpdates = true
-    @AppStorage("ClinicShowTabBar") private var showTabBar = true
     @AppStorage("ClinicShowStatusItem") private var showStatusItem = true
     @AppStorage("ClinicShowUsage") private var showUsage = true
     @AppStorage("ClinicQuitBehaviour") private var quitBehaviour = "ask"
@@ -242,7 +241,6 @@ private struct GeneralPane: View {
             }
 
             Section("Window") {
-                Toggle("Show the tab bar", isOn: $showTabBar)
                 Toggle("Show the menu bar icon", isOn: $showStatusItem)
                 Picker("When quitting with running sessions", selection: $quitBehaviour) {
                     Text("Ask").tag("ask")

@@ -90,7 +90,14 @@ final class WindowState: Identifiable {
         if isPrimary { groupScope = UserDefaults.standard.string(forKey: Self.groupScopeKey).flatMap(UUID.init(uuidString:)) }
     }
 
-    var title: String { nsWindow?.title ?? "Clinic" }
+    /// What the window is showing, in words: a screen, the composer or the selected session, for
+    /// *Move to Window ▸*. The `NSWindow` itself has no title, which the toolbar would draw beside the
+    /// header that already names it (ADR-212).
+    var title: String {
+        if let screen { return screen.title }
+        if editingDraft != nil { return "New session" }
+        return store.flatMap { $0.selectedTab(in: self)?.title } ?? "Clinic"
+    }
 }
 
 /// Reports the NSWindow a SwiftUI hierarchy landed in.
@@ -145,14 +152,21 @@ struct TerminalStack: NSViewRepresentable {
 
     func updateNSView(_ v: TerminalStackView, context: Context) {
         v.sync(tabs: live, selected: selectedId, visible: visible)
-        for tab in live { tab.contentView.setPanel(panelContent(tab)) }
+        for tab in live {
+            tab.contentView.setMain(mainContent(tab))
+            tab.contentView.setPanel(panelContent(tab))
+        }
         if visible, let tab = live.first(where: { $0.id == selectedId }) {
             DispatchQueue.main.async {
-                // A zoomed panel hides the agent surface: focus must not fall back into it (ADR-081).
-                guard let w = tab.surface.window, w.firstResponder !== tab.surface,
-                      !tab.panel.isFront(.terminal), !tab.panel.isZoomed,
-                      !tab.contentView.panelHoldsKeyboard else { return }
-                w.makeFirstResponder(tab.surface)
+                // What the main area shows takes the keyboard back — Claude, or a shell in front of it —
+                // but not behind a zoomed panel (ADR-081), not from a right-panel shell the reader is
+                // in, and not out of a pane they are using (ADR-212).
+                let target: GhosttySurfaceView? = tab.isClaudeInFront ? tab.surface
+                    : tab.panel.isZoomed ? nil : tab.main.selected?.terminal
+                guard let target, let w = tab.surface.window, w.firstResponder !== target,
+                      !(tab.focusedArea == .right && tab.panel.isFront(.terminal)),
+                      !tab.contentView.panelHoldsKeyboard, !tab.contentView.mainPaneHoldsKeyboard else { return }
+                w.makeFirstResponder(target)
             }
         }
     }
@@ -169,14 +183,29 @@ struct TerminalStack: NSViewRepresentable {
         inject(view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }
 
+    /// The main area (ADR-212): its strip, over Claude while the pinned tab is in front, or the pane that is.
+    private func mainContent(_ tab: Tab) -> TabContentView.PanelContent {
+        let chrome = inject(MainTabStrip(tab: tab))
+        guard let pane = tab.main.selected else {
+            return TabContentView.PanelContent(chrome: chrome, page: nil, terminal: nil, showsAgent: true,
+                                               minWidth: 360, zoomed: false)
+        }
+        return content(of: pane, in: tab, chrome: chrome, zoomed: false)
+    }
+
     /// The chrome and the front pane's content for one tab's panel (ADR-079); nil when the panel is hidden.
     private func panelContent(_ tab: Tab) -> TabContentView.PanelContent? {
         guard tab.panel.isVisible else { return nil }
+        let chrome = inject(SidePanelTabBar(tab: tab))
         guard let pane = tab.panel.selected else {
-            return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)),
-                                               page: page(SidePanelEmptyState(tab: tab)),
+            return TabContentView.PanelContent(chrome: chrome, page: page(SidePanelEmptyState(tab: tab)),
                                                terminal: nil, minWidth: 320, zoomed: tab.panel.isZoomed)
         }
+        return content(of: pane, in: tab, chrome: chrome, zoomed: tab.panel.isZoomed)
+    }
+
+    /// One pane's page or surface, in whichever area it is.
+    private func content(of pane: PanelPane, in tab: Tab, chrome: AnyView, zoomed: Bool) -> TabContentView.PanelContent {
         var page: AnyView?
         var terminal: GhosttySurfaceView?
         var header: AnyView?
@@ -198,9 +227,9 @@ struct TerminalStack: NSViewRepresentable {
                 page = self.page(RunPanePlaceholder(runKey: key, tab: tab))
             }
         }
-        return TabContentView.PanelContent(chrome: inject(SidePanelTabBar(tab: tab)), page: page,
+        return TabContentView.PanelContent(chrome: chrome, page: page,
                                            terminal: terminal, terminalHeader: header, terminalFooter: footer,
-                                           minWidth: pane.kind.minWidth, zoomed: tab.panel.isZoomed)
+                                           minWidth: pane.kind.minWidth, zoomed: zoomed)
     }
 }
 

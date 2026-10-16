@@ -154,7 +154,7 @@ struct SessionCardContent {
         }
 
         // Each panel terminal with a job in the foreground (ADR-079, ADR-198).
-        for pane in tab?.panel.panes(.terminal) ?? [] {
+        for pane in tab?.panes(.terminal) ?? [] {
             guard let tab, let job = pane.terminal?.foregroundJobName else { continue }
             rows.append(SessionCardChild(
                 id: "terminal-\(pane.id)", icon: .symbol("terminal"), label: job, detail: tabs.paneTitle(pane, in: tab),

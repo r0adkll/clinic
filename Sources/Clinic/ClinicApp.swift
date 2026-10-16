@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicShowTabBar": true, "ClinicUsageExpanded": true])
+        UserDefaults.standard.register(defaults: ["ClinicShowUsage": true, "ClinicUsageExpanded": true])
         scrubInheritedClaudeEnvironment()
         scrubInheritedDebuggerEnvironment()
         markDevelopmentBuild()
@@ -145,12 +145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // A layer opened from a stack map (ADR-163) is a pane like any other, though the session
                 // never linked it.
                 var refs = self.tabs.pullRequests(for: tab)
-                for pane in tab.panel.panes {
+                for pane in tab.allPanes {
                     if case .pr(let ref) = pane.kind, !refs.contains(ref) { refs.append(ref) }
                 }
                 return refs.map { ref in
                     PRStore.OpenPR(ref: ref, directory: directory,
-                                   isFront: tab.panel.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab),
+                                   isFront: tab.isFront(.pr(ref)) && self.tabs.isFrontAndSelected(tab),
                                    sessionId: tab.sessionId, project: tab.projectPath.isEmpty ? nil : tab.projectPath)
                 }
             }
@@ -379,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if let tab = tabs.selectedTab, !tabs.openInFiles(url, from: tab) { NSWorkspace.shared.open(url) }
                     // `-ClinicPreviewFindOnLaunch <text>` (ADR-191): then the preview's find bar, searching.
                     if let find = UserDefaults.standard.string(forKey: "ClinicPreviewFindOnLaunch"),
-                       let editor = tabs.selectedTab?.panel.pane(.files)?.editor {
+                       let editor = tabs.selectedTab?.pane(.files)?.editor {
                         try? await Task.sleep(for: .seconds(2))
                         editor.previewFindSeed = find
                         editor.previewFindRequest += 1
@@ -388,7 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if UserDefaults.standard.bool(forKey: "ClinicOpenEditorOnLaunch") {
                 tabs.toggleEditor()
-                if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: file) }
+                if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileOnLaunch") { tabs.selectedTab?.pane(.files)?.editor?.open(absolute: file) }
                 // `-ClinicHideFileTree YES` (ADR-081): the Files pane with its tree collapsed.
                 if UserDefaults.standard.bool(forKey: "ClinicHideFileTree") { EditorPrefs.shared.showTree = false }
                 // `-ClinicOpenSecondFileAfterLaunch <path>`: opens another file into a Files pane that is
@@ -397,7 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let second = UserDefaults.standard.string(forKey: "ClinicOpenSecondFileAfterLaunch"), !second.isEmpty {
                     Task {
                         try? await Task.sleep(for: .seconds(5))
-                        tabs.selectedTab?.panel.pane(.files)?.editor?.open(absolute: second)
+                        tabs.selectedTab?.pane(.files)?.editor?.open(absolute: second)
                     }
                 }
             }
@@ -492,13 +492,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 tabs.toggleDiffPanel()
                 if let raw = UserDefaults.standard.string(forKey: "ClinicDiffScope"),
                    let scope = DiffPanelModel.Scope(rawValue: raw) {
-                    tabs.selectedTab?.panel.pane(.diff)?.diff?.scope = scope
+                    tabs.selectedTab?.pane(.diff)?.diff?.scope = scope
                 }
                 // `-ClinicDiffSelectFile <path>`: pick a file out of the tree, which is what a
                 // reader's click does now that the panel shows one file at a time (ADR-101).
                 if let path = UserDefaults.standard.string(forKey: "ClinicDiffSelectFile"), !path.isEmpty {
                     try? await Task.sleep(for: .seconds(6))
-                    tabs.selectedTab?.panel.pane(.diff)?.diff?.smokeSelect(path: path)
+                    tabs.selectedTab?.pane(.diff)?.diff?.smokeSelect(path: path)
                 }
             }
         }
@@ -546,18 +546,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let tab = tabs.selectedTab else { return }
                 let log = Logger(subsystem: "com.r0adkll.clinic", category: "smoke")
                 @MainActor func report(_ step: String) {
-                    let shells = tab.panel.panes(.terminal).map { pane in
-                        "\(tabs.paneTitle(pane, in: tab))\(pane.id == tab.panel.selectedId ? "*" : "")\(pane.terminal?.isOccluded == true ? " (occluded)" : "")"
+                    let shells = tab.panes(.terminal).map { pane in
+                        "\(tabs.paneTitle(pane, in: tab))\(tab.frontPanes.contains { $0.id == pane.id } ? "*" : "")\(pane.terminal?.isOccluded == true ? " (occluded)" : "")"
                     }
                     log.info("smoke terminals \(step, privacy: .public): \(shells.joined(separator: ", "), privacy: .public)")
                 }
                 tabs.togglePanel(tab); report("⌘J")
                 tabs.newTerminal(tab); report("⌘⇧J")
                 tabs.newTerminal(tab); report("⌘⇧J")
-                if let first = tab.panel.panes(.terminal).first { tabs.selectPane(first, in: tab); report("select first") }
+                if let first = tab.panes(.terminal).first { tabs.selectPane(first, in: tab); report("select first") }
                 tabs.showPane(.diff, in: tab); report("⌘⇧G")
                 tabs.togglePanel(tab); report("⌘J")
-                if let second = tab.panel.panes(.terminal).dropFirst().first { tabs.closePane(second, in: tab); report("close second") }
+                if let second = tab.panes(.terminal).dropFirst().first { tabs.closePane(second, in: tab); report("close second") }
                 tabs.newTerminal(tab); report("⌘⇧J")
                 try? await Task.sleep(for: .seconds(3))
                 report("after titles")
@@ -565,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let pane = tabs.idleShell(in: tab) { pane.terminal?.sendLine("sleep 20"); report("run sleep in \(tabs.paneTitle(pane, in: tab))") }
                 try? await Task.sleep(for: .seconds(2))
                 if let pane = tabs.idleShell(in: tab) { report("next command goes to \(tabs.paneTitle(pane, in: tab))") }
-                for pane in tab.panel.panes(.terminal).dropLast() { tabs.closePane(pane, in: tab) }
+                for pane in tab.panes(.terminal).dropLast() { tabs.closePane(pane, in: tab) }
                 try? await Task.sleep(for: .seconds(1))
                 if let pane = tabs.idleShell(in: tab) { pane.terminal?.sendLine("sleep 20"); report("busy last: \(tabs.paneTitle(pane, in: tab))") }
                 try? await Task.sleep(for: .seconds(2))
@@ -848,7 +848,6 @@ struct ClinicCommands: Commands {
             Menu("Sound Packs") { SoundPackPauseItems(store: soundPacks, shortcut: key(.toggleSoundPacks)) }
                 .disabled(soundPacks.installed.isEmpty)
             Toggle("Show Archived Sessions", isOn: Binding(get: { sessions.showArchived }, set: { sessions.showArchived = $0 }))
-            Toggle("Show Tab Bar", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowTabBar") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowTabBar") }))
             Toggle("Show Folder Paths", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "ClinicShowFolderPaths") }, set: { UserDefaults.standard.set($0, forKey: "ClinicShowFolderPaths") }))
             Picker("Session Rows", selection: Binding(get: { UserDefaults.standard.string(forKey: SessionRowStyle.defaultsKey) ?? SessionRowStyle.default.rawValue }, set: { UserDefaults.standard.set($0, forKey: SessionRowStyle.defaultsKey) })) {
                 ForEach(SessionRowStyle.allCases) { Text($0.title).tag($0.rawValue) }

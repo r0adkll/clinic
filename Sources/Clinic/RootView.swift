@@ -19,7 +19,6 @@ struct RootView: View {
     @State private var pullProject: Project?
     @State private var newSessionProject: String?
     @State private var runSheet: RunSheetRequest?
-    @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
     private var windowId: UUID { windowValue ?? TabStore.primaryWindowId }
     private var window: WindowState { tabs.windowState(id: windowId) }
@@ -78,15 +77,12 @@ struct RootView: View {
             newSessionProject = n.object as? String; showNewSession = true
         }
         .modifier(RootToolbar(window: window))
-        .navigationTitle(title(for: window))
+        // An empty title, so the toolbar draws only the header (ADR-212). The toolbar draws whatever
+        // the window's title is, whatever its `titleVisibility`, and `.toolbar(removing: .title)` also
+        // takes the flexible space that holds the controls at the trailing edge.
+        .navigationTitle("")
     }
 
-    /// A screen names the window while it is up; otherwise the selected tab does.
-    private func title(for window: WindowState) -> String {
-        if let screen = window.screen { return screen.title }
-        if window.editingDraft != nil { return "New session" }
-        return tabs.selectedTab(in: window)?.title ?? "Clinic"
-    }
 }
 
 /// Presents the Clone sheet (ADR-168). Its own modifier because `RootView.body` is already as long
@@ -110,19 +106,17 @@ private struct CloneRouting: ViewModifier {
     }
 }
 
+/// The window shows one session's workspace at a time (ADR-212): no session tab bar and no footer. The
+/// sidebar lists the sessions, the toolbar's header names this one, and its own tab row is part of its
+/// content view.
 struct DetailView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(WindowState.self) private var window
-    @AppStorage("ClinicShowTabBar") private var showTabBar = true
 
     var body: some View {
         let mine = tabs.tabs(in: window)
         let selected = mine.first { $0.id == window.selectedTabId }
-        VStack(spacing: 0) {
-            if showTabBar && !mine.isEmpty && !window.isShowingScreen { TabBarView(); Divider() }
-            terminalArea(mine: mine, selected: selected)
-            if !window.isShowingScreen, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
-        }
+        terminalArea(mine: mine, selected: selected)
     }
 
     private func terminalArea(mine: [Tab], selected: Tab?) -> some View {
@@ -134,7 +128,7 @@ struct DetailView: View {
             // the width of everything else in this `ZStack` (ADR-149).
             if !live.isEmpty {
                 TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
-                              keys: live.map { "\($0.id)|\($0.panel.renderKey)|\(tabs.runs.renderKey(for: $0))" })
+                              keys: live.map { "\($0.id)|\($0.main.renderKey)|\($0.panel.renderKey)|\($0.focusedArea)|\(tabs.runs.renderKey(for: $0))" })
             }
             ForEach(mine.filter { $0.replay != nil }) { tab in
                 ReplayView(model: tab.replay!)
@@ -173,54 +167,9 @@ struct DetailView: View {
     }
 }
 
-/// Model, branch and cwd for the selected tab (milestone 2, Collins footer).
-struct TabFooter: View {
-    @Environment(TabStore.self) private var tabs
-    @Environment(SessionStore.self) private var sessions
-    @Environment(PRStore.self) private var prs
-    let tab: Tab
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if tab.sessionId != nil {
-                ModelMenu(tab: tab)
-                EffortMenu(tab: tab)
-            }
-            if let pwd = tab.pwd {
-                Button {
-                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pwd, forType: .string)
-                } label: {
-                    Label(Self.abbreviate(pwd), systemImage: "folder").lineLimit(1).truncationMode(.head)
-                }
-                .buttonStyle(.plain)
-                .help("Working directory (click to copy): \(pwd)")
-            }
-            Spacer(minLength: 8)
-            // Quick actions (ADR-079): each one shows the panel with its tab in front; the tab bar's chevron hides it.
-            HStack(spacing: 6) {
-                PaneToggle(tab: tab, kind: .terminal, help: "Shell in the panel (⌘J)")
-                PaneToggle(tab: tab, kind: .diff, help: "Diff panel (⌘⇧G)")
-                PaneToggle(tab: tab, kind: .files, help: "Editor (⌘⇧E)")
-                if let id = tab.sessionId, let n = sessions.state.attachments[id]?.count, n > 0 {
-                    PaneToggle(tab: tab, kind: .attachments, help: "Media (⌘⇧I)")
-                }
-                // Like the Images chip: the footer only grows a Grill chip once there is a round to
-                // answer, so a session that never gets grilled never carries the control (ADR-131).
-                if let id = tab.sessionId, !sessions.grillRounds(for: id).isEmpty {
-                    PaneToggle(tab: tab, kind: .grill, help: "Grill — the agent's questions (⌘⇧K)")
-                }
-                ForEach(prs.ordered(tabs.pullRequests(for: tab))) { ref in
-                    PRChip(ref: ref, active: tab.panel.isFront(.pr(ref)), open: tab.panel.isOpen(.pr(ref))) { tabs.togglePRPage(tab, ref: ref) }
-                }
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.bar)
-    }
-
+/// Path and model-name formatting the footer used to own (milestone 2); the footer itself went with
+/// ADR-212, its facts moving into the session header.
+enum TabFooter {
     static func abbreviate(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
@@ -242,6 +191,8 @@ struct TabFooter: View {
 struct ModelMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
+    /// The header's form (ADR-212): the name alone, at the line's own size.
+    var compact = false
     private let aliases = ["default"] + ModelAlias.all
     private var modelId: String? { tab.statusLine?.modelId ?? tab.model }
     private var name: String? { tab.statusLine?.modelDisplayName ?? tab.model.map(TabFooter.shortModel) }
@@ -257,7 +208,7 @@ struct ModelMenu: View {
                 Button("Copy Model ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(m, forType: .string) }
             }
         } label: {
-            Label(name ?? "Model", systemImage: "cpu").font(.callout)
+            if compact { Text(name ?? "Model") } else { Label(name ?? "Model", systemImage: "cpu").font(.callout) }
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)
@@ -276,58 +227,19 @@ struct ModelMenu: View {
 struct EffortMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
+    var compact = false
     private let levels = ["low", "medium", "high", "xhigh", "max"]
 
     var body: some View {
         Menu {
             ForEach(levels, id: \.self) { l in Button(l == "xhigh" ? "Extra high" : l.capitalized) { tabs.switchEffort(tab, to: l) } }
         } label: {
-            Label(tab.liveEffort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
+            let level = tab.liveEffort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort"
+            if compact { Text(level) } else { Label(level, systemImage: "gauge.with.dots.needle.33percent").font(.callout) }
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)
         .help(tab.isAtPrompt ? "Switch effort (/effort)" : "Effort can be switched when the session is idle at its prompt")
-    }
-}
-
-/// Footer quick action for one panel pane (ADR-079): shows the panel with this pane in front. Never hides.
-struct PaneToggle: View {
-    @Environment(TabStore.self) private var tabs
-    let tab: Tab
-    let kind: PanelPane.Kind
-    let help: String
-
-    var body: some View {
-        FooterToggle(title: tabs.paneTitle(kind, in: tab), symbol: kind.symbol,
-                     active: tab.panel.isFront(kind), open: tab.panel.isOpen(kind), help: help) {
-            tabs.showPane(kind, in: tab)
-        }
-    }
-}
-
-/// Labeled footer toggle (icon + title) so each control reads at a glance. `active` = this pane is on
-/// screen; `open` = its panel tab exists but something else is in front.
-struct FooterToggle: View {
-    let title: String
-    let symbol: String
-    let active: Bool
-    var open = false
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .labelStyle(.titleAndIcon)
-                .font(.callout)
-                .lineLimit(1)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(active ? Color.accent.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accent.opacity(0.35) : .clear))
-                .foregroundStyle(active ? Color.accent : Color.primary)
-        }
-        .buttonStyle(.plain)
-        .help(help)
     }
 }
 
@@ -359,10 +271,6 @@ struct ExitedOverlay: View {
 /// items otherwise share one, and the split controls are plain buttons now, so they would all run
 /// together. `ToolbarSpacer(.fixed)` between them did not break the shared capsule (tried 2026-09-11),
 /// so these items opt out of it and draw their own.
-/// The window toolbar. On macOS 26 each split control gets its own glass capsule (ADR-123): adjacent
-/// items otherwise share one, and the split controls are plain buttons now, so they would all run
-/// together. `ToolbarSpacer(.fixed)` between them did not break the shared capsule (tried 2026-09-11),
-/// so these items opt out of it and draw their own.
 ///
 /// Which items exist is decided here, not inside them: a `ToolbarItem` whose content is empty still
 /// takes its own width and its capsule's padding, which left a gap where the Run or device control
@@ -380,13 +288,14 @@ private struct RootToolbar: ViewModifier {
         let openIn = tab.flatMap { $0.replay == nil ? ($0.pwd ?? $0.projectPath) : nil }
         let openInProject = tab.flatMap { $0.replay == nil ? $0.projectPath : nil }
         if #available(macOS 26.0, *) {
-            content.toolbar { SpacedItems(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
+            content.toolbar { SpacedItems(window: window, runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
         } else {
-            content.toolbar { Items(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
+            content.toolbar { Items(window: window, runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
         }
     }
 
     private struct Items: ToolbarContent {
+        let window: WindowState
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
         let openIn: String?
@@ -394,7 +303,8 @@ private struct RootToolbar: ViewModifier {
         let sessions: SessionStore
 
         var body: some ToolbarContent {
-            ToolbarItemGroup {
+            ToolbarItem(placement: .navigation) { WorkspaceHeader(window: window) }
+            ToolbarItemGroup(placement: .primaryAction) {
                 StartButtons()
                 TabControls(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions)
                 NotificationBell()
@@ -404,6 +314,7 @@ private struct RootToolbar: ViewModifier {
 
     @available(macOS 26.0, *)
     private struct SpacedItems: ToolbarContent {
+        let window: WindowState
         let runTab: Tab?
         let platforms: [RunDevicePlatform]
         let openIn: String?
@@ -411,16 +322,21 @@ private struct RootToolbar: ViewModifier {
         let sessions: SessionStore
 
         var body: some ToolbarContent {
-            ToolbarItemGroup { StartButtons() }
+            // Always present, whatever it holds: an item added after the first build never appears.
+            ToolbarItem(placement: .navigation) { WorkspaceHeader(window: window) }
+                .sharedBackgroundVisibility(.hidden)
+            // With the title removed nothing else pushes the controls to the trailing edge.
+            ToolbarSpacer(.flexible)
+            ToolbarItemGroup(placement: .primaryAction) { StartButtons() }
             // One item for every control that comes and goes, rather than one item each: SwiftUI
             // settles a toolbar's *items* on the first build, so an item added later never appears and
             // an item whose content went away keeps its width as a gap (both seen 2026-09-11). Inside
             // one item they are ordinary views, which appear and collapse as they should.
-            ToolbarItem {
+            ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 8) { TabControls(runTab: runTab, platforms: platforms, openIn: openIn, openInProject: openInProject, sessions: sessions) }
             }
             .sharedBackgroundVisibility(.hidden)
-            ToolbarItem { NotificationBell() }
+            ToolbarItem(placement: .primaryAction) { NotificationBell() }
         }
     }
 

@@ -4,15 +4,18 @@ import ClinicCore
 import GhosttyBridge
 
 /// Persistent AppKit content for one tab (ADR-019 refined): the agent surface lives here for the tab's
-/// whole life and is never re-parented by SwiftUI. The right-hand panel (ADR-079) is a tab strip hosted
-/// in an `NSHostingView` above a content area that shows either a SwiftUI page or a shell surface.
+/// whole life and is never re-parented by SwiftUI. The workspace's two areas (ADR-212) — the main area,
+/// with Claude pinned first, and the right panel (ADR-079) — are each a tab strip hosted in an
+/// `NSHostingView` above a content area that shows a SwiftUI page or a surface.
 @MainActor
 final class TabContentView: NSView, NSSplitViewDelegate {
-    /// What the panel should show right now; `nil` hides the panel entirely.
+    /// What an area should show right now; `nil` hides the right panel entirely.
     struct PanelContent {
         let chrome: AnyView
         let page: AnyView?
         let terminal: GhosttySurfaceView?
+        /// The main area shows Claude's own surface, which never leaves its host (ADR-212).
+        var showsAgent = false
         /// A band above the terminal and a bar below it: the Run pane's header and failure bar (ADR-122).
         var terminalHeader: AnyView? = nil
         var terminalFooter: AnyView? = nil
@@ -21,11 +24,12 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         let zoomed: Bool
     }
 
-    private let outer = NSSplitView()             // left: agent surface, right: panel
-    private let surfaceHost = SurfaceHostView()
-    private let panel = SidePanelHostView()
+    private let outer = NSSplitView()             // left: main area, right: panel
+    private let main: PaneHostView
+    private let panel = PaneHostView()
     private var rightMin: CGFloat = 320
-    private let leftMin: CGFloat = 360
+    /// The main area's floor: the terminal's 360 pt, or more for a wider pane in front of it.
+    private var leftMin: CGFloat = 360
     /// True while the panel is being installed and positioned, when the split view hands it interim
     /// widths of its own that must not be mistaken for a width the user chose.
     private var isAdjusting = false
@@ -42,6 +46,13 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         return responder === panel || responder.isDescendant(of: panel)
     }
 
+    /// True when the keyboard is in a page or a shell in the main area, rather than in Claude: a
+    /// re-render must not pull it back into a surface that is not on screen.
+    var mainPaneHoldsKeyboard: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return (responder === main || responder.isDescendant(of: main)) && !main.isAgent(responder)
+    }
+
     /// The width the user last settled the panel at: shared by every tab and window, kept across launches.
     /// Hiding the panel takes it out of the split view, so its own autosave cannot do this for us.
     private static let widthKey = "ClinicPanelWidth"
@@ -54,13 +65,12 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     }
 
     init(surface: GhosttySurfaceView) {
+        main = PaneHostView(agent: surface)
         super.init(frame: .zero)
         outer.isVertical = true
         outer.dividerStyle = .thin
         outer.delegate = self
-        surfaceHost.addSubview(surface)
-        surface.frame = surfaceHost.bounds
-        outer.addArrangedSubview(surfaceHost)
+        outer.addArrangedSubview(main)
         outer.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         outer.translatesAutoresizingMaskIntoConstraints = true
         outer.autoresizingMask = [.width, .height]
@@ -72,6 +82,17 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     override func layout() {
         super.layout()
         outer.frame = bounds
+    }
+
+    /// Shows or updates the main area: its strip, and Claude or the pane in front.
+    func setMain(_ content: PanelContent) {
+        leftMin = max(360, content.minWidth)
+        main.apply(content)
+        // A wider pane came to the front of the main area: give it room by narrowing the panel, never
+        // past the panel's own minimum.
+        if outer.arrangedSubviews.count == 2, main.frame.width < leftMin, outer.bounds.width > 0 {
+            outer.setPosition(min(leftMin, outer.bounds.width - rightMin - outer.dividerThickness), ofDividerAt: 0)
+        }
     }
 
     /// Shows, updates or hides the right-hand panel.
@@ -194,12 +215,13 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
 }
 
-/// The panel itself: a SwiftUI tab strip (the height of the session tab bar) over a content area that holds at most one
-/// hosted page and the shell surface, so switching panel tabs never re-parents a libghostty surface.
-/// Everything is pinned with constraints: an `NSHostingView` given only a frame collapses to its
-/// fitting size.
+/// One area of the workspace: a SwiftUI tab strip over a content area that holds at most one hosted
+/// page and one shell or run surface, so switching tabs never re-parents a libghostty surface. The main
+/// area also holds Claude's surface for the tab's whole life, shown while its pinned tab is in front
+/// (ADR-212). Everything is pinned with constraints: an `NSHostingView` given only a frame collapses to
+/// its fitting size.
 @MainActor
-final class SidePanelHostView: NSView {
+final class PaneHostView: NSView {
     private static let barHeight: CGFloat = 34
 
     private let chromeHost = NSHostingView<AnyView>(rootView: AnyView(EmptyView()))
@@ -212,9 +234,19 @@ final class SidePanelHostView: NSView {
     private lazy var headerHeight = terminalHeaderHost.heightAnchor.constraint(equalToConstant: 0)
     private lazy var footerHeight = terminalFooterHost.heightAnchor.constraint(equalToConstant: 0)
     private static let footerBarHeight: CGFloat = 44
+    /// Claude's surface, in the main area only. Added once and never shown through `show`, which would
+    /// re-parent it.
+    private let agentHost: SurfaceHostView?
+    private let agent: GhosttySurfaceView?
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(agent: GhosttySurfaceView? = nil) {
+        self.agent = agent
+        self.agentHost = agent.map { surface in
+            let host = SurfaceHostView()
+            host.addSubview(surface)
+            return host
+        }
+        super.init(frame: .zero)
         chromeHost.sizingOptions = []
         terminalHeaderHost.sizingOptions = []
         terminalFooterHost.sizingOptions = []
@@ -227,6 +259,11 @@ final class SidePanelHostView: NSView {
         content.addSubview(terminalHost)
         content.addSubview(terminalFooterHost)
         terminalHost.isHidden = true
+        if let agentHost {
+            agentHost.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(agentHost)
+            NSLayoutConstraint.activate(Self.pin(agentHost, to: content))
+        }
         NSLayoutConstraint.activate([
             chromeHost.leadingAnchor.constraint(equalTo: leadingAnchor),
             chromeHost.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -260,9 +297,16 @@ final class SidePanelHostView: NSView {
          view.bottomAnchor.constraint(equalTo: container.bottomAnchor)]
     }
 
+    /// Whether this responder is Claude's surface, or inside it.
+    func isAgent(_ view: NSView) -> Bool {
+        guard let agent else { return false }
+        return view === agent || view.isDescendant(of: agent)
+    }
+
     func apply(_ c: TabContentView.PanelContent) {
         chromeHost.rootView = c.chrome
-        if let page = c.page {
+        agentHost?.isHidden = !c.showsAgent
+        if let page = c.page, !c.showsAgent {
             if let host = pageHost {
                 host.rootView = page
             } else {
@@ -277,10 +321,11 @@ final class SidePanelHostView: NSView {
             pageHost?.removeFromSuperview()
             pageHost = nil
         }
-        terminalHost.show(c.terminal)
-        terminalHost.isHidden = c.terminal == nil
-        let header = c.terminal == nil ? nil : c.terminalHeader
-        let footer = c.terminal == nil ? nil : c.terminalFooter
+        let terminal = c.showsAgent ? nil : c.terminal
+        terminalHost.show(terminal)
+        terminalHost.isHidden = terminal == nil
+        let header = terminal == nil ? nil : c.terminalHeader
+        let footer = terminal == nil ? nil : c.terminalFooter
         terminalHeaderHost.rootView = header ?? AnyView(EmptyView())
         terminalFooterHost.rootView = footer ?? AnyView(EmptyView())
         headerHeight.constant = header == nil ? 0 : PaneMetrics.headerHeight

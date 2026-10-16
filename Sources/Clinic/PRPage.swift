@@ -21,7 +21,7 @@ struct PRPage: View {
     @State private var pane: CodeHost.Pane = CodeHost.Pane(rawValue: UserDefaults.standard.string(forKey: "ClinicPRPaneOnLaunch") ?? "") ?? .conversation
     /// Used only if the pane has none of its own, which `TabStore.makePane` always gives it.
     @State private var ownFiles = DiffBrowser()
-    private var files: DiffBrowser { tab.panel.pane(.pr(ref))?.changes ?? ownFiles }
+    private var files: DiffBrowser { tab.pane(.pr(ref))?.changes ?? ownFiles }
     @State private var confirm: PendingAction?
     /// Merge-box lines whose checks the reader has shown or hidden, against the default: a blocking line
     /// starts open, so a failing build is a glance away, not a click (ADR-087).

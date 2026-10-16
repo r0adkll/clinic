@@ -73,7 +73,7 @@ struct DiffPanel: View {
     private func openInFiles(_ path: String) {
         guard let root = model.repo?.root else { return }
         tabs.showPane(.files, in: tab)
-        tab.panel.pane(.files)?.editor?.open(absolute: (root as NSString).appendingPathComponent(path))
+        tab.pane(.files)?.editor?.open(absolute: (root as NSString).appendingPathComponent(path))
     }
 
     // MARK: What is being compared (ADR-187)
