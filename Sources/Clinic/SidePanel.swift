@@ -79,7 +79,7 @@ final class PanelPane: Identifiable {
             // panel's own divider while the tree divider was being dragged, and the two would fight.
             case .files: EditorPrefs.shared.showTree ? 500 : 360
             // A question's body runs to paragraphs and its choices to full sentences, so this is the
-            // widest minimum in the panel. A long round widens further with `zoomPanel` (ADR-131).
+            // widest minimum in the panel.
             case .grill: 460
             }
         }
@@ -122,11 +122,11 @@ final class PanelPane: Identifiable {
 
 /// One of a session's two tab areas (ADR-212): the main area, where Claude is pinned first, or the right
 /// panel (ADR-079). An ordered strip of panes with one selected. In the main area no selection means
-/// Claude is in front; the right panel also shows and hides, and can zoom over the whole session.
+/// Claude is in front; the right panel also shows and hides.
 @MainActor
 @Observable
 final class SidePanel {
-    /// The main area, which always shows (Claude when no pane is selected) and never zooms.
+    /// The main area, which always shows (Claude when no pane is selected).
     let isMain: Bool
     private(set) var panes: [PanelPane] = []
     var selectedId: UUID? {
@@ -135,19 +135,15 @@ final class SidePanel {
             syncWatchers()
         }
     }
-    /// Hiding the panel un-zooms it, so the two controls can never leave a tab with no way back (ADR-081).
     /// The main area is always visible.
     var isVisible: Bool {
         didSet {
             // Only ever put back, never re-set to what it is: an observed property assigned in its own
             // didSet recurses until the stack runs out.
             if isMain && !isVisible { isVisible = true; return }
-            if !isVisible { isZoomed = false }
             syncWatchers()
         }
     }
-    /// The panel fills the tab, with the main area hidden behind it (ADR-081).
-    var isZoomed = false
 
     init(isMain: Bool = false) {
         self.isMain = isMain
@@ -166,9 +162,8 @@ final class SidePanel {
     func panes(_ kind: PanelPane.Kind) -> [PanelPane] { panes.filter { $0.kind == kind } }
     func contains(_ pane: PanelPane) -> Bool { panes.contains { $0.id == pane.id } }
     /// Each shell pane is drawn only while it is the one on screen, in a tab on screen (ADR-019, ADR-198).
-    /// A zoomed right panel covers the main area, so the main area's shells stop too (ADR-081).
-    func occludeShells(tabHidden: Bool, covered: Bool = false) {
-        for pane in panes(.terminal) { pane.terminal?.isOccluded = tabHidden || covered || !isVisible || pane.id != selectedId }
+    func occludeShells(tabHidden: Bool) {
+        for pane in panes(.terminal) { pane.terminal?.isOccluded = tabHidden || !isVisible || pane.id != selectedId }
     }
     /// The pane is open, the area is showing, and this pane is the one on screen.
     func isFront(_ kind: PanelPane.Kind) -> Bool { isVisible && selected?.kind == kind }
@@ -226,7 +221,6 @@ final class SidePanel {
         panes = []
         selectedId = nil
         isVisible = isMain
-        isZoomed = false
     }
 
     /// Only the pane on screen watches the file system; the others idle until they come back to the
@@ -246,7 +240,7 @@ final class SidePanel {
     /// The tree toggle is in here because it changes the Files pane's minimum width, which only the
     /// host knows what to do with (ADR-081).
     var renderKey: String {
-        "\(isVisible)|\(isZoomed)|\(EditorPrefs.shared.showTree)|\(ImagePrefs.shared.showList)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
+        "\(isVisible)|\(EditorPrefs.shared.showTree)|\(ImagePrefs.shared.showList)|\(selectedId?.uuidString ?? "-")|" + panes.map { "\($0.id)\($0.kind)" }.joined(separator: ",")
     }
 }
 
@@ -258,8 +252,7 @@ private extension Array {
 
 /// Tab strip above one of the workspace's areas (ADR-212): one chip per pane and a menu of everything else
 /// (ADR-079, sized and made adaptive by ADR-104). Every area draws the same strip (ADR-214). The main area's
-/// pins Claude first and carries the zoom and the panel toggle at its trailing end; the right panel's
-/// carries the unzoom while it is zoomed over the main area.
+/// pins Claude first and carries the panel toggle at its trailing end.
 struct PaneTabStrip: View {
     @Environment(TabStore.self) private var tabs
     @Environment(KeyBindings.self) private var bindings
@@ -331,20 +324,10 @@ struct PaneTabStrip: View {
     private var trailing: some View {
         if area == .main, !tab.isReplay {
             Divider().frame(height: 16)
-            PaneIconButton(symbol: tab.panel.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                           help: tab.panel.isZoomed ? "Shrink the panel back beside the session" + bindings.hint(.zoomPanel)
-                                                    : "Expand the panel to fill the window" + bindings.hint(.zoomPanel),
-                           isOn: tab.panel.isZoomed) { tabs.togglePanelZoom(tab) }
             PaneIconButton(symbol: "sidebar.right",
                            help: tab.panel.isVisible ? "Hide the right panel" + bindings.hint(.togglePanelVisibility) + ", or ⇧-click its tab bar"
                                                      : "Show the right panel" + bindings.hint(.togglePanelVisibility),
                            isOn: tab.panel.isVisible) { tabs.togglePanelVisibility(tab) }
-        } else if area == .right, tab.panel.isZoomed {
-            // Zoomed, the panel covers the main area and its strip, where the zoom button lives, so the
-            // way back is here too (ADR-212).
-            PaneIconButton(symbol: "arrow.down.right.and.arrow.up.left",
-                           help: "Shrink the panel back beside the session" + bindings.hint(.zoomPanel),
-                           isOn: true) { tabs.togglePanelZoom(tab) }
         }
     }
 
@@ -581,7 +564,7 @@ struct SidePanelTabChip: View {
 
 /// What the panel shows when it is open but holds no tabs (ADR-172): the views it can hold, each
 /// saying what it would show for this tab and the chord that opens it from anywhere, then what this
-/// session has produced — its pull requests and runs — and the chords that hide or zoom the panel.
+/// session has produced — its pull requests and runs — and the chord that hides the panel.
 ///
 /// An empty panel is only ever asked for (ADR-130), so it is read by someone choosing what to put
 /// here; a row per view with a reason to pick it is that choice, where a stack of bare buttons was not.
@@ -678,7 +661,6 @@ struct SidePanelEmptyState: View {
     private var footer: some View {
         HStack(spacing: 14) {
             footerHint("Hide", .togglePanelVisibility)
-            footerHint("Zoom", .zoomPanel)
         }
         .frame(maxWidth: .infinity)
     }

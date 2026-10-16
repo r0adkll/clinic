@@ -92,15 +92,14 @@ final class Tab: Identifiable {
     /// The pane of this kind a quick action means, in either area: the one fronted last (ADR-198).
     func pane(_ kind: PanelPane.Kind) -> PanelPane? { SidePanel.mostRecent(of: panes(kind)) }
     func isOpen(_ kind: PanelPane.Kind) -> Bool { pane(kind) != nil }
-    /// Claude's surface is what the main area shows, and no zoomed panel covers it.
-    var isClaudeInFront: Bool { main.selectedId == nil && !panel.isZoomed }
-    /// On screen in either area: the right panel's front while it shows, or the main area's unless a
-    /// zoomed panel covers it.
-    func isFront(_ kind: PanelPane.Kind) -> Bool { panel.isFront(kind) || (!panel.isZoomed && main.isFront(kind)) }
+    /// Claude's surface is what the main area shows.
+    var isClaudeInFront: Bool { main.selectedId == nil }
+    /// On screen in either area: the right panel's front while it shows, or the main area's.
+    func isFront(_ kind: PanelPane.Kind) -> Bool { panel.isFront(kind) || main.isFront(kind) }
     /// The panes on screen, the focused area's first: what the menu's pane verbs act on.
     var frontPanes: [PanelPane] {
         let right = panel.isVisible ? panel.selected : nil
-        let left = panel.isZoomed ? nil : main.selected
+        let left = main.selected
         return (focusedArea == .right ? [right, left] : [left, right]).compactMap { $0 }
     }
     var frontPane: PanelPane? { frontPanes.first }
@@ -117,7 +116,7 @@ final class Tab: Identifiable {
     /// front shell.
     func syncOcclusion(hidden: Bool) {
         surface.isOccluded = hidden || !isClaudeInFront
-        main.occludeShells(tabHidden: hidden, covered: panel.isZoomed)
+        main.occludeShells(tabHidden: hidden)
         panel.occludeShells(tabHidden: hidden)
     }
 
@@ -1126,20 +1125,6 @@ final class TabStore {
         focusPanel(tab)
     }
 
-    /// ⌘⌥⇧J: the panel fills the tab, with the main area hidden behind it (ADR-081). Zooming a
-    /// hidden panel shows it, so the action always lands somewhere.
-    func togglePanelZoom(_ tab: Tab? = nil) {
-        guard let tab = tab ?? selectedTab else { return }
-        if tab.panel.isZoomed {
-            tab.panel.isZoomed = false
-        } else {
-            tab.panel.isVisible = true
-            tab.panel.isZoomed = true
-            tab.focusedArea = .right
-        }
-        focusPanel(tab)
-    }
-
     /// ⌘⌃E: the front browser's list column — the Files pane's tree or the Images pane's thumbnails.
     /// One key rather than one per pane, because ADR-102 made it one control; each pane keeps its own
     /// preference, for the reason ADR-091 gives (wanting one list open is not wanting them all open).
@@ -1225,7 +1210,6 @@ final class TabStore {
     /// The pinned Claude tab: the main area shows the session again (ADR-212).
     func selectClaude(in tab: Tab) {
         tab.main.selectedId = nil
-        tab.panel.isZoomed = false
         tab.focusedArea = .main
         focusPanel(tab)
     }
@@ -1413,8 +1397,7 @@ final class TabStore {
         tab.syncOcclusion(hidden: window(of: tab).selectedTabId != tab.id)
         runs.claim(for: tab)
         runs.syncOcclusion()
-        let target: GhosttySurfaceView? = if tab.panel.isZoomed { keyboardTarget(.right, in: tab) }
-                                          else if tab.focusedArea == .right, let right = keyboardTarget(.right, in: tab) { right }
+        let target: GhosttySurfaceView? = if tab.focusedArea == .right, let right = keyboardTarget(.right, in: tab) { right }
                                           else { keyboardTarget(.main, in: tab) }
         // A pane opened in a tab nobody is looking at — by an agent's `ask_round` or `show_image` —
         // must not move the keyboard: the window has one, and it belongs to whatever is on screen.
@@ -1423,7 +1406,7 @@ final class TabStore {
         let window = tab.surface.window
         // A page in front of the main area takes the keyboard itself, on a click; leaving the agent's
         // surface first responder behind it would type into a session that is not on screen.
-        if target == nil, !tab.isClaudeInFront, tab.focusedArea == .main || tab.panel.isZoomed {
+        if target == nil, !tab.isClaudeInFront, tab.focusedArea == .main {
             DispatchQueue.main.async { if window?.firstResponder === tab.surface { window?.makeFirstResponder(nil) } }
             return
         }

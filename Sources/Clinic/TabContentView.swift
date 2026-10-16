@@ -21,8 +21,6 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         var terminalHeader: AnyView? = nil
         var terminalFooter: AnyView? = nil
         let minWidth: CGFloat
-        /// The panel fills the tab, hiding the split view whole (ADR-081).
-        let zoomed: Bool
     }
 
     private let outer = NSSplitView()             // left: main area, right: panel
@@ -34,8 +32,6 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     /// True while the panel is being installed and positioned, when the split view hands it interim
     /// widths of its own that must not be mistaken for a width the user chose.
     private var isAdjusting = false
-    /// The panel is pinned over this whole view and the split view is hidden (ADR-081).
-    private(set) var isZoomed = false
 
     /// True when the keyboard is somewhere inside the panel — the image viewer, a code view, a
     /// filter field. The agent surface reclaims the keyboard whenever the terminal stack re-renders
@@ -109,8 +105,7 @@ final class TabContentView: NSView, NSSplitViewDelegate {
     func setPanel(_ content: PanelContent?) {
         guard let content else {
             if panel.superview != nil {
-                if !isZoomed { rememberWidth() }
-                leaveZoom()
+                rememberWidth()
                 outer.removeArrangedSubview(panel)
                 panel.removeFromSuperview()
                 panel.clear()
@@ -118,12 +113,6 @@ final class TabContentView: NSView, NSSplitViewDelegate {
             return
         }
         rightMin = content.minWidth
-        if content.zoomed {
-            panel.apply(content)
-            enterZoom()
-            return
-        }
-        leaveZoom()
         let isNew = panel.superview == nil
         if isNew {
             isAdjusting = true
@@ -170,38 +159,11 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         }
     }
 
-    /// Zoom: the panel comes out of the split view and is pinned over this whole view, and the split
-    /// view is hidden. Driving the divider to zero instead would resize the agent surface to zero
-    /// columns and reflow its scrollback; hidden, it keeps the size it had (ADR-081). The libghostty
-    /// surfaces are never re-parented — only the panel that hosts one moves.
-    private func enterZoom() {
-        guard !isZoomed else { return }
-        if panel.superview === outer {
-            rememberWidth()
-            outer.removeArrangedSubview(panel)
-            panel.removeFromSuperview()
-        }
-        isZoomed = true
-        outer.isHidden = true
-        panel.frame = bounds
-        panel.autoresizingMask = [.width, .height]
-        addSubview(panel)
-        panel.layoutSubtreeIfNeeded()
-    }
-
-    /// Takes the panel back out of zoom; `setPanel` then puts it into the split view as if it were new.
-    private func leaveZoom() {
-        guard isZoomed else { return }
-        isZoomed = false
-        panel.removeFromSuperview()
-        outer.isHidden = false
-    }
-
     /// Records the panel's current width. Ignores widths below any pane minimum, which are only ever the
     /// transient sizes a freshly added arranged subview passes through.
     private func rememberWidth() {
         let width = panel.frame.width
-        guard !isAdjusting, !isZoomed, panel.superview === outer, width >= 200, abs(width - Self.savedWidth) >= 1 else { return }
+        guard !isAdjusting, panel.superview === outer, width >= 200, abs(width - Self.savedWidth) >= 1 else { return }
         Self.savedWidth = width
     }
 
@@ -227,9 +189,8 @@ final class TabContentView: NSView, NSSplitViewDelegate {
             let r = v.convert(v.bounds, to: self)
             return .init(x: r.minX, y: r.minY, width: r.width, height: r.height)
         }
-        let mainRect = isZoomed ? PaneDropZones.Rect(x: 0, y: 0, width: 0, height: 0) : rect(main)
         let panelRect = panel.superview != nil ? rect(panel) : nil
-        guard let target = PaneDropZones.target(x: p.x, y: p.y, main: mainRect, panel: panelRect, from: from) else { return nil }
+        guard let target = PaneDropZones.target(x: p.x, y: p.y, main: rect(main), panel: panelRect, from: from) else { return nil }
         return (item.id, target)
     }
 

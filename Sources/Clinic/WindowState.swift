@@ -159,10 +159,10 @@ struct TerminalStack: NSViewRepresentable {
         if visible, let tab = live.first(where: { $0.id == selectedId }) {
             DispatchQueue.main.async {
                 // What the main area shows takes the keyboard back — Claude, or a shell in front of it —
-                // but not behind a zoomed panel (ADR-081), not from a right-panel shell the reader is
+                // but not from a right-panel shell the reader is
                 // in, and not out of a pane they are using (ADR-212).
                 let target: GhosttySurfaceView? = tab.isClaudeInFront ? tab.surface
-                    : tab.panel.isZoomed ? nil : tab.main.selected?.terminal
+                    : tab.main.selected?.terminal
                 guard let target, let w = tab.surface.window, w.firstResponder !== target,
                       !(tab.focusedArea == .right && tab.panel.isFront(.terminal)),
                       !tab.contentView.panelHoldsKeyboard, !tab.contentView.mainPaneHoldsKeyboard else { return }
@@ -188,9 +188,9 @@ struct TerminalStack: NSViewRepresentable {
         let chrome = inject(PaneTabStrip(tab: tab, area: .main))
         guard let pane = tab.main.selected else {
             return TabContentView.PanelContent(chrome: chrome, page: nil, terminal: nil, showsAgent: true,
-                                               minWidth: 360, zoomed: false)
+                                               minWidth: 360)
         }
-        return content(of: pane, in: tab, chrome: chrome, zoomed: false)
+        return content(of: pane, in: tab, chrome: chrome)
     }
 
     /// The chrome and the front pane's content for one tab's panel (ADR-079); nil when the panel is hidden.
@@ -199,13 +199,13 @@ struct TerminalStack: NSViewRepresentable {
         let chrome = inject(PaneTabStrip(tab: tab, area: .right))
         guard let pane = tab.panel.selected else {
             return TabContentView.PanelContent(chrome: chrome, page: page(SidePanelEmptyState(tab: tab)),
-                                               terminal: nil, minWidth: 320, zoomed: tab.panel.isZoomed)
+                                               terminal: nil, minWidth: 320)
         }
-        return content(of: pane, in: tab, chrome: chrome, zoomed: tab.panel.isZoomed)
+        return content(of: pane, in: tab, chrome: chrome)
     }
 
     /// One pane's page or surface, in whichever area it is.
-    private func content(of pane: PanelPane, in tab: Tab, chrome: AnyView, zoomed: Bool) -> TabContentView.PanelContent {
+    private func content(of pane: PanelPane, in tab: Tab, chrome: AnyView) -> TabContentView.PanelContent {
         var page: AnyView?
         var terminal: GhosttySurfaceView?
         var header: AnyView?
@@ -229,7 +229,7 @@ struct TerminalStack: NSViewRepresentable {
         }
         return TabContentView.PanelContent(chrome: chrome, page: page,
                                            terminal: terminal, terminalHeader: header, terminalFooter: footer,
-                                           minWidth: pane.kind.minWidth, zoomed: zoomed)
+                                           minWidth: pane.kind.minWidth)
     }
 }
 

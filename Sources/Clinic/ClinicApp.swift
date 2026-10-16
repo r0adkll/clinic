@@ -431,9 +431,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if stopAfter > 0 { try? await Task.sleep(for: .seconds(stopAfter)); tabs.stopSelectedRun() }
             }
         }
-        // `-ClinicZoomPanelAfterLaunch <seconds>` (ADR-081): let the panel settle, then zoom it over the tab.
-        let zoomAfter = UserDefaults.standard.double(forKey: "ClinicZoomPanelAfterLaunch")
-        if zoomAfter > 0 { Task { try? await Task.sleep(for: .seconds(zoomAfter)); tabs.togglePanelZoom() } }
         // `-ClinicOpenFileWindowOnLaunch <path>` (ADR-081): pop a file straight out into its own window.
         if let file = UserDefaults.standard.string(forKey: "ClinicOpenFileWindowOnLaunch"), !file.isEmpty {
             Task {
@@ -863,8 +860,6 @@ struct ClinicCommands: Commands {
         CommandMenu("Panel") {
             Button(tabs.selectedTab?.panel.isVisible == true ? "Hide Panel" : "Show Panel") { tabs.togglePanelVisibility() }
                 .keyboardShortcut(key(.togglePanelVisibility)).disabled(tabs.selectedTab == nil)
-            Button(tabs.selectedTab?.panel.isZoomed == true ? "Unzoom Panel" : "Zoom Panel") { tabs.togglePanelZoom() }
-                .keyboardShortcut(key(.zoomPanel)).disabled(tabs.selectedTab == nil)
             Toggle(tabs.isImagesPaneFront ? "Show Media List" : "Show File Tree",
                    isOn: Binding(get: { tabs.browserListShown }, set: { _ in tabs.toggleBrowserList() }))
                 .keyboardShortcut(key(.toggleFileTree)).disabled(!tabs.canToggleBrowserList)

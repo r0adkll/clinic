@@ -5310,3 +5310,9 @@ ADR-215's text payload would have been pasted into a terminal (surfaces take `.s
 writes it. `TabContentView` takes the drop. `PaneDropZones` (ClinicCore, 5 tests) decides between the right edge
 (panel hidden), the panel and the main area. A labelled accent highlight shows the zone. The drag needs a check by
 hand. `make test` 721 pass.
+
+## 2026-10-15 — The panel does not zoom (ADR-219)
+
+User found zoom confusing beside movable tabs. Removed the buttons, the menu item and chord, the empty panel's
+hint, the launch seam, and the zoom state and hosting. The main strip ends with the panel toggle. Build clean,
+checked in Clinic Dev.
