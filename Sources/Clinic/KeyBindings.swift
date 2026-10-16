@@ -8,6 +8,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     case renameSession, toggleFavorite, archiveSession, undoArchive, stopSession, forkSession, backgroundSession, sessionDetails, replaySession, jumpToSession, moveTabToNewWindow
     case tasks, mcpServers, marketplace, automations, sounds, selectSessions, notifications, caffeine, toggleSoundPacks, nextProjectGroup, previousProjectGroup
     case togglePanel, newTerminal, toggleDiffPage = "toggleGitPage", toggleEditor, toggleAttachments, toggleGrill, togglePRPage
+    /// A view opened beside Claude rather than in the right panel: each opener's chord with ⌥ (ADR-220).
+    case terminalBeside, newTerminalBeside, diffBeside, filesBeside, mediaBeside, grillBeside, prBeside
+    /// Moving between sessions without the sidebar (ADR-220): most recently used, and in sidebar order.
+    case nextSession, previousSession, nextOpenSession, previousOpenSession
     case togglePanelVisibility, toggleFileTree, cycleMarkdownView, quickLookImage, copyGrillRound, nextPanelTab, previousPanelTab, closePanelTab, nextTab, previousTab
     /// Reading a diff (ADR-188): in the Diff panel and a pull request's Files tab.
     case nextDiffChange, previousDiffChange, nextDiffFile, previousDiffFile, markDiffFileViewed
@@ -33,7 +37,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .sessionDetails: "Session Details…"
         case .replaySession: "Replay Session…"
         case .jumpToSession: "Jump to Session…"
-        case .moveTabToNewWindow: "Move Tab to New Window"
+        case .moveTabToNewWindow: "Move Session to New Window"
         case .tasks: "Tasks"
         case .mcpServers: "MCP Servers"
         case .marketplace: "Marketplace"
@@ -67,6 +71,17 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .closePanelTab: "Close Panel Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .terminalBeside: "Terminal Beside Claude"
+        case .newTerminalBeside: "New Terminal Beside Claude"
+        case .diffBeside: "Diff Beside Claude"
+        case .filesBeside: "Files Beside Claude"
+        case .mediaBeside: "Media Beside Claude"
+        case .grillBeside: "Grill Beside Claude"
+        case .prBeside: "Pull Request Beside Claude"
+        case .nextSession: "Next Session (Most Recent)"
+        case .previousSession: "Previous Session (Most Recent)"
+        case .nextOpenSession: "Next Open Session"
+        case .previousOpenSession: "Previous Open Session"
         case .run: "Run"
         case .stopRun: "Stop Run"
         case .chooseRunConfiguration: "Choose Run Configuration…"
@@ -81,8 +96,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .togglePanel, .newTerminal, .toggleDiffPage, .toggleEditor, .toggleAttachments, .toggleGrill, .togglePRPage,
              .togglePanelVisibility, .toggleFileTree, .cycleMarkdownView, .quickLookImage, .copyGrillRound,
              .nextPanelTab, .previousPanelTab, .closePanelTab,
+             .terminalBeside, .newTerminalBeside, .diffBeside, .filesBeside, .mediaBeside, .grillBeside, .prBeside,
              .nextDiffChange, .previousDiffChange, .nextDiffFile, .previousDiffFile, .markDiffFileViewed: "Panel"
-        case .nextTab, .previousTab: "Tabs"
+        case .nextTab, .previousTab, .nextSession, .previousSession, .nextOpenSession, .previousOpenSession: "Tabs"
         case .run, .stopRun, .chooseRunConfiguration: "Run"
         }
     }
@@ -150,6 +166,20 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .closePanelTab: "cmd+ctrl+w"
         case .nextTab: "cmd+shift+]"
         case .previousTab: "cmd+shift+["
+        // ADR-220: each opener's chord with ⌥. Terminal's would be ⌥⌘J, which shows and hides the panel.
+        case .terminalBeside: nil
+        case .newTerminalBeside: "cmd+opt+shift+j"
+        case .diffBeside: "cmd+opt+shift+g"
+        case .filesBeside: "cmd+opt+shift+e"
+        case .mediaBeside: "cmd+opt+shift+i"
+        case .grillBeside: "cmd+opt+shift+k"
+        case .prBeside: "cmd+opt+shift+p"
+        // ADR-220. ⌃⇥ as in every tabbed app, but over sessions; ⌃⌥⌘↑/↓ walk the sidebar, since ⌥⌘↑/↓ is
+        // the diff's next file (ADR-188).
+        case .nextSession: "ctrl+tab"
+        case .previousSession: "ctrl+shift+tab"
+        case .nextOpenSession: "cmd+opt+ctrl+down"
+        case .previousOpenSession: "cmd+opt+ctrl+up"
         // ADR-122. ⌘. is Stop Session, so stopping a run takes ⌃ as well.
         case .run: "cmd+r"
         case .stopRun: "cmd+ctrl+."

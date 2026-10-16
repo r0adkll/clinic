@@ -836,6 +836,7 @@ final class TabStore {
         if let tab = selectedTab(in: window) { runs.claim(for: tab) }
         runs.syncOcclusion()
         if let tab = selectedTab(in: window) {
+            noteSelected(tab, in: window)
             tab.unread = false
             if let id = tab.sessionId { history.markRead(sessionId: id) }
             if let id = tab.sessionId { sessions.update { $0.selectedSessionId = id } }
@@ -1093,8 +1094,13 @@ final class TabStore {
     /// panel if it is there and hidden. Otherwise open it in `area` — the right panel unless the caller
     /// asked for the main area, so nothing but the reader adds a tab beside Claude (ADR-212). Never a
     /// toggle: hiding is its own action.
-    func showPane(_ kind: PanelPane.Kind, in tab: Tab? = nil, area: Tab.Area = .right) {
+    func showPane(_ kind: PanelPane.Kind, in tab: Tab? = nil, area: Tab.Area = .right, bringHere: Bool = false) {
         guard let tab = tab ?? selectedTab else { return }
+        if bringHere, let existing = tab.pane(kind), let found = tab.area(of: existing), found != area {
+            // ⌥ with an opener (ADR-220): the view comes to this area, rather than being fronted where it is.
+            movePane(existing, in: tab, to: area)
+            return
+        }
         if let existing = tab.pane(kind), let found = tab.area(of: existing) {
             tab.group(found).select(existing)
             tab.focusedArea = found
@@ -1141,7 +1147,110 @@ final class TabStore {
             key.performClose(nil)
             return
         }
-        if editingDraft != nil { closeDraftScreen() } else { closeSelected() }
+            if editingDraft != nil { closeDraftScreen(); return }
+        // The tab the keyboard is in (ADR-220): a pane closes outright; Claude's tab closes the session,
+        // through the close sheet (ADR-037).
+        guard let tab = selectedTab else { return }
+        if let pane = keyboardPane(in: tab) { closePane(pane, in: tab) } else { close(tab) }
+    }
+
+    // MARK: The keyboard over the workspace (ADR-220)
+
+    /// The area the keyboard is in: where the first responder is, else the area the reader last acted in.
+    func keyboardArea(in tab: Tab) -> Tab.Area {
+        if tab.contentView.panelHoldsKeyboard, tab.panel.isVisible { return .right }
+        if tab.contentView.mainPaneHoldsKeyboard || tab.surface.window?.firstResponder === tab.surface { return .main }
+        return tab.focusedArea == .right && tab.panel.isVisible ? .right : .main
+    }
+
+    /// The pane in front of the keyboard's area; nil for Claude.
+    func keyboardPane(in tab: Tab) -> PanelPane? { tab.group(keyboardArea(in: tab)).selected }
+
+    /// ⌘1–9: the tab at that place in the keyboard's area. In the main area 1 is Claude.
+    func selectTab(number n: Int) {
+        guard let tab = selectedTab else { return }
+        let area = keyboardArea(in: tab)
+        let panes = tab.group(area).panes
+        if area == .main {
+            if n == 1 { selectClaude(in: tab) } else if panes.indices.contains(n - 2) { selectPane(panes[n - 2], in: tab) }
+        } else if panes.indices.contains(n - 1) {
+            selectPane(panes[n - 1], in: tab)
+        }
+    }
+
+    /// ⌘⇧] / ⌘⇧[: the next or previous tab in the keyboard's area, Claude among the main area's.
+    func cycleTab(_ delta: Int) {
+        guard let tab = selectedTab else { return }
+        let area = keyboardArea(in: tab)
+        tab.group(area).cycle(by: delta)
+        tab.focusedArea = area
+        focusPanel(tab)
+    }
+
+    /// Sessions in each window, most recently selected first (ADR-220).
+    private var sessionRecency: [UUID: [Tab.ID]] = [:]
+    /// A ⌃⇥ walk in progress: the order it walks, frozen when it began, and where it is.
+    private var sessionCycle: (window: UUID, order: [Tab.ID], index: Int)?
+    private var controlMonitor: Any?
+
+    private func noteSelected(_ tab: Tab, in window: WindowState) {
+        guard sessionCycle == nil else { return }
+        var order = sessionRecency[window.id] ?? []
+        order.removeAll { $0 == tab.id }
+        order.insert(tab.id, at: 0)
+        sessionRecency[window.id] = order
+    }
+
+    /// ⌃⇥ / ⌃⇧⇥: the session used before this one, and on through them while ⌃ is held, as ⌘⇥ walks apps.
+    /// Letting go of ⌃ settles on the one reached, which then counts as the most recent.
+    func cycleSessions(_ delta: Int) {
+        let w = activeWindow
+        let open = tabs(in: w).map(\.id)
+        if sessionCycle?.window != w.id {
+            let recent = (sessionRecency[w.id] ?? []).filter(open.contains)
+            sessionCycle = (w.id, recent + open.filter { !recent.contains($0) }, 0)
+        }
+        guard var cycle = sessionCycle, cycle.order.count > 1 else { sessionCycle = nil; return }
+        cycle.index = (cycle.index + delta + cycle.order.count) % cycle.order.count
+        sessionCycle = cycle
+        w.selectedTabId = cycle.order[cycle.index]
+        if NSEvent.modifierFlags.contains(.control) {
+            if controlMonitor == nil {
+                controlMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                    if !event.modifierFlags.contains(.control) { MainActor.assumeIsolated { self?.endSessionCycle() } }
+                    return event
+                }
+            }
+        } else {
+            // Chosen from the menu with the mouse: nothing is held, so it settles at once.
+            endSessionCycle()
+        }
+    }
+
+    private func endSessionCycle() {
+        if let controlMonitor { NSEvent.removeMonitor(controlMonitor) }
+        controlMonitor = nil
+        let ended = sessionCycle
+        sessionCycle = nil
+        if let ended, let w = windows.first(where: { $0.id == ended.window }), let tab = selectedTab(in: w) { noteSelected(tab, in: w) }
+    }
+
+    /// ⌃⌥⌘↓ / ↑: the next or previous open session in the order the sidebar lists them — by project, then
+    /// the project's rows. A tab that is not a session goes last.
+    func walkOpenSessions(_ delta: Int) {
+        let w = activeWindow
+        let projects = sessions.projects.map(\.path)
+        var rows: [String: [SessionID]] = [:]
+        func rank(_ tab: Tab) -> (Int, Int) {
+            guard let id = tab.sessionId else { return (Int.max, Int.max) }
+            let path = sessions.sidebarProjectPath(of: id) ?? tab.projectPath
+            if rows[path] == nil { rows[path] = sessions.treeRows(in: Project(path: path), query: "").map(\.id) }
+            return (projects.firstIndex(of: path) ?? Int.max - 1, rows[path]?.firstIndex(of: id) ?? Int.max)
+        }
+        let list = tabs(in: w).sorted { rank($0) < rank($1) }
+        guard list.count > 1 else { return }
+        let index = list.firstIndex { $0.id == w.selectedTabId } ?? 0
+        w.selectedTabId = list[(index + delta + list.count) % list.count].id
     }
 
     /// ⌘Y: Quick Look whatever the front Images pane has selected. The pane's own space bar needs
@@ -1279,10 +1388,10 @@ final class TabStore {
         focusPanel(tab)
     }
 
-    /// ⌘⇧J: another shell, beside any already open (ADR-198).
-    func newTerminal(_ tab: Tab? = nil) {
+    /// ⌘⇧J: another shell, beside any already open (ADR-198); in the main area with ⌥ (ADR-220).
+    func newTerminal(_ tab: Tab? = nil, area: Tab.Area = .right) {
         guard let tab = tab ?? selectedTab else { return }
-        addPane(.terminal, in: tab)
+        addPane(.terminal, in: tab, area: area)
     }
 
     /// The shell `run_in_terminal` types into (ADR-198): the most recently used one at its prompt, or
@@ -1436,9 +1545,9 @@ final class TabStore {
     /// instead of pulling the keyboard out of the tab they are in (ADR-197).
     var grillKeyboardRequests: Set<Tab.ID> = []
 
-    func toggleGrill(_ tab: Tab? = nil) {
+    func toggleGrill(_ tab: Tab? = nil, area: Tab.Area = .right) {
         guard let tab = tab ?? selectedTab else { return }
-        showPane(.grill, in: tab)
+        showPane(.grill, in: tab, area: area, bringHere: area == .main)
         grillKeyboardRequests.insert(tab.id)
     }
 
@@ -1453,9 +1562,9 @@ final class TabStore {
     }
 
     /// ⌘⇧P: the newest PR's pane; `ref` picks a specific PR (an opener). Each PR gets its own pane.
-    func togglePRPage(_ tab: Tab? = nil, ref: PullRequestRef? = nil) {
+    func togglePRPage(_ tab: Tab? = nil, ref: PullRequestRef? = nil, area: Tab.Area = .right) {
         guard let tab = tab ?? selectedTab, let target = ref ?? pullRequests(for: tab).last else { return }
-        showPane(.pr(target), in: tab)
+        showPane(.pr(target), in: tab, area: area, bringHere: area == .main)
     }
 
     func tab(forSurface surface: GhosttySurfaceView) -> Tab? {

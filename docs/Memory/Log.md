@@ -5316,3 +5316,11 @@ hand. `make test` 721 pass.
 User found zoom confusing beside movable tabs. Removed the buttons, the menu item and chord, the empty panel's
 hint, the launch seam, and the zoom state and hosting. The main strip ends with the panel toggle. Build clean,
 checked in Clinic Dev.
+
+## 2026-10-15 — The keyboard reaches tabs and sessions (ADR-220)
+
+Step 2 of ADR-212. ⌘W closes the tab the keyboard is in, and on Claude the session. ⌘1–9 and ⌘⇧]/[ work within
+the keyboard's area. ⌃⇥ walks sessions by recency, held like ⌘⇥. ⌃⌥⌘↑/↓ walk the sidebar, because ⌥⌘↑/↓ was
+already the diff's next file; the user chose this. *Panel ▸ Beside Claude* holds rebindable ⌥ variants of the
+openers, Terminal without a default chord since ⌥⌘J shows and hides the panel. Driven through the menu bar in Clinic
+Dev. Modal close and held-⌃ walking left unverified.

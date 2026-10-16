@@ -893,20 +893,37 @@ struct ClinicCommands: Commands {
             Button("Media") { tabs.toggleAttachments() }.keyboardShortcut(key(.toggleAttachments)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Grill") { tabs.toggleGrill() }.keyboardShortcut(key(.toggleGrill)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("Pull Request") { tabs.togglePRPage() }.keyboardShortcut(key(.togglePRPage)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
+            // ADR-220: the same views beside Claude, each on its opener's chord with ⌥.
+            Menu("Beside Claude") {
+                Button("Terminal") { tabs.showPane(.terminal, area: .main, bringHere: true) }.keyboardShortcut(key(.terminalBeside))
+                Button("New Terminal") { tabs.newTerminal(area: .main) }.keyboardShortcut(key(.newTerminalBeside))
+                Button("Diff") { tabs.showPane(.diff, area: .main, bringHere: true) }.keyboardShortcut(key(.diffBeside))
+                Button("Files") { tabs.showPane(.files, area: .main, bringHere: true) }.keyboardShortcut(key(.filesBeside))
+                Button("Media") { tabs.showPane(.attachments, area: .main, bringHere: true) }.keyboardShortcut(key(.mediaBeside)).disabled(tabs.selectedTab?.sessionId == nil)
+                Button("Grill") { tabs.toggleGrill(area: .main) }.keyboardShortcut(key(.grillBeside)).disabled(tabs.selectedTab?.sessionId == nil)
+                Button("Pull Request") { tabs.togglePRPage(area: .main) }.keyboardShortcut(key(.prBeside)).disabled(tabs.selectedTab.map { tabs.pullRequests(for: $0).isEmpty } ?? true)
+            }
+            .disabled(tabs.selectedTab == nil)
             Divider()
             Button("Next Panel Tab") { tabs.cyclePanelTab(1) }.keyboardShortcut(key(.nextPanelTab)).disabled((tabs.selectedTab?.panel.panes.count ?? 0) < 2)
             Button("Previous Panel Tab") { tabs.cyclePanelTab(-1) }.keyboardShortcut(key(.previousPanelTab)).disabled((tabs.selectedTab?.panel.panes.count ?? 0) < 2)
             Button("Close Panel Tab") { tabs.closeFrontPane() }.keyboardShortcut(key(.closePanelTab)).disabled(tabs.selectedTab?.panel.selected == nil)
         }
         CommandMenu("Tabs") {
-            Button("Move Tab to New Window") { if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } }.keyboardShortcut(key(.moveTabToNewWindow)).disabled(tabs.selectedTab == nil)
-            Divider()
-            Button("Next Tab") { tabs.selectNext(1) }.keyboardShortcut(key(.nextTab))
-            Button("Previous Tab") { tabs.selectNext(-1) }.keyboardShortcut(key(.previousTab))
-            Divider()
+            // Tabs are the selected session's (ADR-212), in the area the keyboard is in (ADR-220).
+            Button("Next Tab") { tabs.cycleTab(1) }.keyboardShortcut(key(.nextTab)).disabled(tabs.selectedTab == nil)
+            Button("Previous Tab") { tabs.cycleTab(-1) }.keyboardShortcut(key(.previousTab)).disabled(tabs.selectedTab == nil)
             ForEach(0..<9, id: \.self) { i in
-                Button("Tab \(i + 1)") { tabs.selectIndex(i) }.keyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command)
+                Button("Tab \(i + 1)") { tabs.selectTab(number: i + 1) }.keyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command)
+                    .disabled(tabs.selectedTab == nil)
             }
+            Divider()
+            Button("Next Session") { tabs.cycleSessions(1) }.keyboardShortcut(key(.nextSession))
+            Button("Previous Session") { tabs.cycleSessions(-1) }.keyboardShortcut(key(.previousSession))
+            Button("Next Open Session in Sidebar") { tabs.walkOpenSessions(1) }.keyboardShortcut(key(.nextOpenSession))
+            Button("Previous Open Session in Sidebar") { tabs.walkOpenSessions(-1) }.keyboardShortcut(key(.previousOpenSession))
+            Divider()
+            Button("Move Session to New Window") { if let t = tabs.selectedTab { tabs.moveToNewWindow(t) } }.keyboardShortcut(key(.moveTabToNewWindow)).disabled(tabs.selectedTab == nil)
         }
     }
 }
