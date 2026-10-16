@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (zoom superseded by ADR-219)
 date: 2026-09-08
+superseded-by: "[[ADR-219 The Panel Does Not Zoom]] (zooming the panel over the session)"
 tags: [adr, editor, ui, panel, milestone-5]
 ---
 # ADR-081: Focus modes for the Files panel — tree toggle, zoom, file windows

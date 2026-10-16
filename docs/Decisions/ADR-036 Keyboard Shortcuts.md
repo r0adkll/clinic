@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (⌘1–9 and ⌘W amended by ADR-220)
 date: 2026-09-07
+superseded-by: "[[ADR-220 The Keyboard Reaches Tabs And Sessions]] (⌘1–9 pick tabs; ⌘W closes the focused tab)"
 tags: [adr, ui]
 ---
 # ADR-036: Keyboard Shortcuts

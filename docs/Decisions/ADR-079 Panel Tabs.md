@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (generalised by ADR-212 and later)
 date: 2026-09-08
+superseded-by: "[[ADR-212 A Session Is A Workspace Of Tabs]] (one panel beside the agent → two tab areas; footer openers), [[ADR-213 The Plus Menu Replaces The Openers]] (openers), [[ADR-214 Every Area Draws The Panel's Tab Chips]] (both areas draw the chips), [[ADR-219 The Panel Does Not Zoom]] (zoom), [[ADR-223 A Session Comes Back Fresh]] (still not persisted)"
 tags: [adr, ui, panel, milestone-4]
 ---
 # ADR-079: The right panel is a tab strip

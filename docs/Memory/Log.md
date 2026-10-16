@@ -5343,3 +5343,9 @@ Dev.
 
 User decided against step 5, saved layouts: a session reopened cold should start with Claude alone. Recorded as
 ADR-223, superseding ADR-212's persistence section and closing its build order at step 4.
+
+## 2026-10-16 — Older ADRs point at what replaced them
+
+The ADRs the per-session workspace changed now say so: ADR-049 is superseded by ADR-212. ADR-013, 036, 041, 059,
+079, 081, 104, 120, 130, 172 and 198 carry a status note and a `superseded-by` naming the part replaced. ADR-042 is
+noted as confirmed by ADR-223.

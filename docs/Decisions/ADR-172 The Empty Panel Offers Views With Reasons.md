@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (rows open into the panel, ADR-214)
 date: 2026-09-26
+superseded-by: "[[ADR-214 Every Area Draws The Panel's Tab Chips]] (its rows add into the panel; the Zoom hint went with [[ADR-219 The Panel Does Not Zoom]])"
 amends: "[[ADR-079 Panel Tabs]] (what the empty state shows)"
 tags: [adr, ui, panel]
 ---

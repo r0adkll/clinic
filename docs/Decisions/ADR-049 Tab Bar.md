@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: superseded by ADR-212
 date: 2026-09-07
+superseded-by: "[[ADR-212 A Session Is A Workspace Of Tabs]] (no session tab bar: the sidebar lists sessions)"
 supersedes: part of ADR-019
 tags: [adr, ui]
 ---

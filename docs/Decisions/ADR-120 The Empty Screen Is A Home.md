@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (New Shell card removed by ADR-221)
 date: 2026-09-11
+superseded-by: "[[ADR-221 Terminals Live In Sessions And Replays In Their Claude Tab]] (the New Shell card)"
 tags: [adr, ui, navigation]
 ---
 # ADR-120: The empty screen is a home

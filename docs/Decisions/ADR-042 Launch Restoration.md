@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (confirmed for sessions by [[ADR-223 A Session Comes Back Fresh]])
 date: 2026-09-07
 tags: [adr, ui]
 ---

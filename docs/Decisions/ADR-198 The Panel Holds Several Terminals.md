@@ -1,6 +1,7 @@
 ---
-status: accepted (built 2026-10-11)
+status: accepted (built 2026-10-11; amended by ADR-212 and ADR-214)
 date: 2026-10-11
+superseded-by: "[[ADR-212 A Session Is A Workspace Of Tabs]] (Files allows several; shells in either area), [[ADR-214 Every Area Draws The Panel's Tab Chips]] (the empty panel's Terminal adds one)"
 supersedes: "[[ADR-079 Panel Tabs]] (at most one pane per kind)"
 amends: "[[ADR-046 Terminal Panel]] (one panel shell per tab), [[ADR-056 Session MCP Tools]] (`run_in_terminal` picks an idle shell)"
 tags: [adr, ui, panel, terminal, keyboard, mcp]

@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (replay tab superseded by ADR-221)
 date: 2026-09-07
+superseded-by: "[[ADR-221 Terminals Live In Sessions And Replays In Their Claude Tab]] (a replay shows in its session's Claude tab, with Resume)"
 tags: [adr, ui, transcripts, milestone-3]
 ---
 # ADR-059: Replay and session details

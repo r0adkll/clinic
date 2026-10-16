@@ -1,6 +1,7 @@
 ---
-status: accepted (sidebar scope superseded by ADR-048)
+status: accepted (sidebar scope superseded by ADR-048; shell tabs superseded by ADR-221)
 date: 2026-09-07
+superseded-by: "[[ADR-221 Terminals Live In Sessions And Replays In Their Claude Tab]] (shell tabs)"
 tags: [adr, scope, milestones]
 ---
 # ADR-013: Milestone 1 Slice

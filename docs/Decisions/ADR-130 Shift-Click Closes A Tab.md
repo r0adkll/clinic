@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (session tab ⇧-click gone with ADR-212)
 date: 2026-09-11
+superseded-by: "[[ADR-212 A Session Is A Workspace Of Tabs]] (there is no session tab to ⇧-click; panes still close by ⇧-click)"
 supersedes: "[[ADR-079 Panel Tabs]] (closing the last pane left the panel open on an empty state)"
 amends: "[[ADR-104 Panel Tabs Fit The Panel]] (a compact chip now has a pointer-driven close)"
 tags: [adr, ui, tabs, panel]

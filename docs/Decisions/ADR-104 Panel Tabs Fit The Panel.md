@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: accepted (drawn in every area by ADR-214)
 date: 2026-09-10
+superseded-by: "[[ADR-214 Every Area Draws The Panel's Tab Chips]] (the strip serves both areas), [[ADR-215 Tabs Move By Dragging]] (drag to reorder, which this left out)"
 supersedes: "[[ADR-079 Panel Tabs]] (strip metrics only)"
 tags: [adr, ui, panel]
 ---
