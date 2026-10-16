@@ -25,8 +25,8 @@ struct PaneGlyph: View {
 // MARK: - The session header (ADR-212)
 
 /// The toolbar's leading item: what the window is showing. For a session, its project's icon, its title
-/// and state, and a line of project · branch · model ▾ · effort ▾ · context, which the footer used to
-/// carry, with a ⋯ menu for the verbs the session tab's ✕ and menu used to hold.
+/// over its project's name, its state, and a ⋯ menu for the verbs the session tab's ✕ and menu used to hold
+/// (ADR-212). Model, effort, directory and context stay in the footer (ADR-216).
 struct WorkspaceHeader: View {
     @Environment(TabStore.self) private var tabs
     /// Passed in: toolbar content sits outside the `.environment(window)` the window's views get.
@@ -66,35 +66,12 @@ struct SessionHeader: View {
         .padding(.horizontal, 4)
     }
 
+    /// The project's name under the title. Model, effort, directory and context are the footer's (ADR-216).
     private var meta: some View {
-        HStack(spacing: 5) {
-            Button(action: copyDirectory) {
-                // The branch when there is one: the icon beside the title already names the project.
-                HStack(spacing: 3) {
-                    if let branch = tab.gitBranch {
-                        Image(systemName: "arrow.triangle.branch").font(.system(size: 9))
-                        Text(branch).truncationMode(.middle)
-                    } else {
-                        Text(Project(path: tab.projectPath).name)
-                    }
-                }
-                .lineLimit(1)
-            }
-            .buttonStyle(.plain)
-            .help("Working directory (click to copy): \(tab.pwd ?? tab.projectPath)")
-            if tab.sessionId != nil {
-                Text("·")
-                ModelMenu(tab: tab, compact: true)
-                Text("·")
-                EffortMenu(tab: tab, compact: true)
-                if let percent = tab.statusLine?.contextUsedPercentage {
-                    Text("·")
-                    ContextGauge(percent: percent, windowSize: tab.statusLine?.contextWindowSize).fixedSize()
-                }
-            }
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
+        Text(Project(path: tab.projectPath).name)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     private var menu: some View {
@@ -116,10 +93,6 @@ struct SessionHeader: View {
         .help("Close, archive, move or show details of this session")
     }
 
-    private func copyDirectory() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(tab.pwd ?? tab.projectPath, forType: .string)
-    }
 }
 
 /// The session's state in words, coloured only for what wants the reader (ADR-096's palette).

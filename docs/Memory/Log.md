@@ -5284,3 +5284,11 @@ drags onto another chip (lands before it), onto a strip's empty space (goes to t
 (goes first). That covers moving between the areas and reordering. *Move to …* stays in the chip's menu.
 Could not be driven: `CGPreflightPostEventAccess()` is false for this session, so synthetic clicks and drags
 were dropped silently. A hand check is written into the ADR.
+
+## 2026-10-15 — The footer returns under both areas (ADR-216)
+
+User found the header cramped. It is now icon, session name over project name, state and ⋯. The footer is back
+across the bottom of the session, under both areas: model ▾, effort ▾ and directory, plus the context gauge at
+the trailing end. Checked in a Clinic Dev screenshot with a Haiku session and a shell in the right panel.
+The user had their own Clinic Dev open (started 21:55) when I launched mine. They shared its data directory, so
+my Haiku session landed in theirs. I stopped only my instance.

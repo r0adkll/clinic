@@ -106,9 +106,9 @@ private struct CloneRouting: ViewModifier {
     }
 }
 
-/// The window shows one session's workspace at a time (ADR-212): no session tab bar and no footer. The
-/// sidebar lists the sessions, the toolbar's header names this one, and its own tab row is part of its
-/// content view.
+/// The window shows one session's workspace at a time (ADR-212): no session tab bar. The sidebar lists the
+/// sessions, the toolbar's header names this one, its tab rows are part of its content view, and the footer
+/// runs under both of its areas (ADR-216).
 struct DetailView: View {
     @Environment(TabStore.self) private var tabs
     @Environment(WindowState.self) private var window
@@ -116,7 +116,11 @@ struct DetailView: View {
     var body: some View {
         let mine = tabs.tabs(in: window)
         let selected = mine.first { $0.id == window.selectedTabId }
-        terminalArea(mine: mine, selected: selected)
+        VStack(spacing: 0) {
+            terminalArea(mine: mine, selected: selected)
+            // Under both areas, as it was under the session and its panel before (ADR-216).
+            if !window.isShowingScreen, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
+        }
     }
 
     private func terminalArea(mine: [Tab], selected: Tab?) -> some View {
@@ -167,9 +171,38 @@ struct DetailView: View {
     }
 }
 
-/// Path and model-name formatting the footer used to own (milestone 2); the footer itself went with
-/// ADR-212, its facts moving into the session header.
-enum TabFooter {
+/// The bar under both of a session's areas (milestone 2, Collins footer; ADR-216): model ▾ and effort ▾, the
+/// working directory, which a click copies, and how full the context window is.
+struct TabFooter: View {
+    let tab: Tab
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if tab.sessionId != nil {
+                ModelMenu(tab: tab)
+                EffortMenu(tab: tab)
+            }
+            if let pwd = tab.pwd {
+                Button {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pwd, forType: .string)
+                } label: {
+                    Label(Self.abbreviate(pwd), systemImage: "folder").lineLimit(1).truncationMode(.head)
+                }
+                .buttonStyle(.plain)
+                .help("Working directory (click to copy): \(pwd)")
+            }
+            Spacer(minLength: 8)
+            if let percent = tab.statusLine?.contextUsedPercentage {
+                ContextGauge(percent: percent, windowSize: tab.statusLine?.contextWindowSize).fixedSize()
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.bar)
+    }
+
     static func abbreviate(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
@@ -191,8 +224,6 @@ enum TabFooter {
 struct ModelMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
-    /// The header's form (ADR-212): the name alone, at the line's own size.
-    var compact = false
     private let aliases = ["default"] + ModelAlias.all
     private var modelId: String? { tab.statusLine?.modelId ?? tab.model }
     private var name: String? { tab.statusLine?.modelDisplayName ?? tab.model.map(TabFooter.shortModel) }
@@ -208,7 +239,7 @@ struct ModelMenu: View {
                 Button("Copy Model ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(m, forType: .string) }
             }
         } label: {
-            if compact { Text(name ?? "Model") } else { Label(name ?? "Model", systemImage: "cpu").font(.callout) }
+            Label(name ?? "Model", systemImage: "cpu").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)
@@ -227,15 +258,13 @@ struct ModelMenu: View {
 struct EffortMenu: View {
     @Environment(TabStore.self) private var tabs
     let tab: Tab
-    var compact = false
     private let levels = ["low", "medium", "high", "xhigh", "max"]
 
     var body: some View {
         Menu {
             ForEach(levels, id: \.self) { l in Button(l == "xhigh" ? "Extra high" : l.capitalized) { tabs.switchEffort(tab, to: l) } }
         } label: {
-            let level = tab.liveEffort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort"
-            if compact { Text(level) } else { Label(level, systemImage: "gauge.with.dots.needle.33percent").font(.callout) }
+            Label(tab.liveEffort.map { $0 == "xhigh" ? "Extra high" : $0.capitalized } ?? "Effort", systemImage: "gauge.with.dots.needle.33percent").font(.callout)
         }
         .menuStyle(.borderlessButton).fixedSize()
         .disabled(!tab.isAtPrompt)
