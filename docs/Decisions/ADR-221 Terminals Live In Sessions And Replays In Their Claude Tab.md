@@ -37,8 +37,8 @@ run with no tab to host its pane, and Ghostty's own new-tab and split actions.
 ## Consequences
 - The `-ClinicOpenShellOnLaunch` seam is gone. The panel seams that hung off it act on the tab
   `-ClinicSessionOnLaunch` opens.
-- A replay's views beside it (Files, Diff) can be opened, but they are not restored with it until saved layouts
-  (step 5).
+- A replay's views beside it (Files, Diff) can be opened by hand. Layouts are not saved
+  ([[ADR-223 A Session Comes Back Fresh]]).
 
 ## Verification
 In Clinic Dev with `-ClinicOpenSessionOnLaunch <id> -ClinicReplayOnLaunch YES`, the replay showed in the main area

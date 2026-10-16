@@ -5338,3 +5338,8 @@ session. Checked in Clinic Dev: replay, Resume and New Terminal Tab.
 Step 4 of ADR-212. Open cards gain `WorkspaceGlyphs`, the main area's tabs, a divider, then the panel's, each
 clickable, and nothing while Claude is alone. The existing hover ✕ is relabelled *Close Session*. Checked in Clinic
 Dev.
+
+## 2026-10-16 — A session comes back fresh (ADR-223)
+
+User decided against step 5, saved layouts: a session reopened cold should start with Claude alone. Recorded as
+ADR-223, superseding ADR-212's persistence section and closing its build order at step 4.
