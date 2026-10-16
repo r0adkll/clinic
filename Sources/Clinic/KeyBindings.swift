@@ -24,7 +24,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .newSession: "New Session"
         case .newSessionInFolder: "New Session in Folder…"
         case .newChat: "New Chat"
-        case .newShell: "New Shell"
+        case .newShell: "New Terminal Tab"
         case .newWindow: "New Window"
         case .closeTab: "Close Tab"
         case .renameSession: "Rename Session…"

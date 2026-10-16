@@ -119,13 +119,15 @@ struct DetailView: View {
         VStack(spacing: 0) {
             terminalArea(mine: mine, selected: selected)
             // Under both areas, as it was under the session and its panel before (ADR-216).
+            // A replay has no model, effort or context to show.
             if !window.isShowingScreen, let tab = selected, !tab.isReplay { Divider(); TabFooter(tab: tab) }
         }
     }
 
     private func terminalArea(mine: [Tab], selected: Tab?) -> some View {
-        let live = mine.filter { $0.replay == nil }
-        let showTerminals = tabs.startupError == nil && !window.isShowingScreen && !mine.isEmpty && selected?.replay == nil
+        // A replay is a workspace too, its transcript in the Claude tab (ADR-221), so it is hosted like a session.
+        let live = mine
+        let showTerminals = tabs.startupError == nil && !window.isShowingScreen && !mine.isEmpty
         return ZStack {
             // Every live tab keeps its content view mounted in this window's stack; only the selected one is visible (ADR-019, ADR-072).
             // With no live tab there is nothing to keep mounted, and an empty stack left in place freezes
@@ -133,11 +135,6 @@ struct DetailView: View {
             if !live.isEmpty {
                 TerminalStack(live: live, selectedId: window.selectedTabId, visible: showTerminals,
                               keys: live.map { "\($0.id)|\($0.main.renderKey)|\($0.panel.renderKey)|\($0.focusedArea)|\(tabs.runs.renderKey(for: $0))" })
-            }
-            ForEach(mine.filter { $0.replay != nil }) { tab in
-                ReplayView(model: tab.replay!)
-                    .opacity(tab.id == window.selectedTabId ? 1 : 0)
-                    .allowsHitTesting(tab.id == window.selectedTabId)
             }
             if let error = tabs.startupError {
                 ContentUnavailableView("libghostty failed to start", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -164,7 +161,7 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
             } else if mine.isEmpty {
                 HomeScreen()
-            } else if let tab = selected, tab.childExited {
+            } else if let tab = selected, tab.childExited, !tab.isReplay {
                 ExitedOverlay(tab: tab)
             }
         }
@@ -401,7 +398,6 @@ private struct RootToolbar: ViewModifier {
         @Environment(KeyBindings.self) private var bindings
         var body: some View {
             Button { tabs.startNewSession() } label: { Label("New Session", systemImage: "square.and.pencil") }.help("New Claude Code session" + bindings.hint(.newSession))
-            Button { tabs.newShell() } label: { Label("New Shell", systemImage: "terminal") }.help("New shell tab" + bindings.hint(.newShell))
         }
     }
 

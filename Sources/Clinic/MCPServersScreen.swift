@@ -291,7 +291,7 @@ struct MCPServerDetail: View {
                 // OAuth opens a browser and waits for a redirect, so it runs in a real PTY rather
                 // than a captured pipe (ADR-093).
                 Button("Log In") {
-                    tabs.newShell(in: entry.projectPath, initialInput: MCPService.displayCommand(.login(name: entry.name)))
+                    tabs.openTerminal(in: entry.projectPath ?? tabs.selectedTab?.pwd ?? NSHomeDirectory(), initialInput: MCPService.displayCommand(.login(name: entry.name)))
                 }
                 .help("Opens a shell tab and runs claude mcp login \(entry.name)")
                 Button("Log Out") { model.logout(entry) }

@@ -190,7 +190,7 @@ struct ProjectMenu: View {
         Button("Continue Last Session Here") { tabs.continueLast(in: project.path) }
         Button("Import Session…") { NotificationCenter.default.post(name: .clinicQuickSwitch, object: project.path) }
         Divider()
-        Button("Open Shell Here") { tabs.newShell(in: project.path) }
+        Button("Open Shell Here") { tabs.openTerminal(in: project.path) }
         ProjectRunMenu(projectPath: project.path)
         OpenInMenu(path: project.path)
         SoundPackMenu(target: .project(project.path))

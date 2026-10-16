@@ -161,7 +161,7 @@ struct TerminalStack: NSViewRepresentable {
                 // What the main area shows takes the keyboard back — Claude, or a shell in front of it —
                 // but not from a right-panel shell the reader is
                 // in, and not out of a pane they are using (ADR-212).
-                let target: GhosttySurfaceView? = tab.isClaudeInFront ? tab.surface
+                let target: GhosttySurfaceView? = tab.isClaudeInFront ? (tab.isReplay ? nil : tab.surface)
                     : tab.main.selected?.terminal
                 guard let target, let w = tab.surface.window, w.firstResponder !== target,
                       !(tab.focusedArea == .right && tab.panel.isFront(.terminal)),
@@ -187,6 +187,10 @@ struct TerminalStack: NSViewRepresentable {
     private func mainContent(_ tab: Tab) -> TabContentView.PanelContent {
         let chrome = inject(PaneTabStrip(tab: tab, area: .main))
         guard let pane = tab.main.selected else {
+            // A session not running shows its replay where Claude would be (ADR-221).
+            if let replay = tab.replay {
+                return TabContentView.PanelContent(chrome: chrome, page: page(ReplayView(model: replay)), terminal: nil, minWidth: 360)
+            }
             return TabContentView.PanelContent(chrome: chrome, page: nil, terminal: nil, showsAgent: true,
                                                minWidth: 360)
         }

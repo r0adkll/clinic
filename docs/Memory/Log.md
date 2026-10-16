@@ -5324,3 +5324,11 @@ the keyboard's area. ⌃⇥ walks sessions by recency, held like ⌘⇥. ⌃⌥�
 already the diff's next file; the user chose this. *Panel ▸ Beside Claude* holds rebindable ⌥ variants of the
 openers, Terminal without a default chord since ⌥⌘J shows and hides the panel. Driven through the menu bar in Clinic
 Dev. Modal close and held-⌃ walking left unverified.
+
+## 2026-10-16 — Terminals live in sessions, replays in their Claude tab (ADR-221)
+
+Step 3 of ADR-212. The shell tab kind is removed. ⌘T is New Terminal Tab in the selected session.
+`openTerminal(in:)` puts a folder's shell in the open session there, or hands it to Ghostty (else Terminal) when
+there is none, and the clone sheet always hands off. A run with no session runs without a pane. Replays are hosted
+as workspaces, the transcript in the main area, with a Resume button in the header that swaps in the running
+session. Checked in Clinic Dev: replay, Resume and New Terminal Tab.

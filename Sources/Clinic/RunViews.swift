@@ -49,14 +49,11 @@ extension TabStore {
         run(config, in: ctx)
     }
 
-    /// Starts `config` in the context's checkout, with its pane in the context's tab — or, from the
-    /// project menu with no tab in that checkout, in a new shell tab there, so the output has a home.
+    /// Starts `config` in the context's checkout, with its pane in the context's tab. From the project menu
+    /// with no session in that checkout it runs without a pane (there are no shell tabs to host one,
+    /// ADR-221); the toolbar's pill reports it, and any session in the checkout can show it.
     func run(_ config: RunConfiguration, in ctx: RunContext, byUser: Bool = true) {
-        let tab = ctx.tab ?? {
-            newShell(in: ctx.checkout)
-            return selectedTab
-        }()
-        runs.start(config, file: ctx.file, checkout: ctx.checkout, projectPath: ctx.projectPath, from: tab, byUser: byUser)
+        runs.start(config, file: ctx.file, checkout: ctx.checkout, projectPath: ctx.projectPath, from: ctx.tab, byUser: byUser)
     }
 
     /// ⌃⌘.: stops the selected configuration's run (every member, for a compound).

@@ -112,7 +112,7 @@ struct ProjectQuickActions: View {
         case .newSession: if SessionStore.isChats(path) { tabs.newChat() } else { tabs.startNewSession(projectPath: path) }
         case .newWorktreeSession: tabs.newSession(projectPath: path, model: sessions.state.lastModelByProject[path], worktree: true)
         case .continueLast: tabs.continueLast(in: path)
-        case .openShell: tabs.newShell(in: path)
+        case .openShell: tabs.openTerminal(in: path)
         case .openIn:
             let apps = OpenInApps.shared
             if let target = apps.target(forProjectPick: sessions.state.openInByProject[path]) { apps.open(path, in: target) }

@@ -307,13 +307,13 @@ struct CloneSheet: View {
                     .keyboardShortcut(.defaultAction).controlSize(.large).buttonStyle(.borderedProminent)
             case .failed(let e, let remote, let dest):
                 if e.failure == .hostKey, let probe = remote.sshProbeCommand {
-                    Button("Connect in a Shell") { tabs.newShell(in: parent, initialInput: probe); dismiss() }
+                    Button("Connect in a Shell") { tabs.openExternalTerminal(in: parent, initialInput: probe); dismiss() }
                         .controlSize(.large)
-                        .help("Runs \(probe) in a new shell, so you can accept \(remote.host)’s key")
+                        .help("Runs \(probe) in your terminal app, so you can accept \(remote.host)’s key")
                 } else if e.failure == .authentication || e.failure == .hostKey {
-                    Button("Open Shell Here") { tabs.newShell(in: parent); dismiss() }
+                    Button("Open Shell Here") { tabs.openExternalTerminal(in: parent); dismiss() }
                         .controlSize(.large)
-                        .help("Open a shell in \(TabFooter.abbreviate(parent)) to sort this out")
+                        .help("Open your terminal app in \(TabFooter.abbreviate(parent)) to sort this out")
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).controlSize(.large)

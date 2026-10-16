@@ -322,7 +322,7 @@ struct PaneTabStrip: View {
 
     @ViewBuilder
     private var trailing: some View {
-        if area == .main, !tab.isReplay {
+        if area == .main {
             Divider().frame(height: 16)
             PaneIconButton(symbol: "sidebar.right",
                            help: tab.panel.isVisible ? "Hide the right panel" + bindings.hint(.togglePanelVisibility) + ", or ⇧-click its tab bar"
@@ -453,15 +453,12 @@ struct ClaudeTabChip: View {
     @State private var hovering = false
     @State private var dropTargeted = false
 
-    private var title: String {
-        if tab.isReplay { return "Replay" }
-        return tab.sessionId == nil ? "Shell" : "Claude"
-    }
+    private var title: String { tab.isReplay ? "Replay" : "Claude" }
 
     var body: some View {
         HStack(spacing: 5) {
             Group {
-                if tab.sessionId == nil { Image(systemName: "terminal").font(.system(size: compact ? 13 : 11)) }
+                if tab.isReplay { Image(systemName: "play.circle").font(.system(size: compact ? 13 : 11)) }
                 else { StateGlyph(tab: tab) }
             }
             .frame(width: 16)

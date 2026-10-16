@@ -121,20 +121,20 @@ private struct WaitingItem: Identifiable {
     var id: SessionID { sessionId }
 }
 
-/// New Session, New Chat, New Shell, Add Project: four across, two by two when the pane is narrow.
+/// New Session, New Chat, Add Project: three across, stacked when the pane is narrow. No New Shell: terminals
+/// live in sessions (ADR-221).
 private struct StartActions: View {
     @Environment(TabStore.self) private var tabs
 
     var body: some View {
         let newSession = HomeActionCard(symbol: "square.and.pencil", title: "New Session", action: .newSession) { tabs.startNewSession() }
         let newChat = HomeActionCard(symbol: "bubble.left.and.bubble.right", title: "New Chat", action: .newChat) { tabs.newChat() }
-        let newShell = HomeActionCard(symbol: "terminal", title: "New Shell", action: .newShell) { tabs.newShell() }
         let addProject = HomeAddProjectCard()
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { newSession; newChat; newShell; addProject }
+            HStack(spacing: 12) { newSession; newChat; addProject }
             VStack(spacing: 12) {
                 HStack(spacing: 12) { newSession; newChat }
-                HStack(spacing: 12) { newShell; addProject }
+                addProject
             }
         }
     }
@@ -299,7 +299,6 @@ private struct FirstLaunchHome: View {
                 .strokeBorder(targeted ? Color.accent : Color.primary.opacity(0.16), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
             HStack(spacing: 12) {
                 HomeActionCard(symbol: "bubble.left.and.bubble.right", title: "New Chat", action: .newChat) { tabs.newChat() }
-                HomeActionCard(symbol: "terminal", title: "New Shell", action: .newShell) { tabs.newShell() }
                 HomeActionCard(symbol: "arrow.right.to.line", title: "Import a Session", action: .jumpToSession) {
                     NotificationCenter.default.post(name: .clinicQuickSwitch, object: nil)
                 }

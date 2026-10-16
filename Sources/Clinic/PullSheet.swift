@@ -180,7 +180,7 @@ struct PullSheet: View {
         HStack {
             switch phase {
             case .failed(let e):
-                Button("Open Shell Here") { tabs.newShell(in: target.path); dismiss() }
+                Button("Open Shell Here") { tabs.openTerminal(in: target.path); dismiss() }
                     .help("Open a shell in \(target.name) to sort this out")
                 if case .upstreamGone = e.failure, let defaultBranch, defaultBranch != e.branch {
                     Button("Check Out \(defaultBranch)") { checkoutAndPull(defaultBranch) }

@@ -61,6 +61,18 @@ struct SessionHeader: View {
             // A toolbar item is as wide as it asks to be, and the controls after it overflow into a »
             // menu rather than squeeze it: the cap is what lets a long title truncate instead.
             .frame(maxWidth: 290, alignment: .leading)
+            // A replay is the session not running (ADR-221): one click runs it again, in place of the replay.
+            if tab.isReplay {
+                // Drawn by hand: the toolbar flattens a bordered button into plain text.
+                Button { tabs.resume(replay: tab) } label: {
+                    Text("Resume").font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10).frame(height: 22)
+                        .background(Color.accent, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .help("Resume this session, in place of its replay")
+            }
             menu
         }
         .padding(.horizontal, 4)
@@ -76,7 +88,7 @@ struct SessionHeader: View {
 
     private var menu: some View {
         Menu {
-            Button("Close Session…") { tabs.close(tab) }
+            Button(tab.isReplay ? "Close Replay" : "Close Session…") { tabs.close(tab) }
             if let id = tab.sessionId, let summary = sessions.sessions[id] {
                 Button("Archive") { SessionActions.archive(summary, sessions: sessions, tabs: tabs) }
                 Divider()
@@ -104,6 +116,7 @@ struct StatePill: View {
             let tint = label.1
             Text(label.0)
                 .font(.system(size: 10, weight: .semibold))
+                .fixedSize()
                 .padding(.horizontal, 6).padding(.vertical, 1)
                 .background(tint.opacity(0.18), in: Capsule())
                 .foregroundStyle(tint)

@@ -381,7 +381,7 @@ struct SessionContextMenu: View {
         if let agent {
             Divider()
             if agent.isRunning { Button("Stop Detached Session") { Task { await background.stopAgent(agent) } } }
-            Button("Show Logs") { tabs.newShell(in: summary.lastCwd ?? summary.cwd, initialInput: "claude logs \(agent.id)\n") }
+            Button("Show Logs") { tabs.openTerminal(in: summary.lastCwd ?? summary.cwd ?? NSHomeDirectory(), initialInput: "claude logs \(agent.id)\n") }
             Button("Remove Detached Session", role: .destructive) { Task { await background.removeAgent(agent) } }
         }
         Button("Replay…") { tabs.openReplay(summary) }

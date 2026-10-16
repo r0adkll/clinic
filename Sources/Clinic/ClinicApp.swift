@@ -355,7 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hidden smoke-test key (ADR-038): `open Clinic.app --args -ClinicOpenShellOnLaunch YES`
         if UserDefaults.standard.bool(forKey: "ClinicOpenShellOnLaunch") {
-            tabs.newShell(in: UserDefaults.standard.string(forKey: "ClinicShellDirectory"))
+            // There are no shell tabs (ADR-221): these act on the tab `-ClinicSessionOnLaunch` opens.
             if UserDefaults.standard.bool(forKey: "ClinicOpenPanelOnLaunch") { tabs.togglePanel() }
             // `-ClinicShowEmptyPanelOnLaunch YES`: the panel shown with nothing in it (ADR-172).
             if UserDefaults.standard.bool(forKey: "ClinicShowEmptyPanelOnLaunch") { tabs.togglePanelVisibility() }
@@ -538,8 +538,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "ClinicSeveralTerminalsOnLaunch") {
             Task {
                 try? await Task.sleep(for: .seconds(2))
-                tabs.newShell(in: NSHomeDirectory())
-                try? await Task.sleep(for: .seconds(1))
                 guard let tab = tabs.selectedTab else { return }
                 let log = Logger(subsystem: "com.r0adkll.clinic", category: "smoke")
                 @MainActor func report(_ step: String) {
@@ -795,7 +793,7 @@ struct ClinicCommands: Commands {
             Button("New Session") { tabs.startNewSession() }.keyboardShortcut(key(.newSession))
             Button("New Session in Folder…") { NotificationCenter.default.post(name: .clinicNewSession, object: nil) }.keyboardShortcut(key(.newSessionInFolder))
             Button("New Chat") { tabs.newChat() }.keyboardShortcut(key(.newChat))
-            Button("New Shell") { tabs.newShell() }.keyboardShortcut(key(.newShell))
+            Button("New Terminal Tab") { tabs.newTerminalTab() }.keyboardShortcut(key(.newShell)).disabled(tabs.selectedTab?.sessionId == nil)
             Button("New Window") { tabs.openNewWindow() }.keyboardShortcut(key(.newWindow))
             Divider()
             Button("Add Project Folder…") { if let path = ProjectFolderPicker.choose() { sessions.addProject(path) } }

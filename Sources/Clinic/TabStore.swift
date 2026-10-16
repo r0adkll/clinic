@@ -8,7 +8,9 @@ import GhosttyBridge
 @MainActor
 @Observable
 final class Tab: Identifiable {
-    enum Kind: Hashable { case session(SessionID), shell, replay(SessionID) }
+    /// A session, or a session's transcript replayed while it is not running (ADR-221). Terminals live only
+    /// inside sessions, as tabs of their workspace.
+    enum Kind: Hashable { case session(SessionID), replay(SessionID) }
 
     let id = UUID()
     /// Mutable so a fork/continue tab can rebind to the id the CLI reports (ADR-063).
@@ -115,7 +117,7 @@ final class Tab: Identifiable {
     /// Only what is on screen renders (ADR-019): Claude while the main area shows it, and each area's
     /// front shell.
     func syncOcclusion(hidden: Bool) {
-        surface.isOccluded = hidden || !isClaudeInFront
+        surface.isOccluded = hidden || !isClaudeInFront || isReplay
         main.occludeShells(tabHidden: hidden)
         panel.occludeShells(tabHidden: hidden)
     }
@@ -137,8 +139,7 @@ final class Tab: Identifiable {
         get {
             switch kind {
             case .session(let id): if let s = sessions.sessions[id] { return sessions.displayName(for: s) }
-            case .replay(let id): if let s = sessions.sessions[id] { return "Replay: " + sessions.displayName(for: s) }
-            case .shell: break
+            case .replay(let id): if let s = sessions.sessions[id] { return sessions.displayName(for: s) }
             }
             return openedTitle
         }
@@ -436,6 +437,8 @@ final class TabStore {
     /// Opens (or focuses, ADR-041) a session known from disk.
     func open(session summary: SessionSummary) {
         if let existing = tab(for: summary.id) { select(existing); return }
+        // Resuming a session that is being replayed: the replay gives way to it (ADR-221).
+        if let replay = tabs.first(where: { $0.kind == .replay(summary.id) }) { close(replay, confirm: false) }
         sessions.adopt(summary)
         let cwd = summary.lastCwd ?? summary.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         let running = backgroundAgents?.runningAgent(for: summary.id)
@@ -731,9 +734,17 @@ final class TabStore {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    /// Opens a transcript as a replay tab; focuses an existing one (ADR-059).
+    /// *Resume* in a replay's header: the session runs again in place of its replay (ADR-221).
+    func resume(replay tab: Tab) {
+        guard case .replay(let id) = tab.kind, let summary = sessions.sessions[id] else { return }
+        open(session: summary)
+    }
+
+    /// *Replay…*: a session that is not running, its transcript in the Claude tab (ADR-059, ADR-221). Focuses
+    /// an existing replay; for a session that is running, shows that instead.
     func openReplay(_ summary: SessionSummary) {
-        if let existing = tabs.first(where: { $0.kind == .replay(summary.id) }) { selectedTabId = existing.id; return }
+        if let existing = tabs.first(where: { $0.kind == .replay(summary.id) }) { select(existing); return }
+        if let running = tab(for: summary.id) { select(running); return }
         guard let runtime else { return }
         // A replay tab still needs a Tab; give it an idle surface it never shows (cheapest way to keep Tab uniform).
         var options = GhosttySurfaceOptions()
@@ -741,17 +752,71 @@ final class TabStore {
         options.workingDirectory = summary.lastCwd ?? summary.cwd
         guard let surface = try? GhosttySurfaceView(runtime: runtime, options: options) else { return }
         surface.isOccluded = true
-        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: "Replay: " + sessions.displayName(for: summary), windowId: activeWindow.id, sessions: sessions)
+        let tab = Tab(kind: .replay(summary.id), projectPath: ProjectGrouping.projectPath(forCwd: summary.cwd ?? ""), surface: surface, title: sessions.displayName(for: summary), windowId: activeWindow.id, sessions: sessions)
+        wirePaneDrops(tab)
         tab.replay = ReplayModel(sessionId: summary.id, transcriptPath: summary.transcriptPath)
         tab.state = nil
         tabs.append(tab)
         selectedTabId = tab.id
     }
 
-    func newShell(in directory: String? = nil, initialInput: String? = nil) {
-        let dir = directory ?? selectedTab?.pwd ?? selectedTab?.projectPath ?? FileManager.default.homeDirectoryForCurrentUser.path
-        guard let tab = makeTab(kind: .shell, cwd: dir, projectPath: ProjectGrouping.projectPath(forCwd: dir), initialInput: initialInput, title: "Shell") else { return }
-        selectedTabId = tab.id
+    /// ⌘T, *New Terminal Tab*: another shell beside Claude in the selected session (ADR-221). There are no
+    /// standalone shells; with no session in view it does nothing, and the menu item is disabled.
+    func newTerminalTab() {
+        guard let tab = selectedTab, tab.sessionId != nil else { return }
+        addPane(.terminal, in: tab, area: .main)
+    }
+
+    /// A shell in `directory`, typing `initialInput` (ADR-221): a terminal tab beside Claude in the open
+    /// session working there — the selected one first — or, with none, the user's own terminal app.
+    func openTerminal(in directory: String, initialInput: String? = nil) {
+        guard let host = terminalHost(for: directory),
+              let pane = makePane(.terminal, in: host, cwd: directory, initialInput: initialInput) else {
+            openExternalTerminal(in: directory, initialInput: initialInput)
+            return
+        }
+        host.main.append(pane)
+        host.focusedArea = .main
+        select(host)
+        focusPanel(host)
+    }
+
+    /// The open session working in `directory`: the selected one if it is, else one there, else one in the
+    /// same project.
+    private func terminalHost(for directory: String) -> Tab? {
+        let project: String = ProjectGrouping.projectPath(forCwd: directory)
+        let sessionTabs: [Tab] = tabs.filter { $0.sessionId != nil }
+        if let selected = selectedTab, selected.sessionId != nil, selected.pwd == directory || selected.projectPath == project {
+            return selected
+        }
+        if let here = sessionTabs.first(where: { $0.pwd == directory }) { return here }
+        return sessionTabs.first(where: { $0.projectPath == project })
+    }
+
+    /// Ghostty if it is installed, else Terminal, in `directory`. A command is run with Ghostty, in a login
+    /// shell that stays open afterwards; Terminal is only opened there, with the command on the pasteboard.
+    func openExternalTerminal(in directory: String, initialInput: String? = nil) {
+        let command = initialInput?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ghostty = Self.ghosttyBinary {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: ghostty)
+            var args = ["--working-directory=\(directory)"]
+            if let command, !command.isEmpty {
+                let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+                args += ["-e", shell, "-lc", "\(command); exec \(shell) -l"]
+            }
+            p.arguments = args
+            var env = ProcessInfo.processInfo.environment
+            for k in env.keys where k == "CLAUDECODE" || k.hasPrefix("CLAUDE_CODE_") { env[k] = nil }
+            p.environment = env
+            try? p.run()
+            return
+        }
+        if let command, !command.isEmpty {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string)
+        }
+        NSWorkspace.shared.open([URL(fileURLWithPath: directory)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                configuration: NSWorkspace.OpenConfiguration())
     }
 
     private func makeTab(kind: Tab.Kind, cwd: String, projectPath: String, initialInput: String?, title: String) -> Tab? {
@@ -1448,15 +1513,16 @@ final class TabStore {
     }
 
     /// Builds a pane's long-lived content; nil when it cannot exist (no runtime, no session).
-    private func makePane(_ kind: PanelPane.Kind, in tab: Tab) -> PanelPane? {
+    private func makePane(_ kind: PanelPane.Kind, in tab: Tab, cwd: String? = nil, initialInput: String? = nil) -> PanelPane? {
         let pane = PanelPane(kind: kind)
         if kind.allowsSeveral { pane.ordinal = tab.nextOrdinal(for: kind) }
         switch kind {
         case .terminal:
             guard let runtime else { return nil }
             var options = GhosttySurfaceOptions()
-            options.workingDirectory = tab.pwd ?? tab.projectPath
+            options.workingDirectory = cwd ?? tab.pwd ?? tab.projectPath
             options.environment = ["CLINIC": "1", "CLINIC_PANEL": "1"]
+            options.initialInput = initialInput
             do {
                 let surface = try GhosttySurfaceView(runtime: runtime, options: options)
                 surface.delegate = self
@@ -1489,7 +1555,7 @@ final class TabStore {
     private func keyboardTarget(_ area: Tab.Area, in tab: Tab) -> GhosttySurfaceView? {
         let group = tab.group(area)
         guard group.isVisible else { return nil }
-        guard let pane = group.selected else { return area == .main ? tab.surface : nil }
+        guard let pane = group.selected else { return area == .main && !tab.isReplay ? tab.surface : nil }
         switch pane.kind {
         case .terminal: return pane.terminal
         case .run(let key):
@@ -1863,7 +1929,7 @@ final class TabStore {
 
     private func handleAppAction(_ action: GhosttyAction) -> Bool {
         switch action {
-        case .newTab, .newWindow, .newSplit: newShell(); return true
+        case .newTab, .newWindow, .newSplit: newTerminalTab(); return true
         case .quit: NSApp.terminate(nil); return true
         // libghostty asks for this when the colour scheme changes (ADR-152) and a `theme = light:…,
         // dark:…` config has a different theme to apply. Handing it the same config back is how it
@@ -1924,7 +1990,10 @@ extension TabStore: GhosttySurfaceDelegate {
         let shellPane = tab?.shellPane(for: surface)
         let isPanel = shellPane != nil
         switch action {
-        case .newTab, .newWindow, .newSplit: newShell(in: tab?.pwd); return true
+        case .newTab, .newWindow, .newSplit:
+            // Ghostty's own new tab or split, from inside a session: a terminal tab beside Claude (ADR-221).
+            if let tab, tab.sessionId != nil { addPane(.terminal, in: tab, area: .main) }
+            return true
         case .openURL(let url, _):
             if let tab, openInFiles(url, from: tab) { return true }
             NSWorkspace.shared.open(url); return true
@@ -1937,7 +2006,7 @@ extension TabStore: GhosttySurfaceDelegate {
             // A panel shell's title names its chip, never the tab (ADR-046, ADR-198).
             if let shellPane { shellPane.shellTitle = t.isEmpty ? nil : t }
             if let tab, !isPanel {
-                if tab.kind == .shell { tab.title = t.isEmpty ? "Shell" : t } else { titleReported(tab, title: t) }
+                titleReported(tab, title: t)
             }
             return true
         case .pwd(let p):
