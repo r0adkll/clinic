@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import os
 import SwiftUI
 import AndroidEmulator
 
@@ -59,6 +60,11 @@ final class DeviceScreenModel {
     @ObservationIgnored private var stream: Task<Void, Never>?
     @ObservationIgnored private var streamBox: (Int, Int)?
     @ObservationIgnored private var restart: Task<Void, Never>?
+    @ObservationIgnored private var connecting: Task<Bool, Never>?
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
+    /// The size the screen view last asked for; nil while it is off screen.
+    @ObservationIgnored private var wantedPixels: CGSize?
+    private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "device")
     @ObservationIgnored private var noticeTimer: Task<Void, Never>?
     @ObservationIgnored weak var screen: DeviceScreenNSView?
 
@@ -69,47 +75,97 @@ final class DeviceScreenModel {
 
     // MARK: Streaming
 
-    /// Streams frames that fit `pixels` (the view's size in backing pixels). The emulator scales each
-    /// frame into the box it is asked for, keeping the aspect, so the box is all it needs; a new box
-    /// restarts the stream once the size has settled, rather than on every step of a resize.
+    /// Streams frames that fit `pixels` (the view's size in backing pixels) while the screen is on
+    /// screen. The emulator scales each frame into the box it is asked for, keeping the aspect, so the
+    /// box is all it needs; a new box restarts the stream once the size has settled, rather than on
+    /// every step of a resize. Connecting is not part of that debounce: a resize arriving mid-connect
+    /// must not cancel it, or the pane is left with no connection and nothing asking for one.
     func show(at pixels: CGSize) {
         guard pixels.width >= 16, pixels.height >= 16 else { return }
+        wantedPixels = pixels
         restart?.cancel()
         restart = Task { [weak self] in
-            await self?.connectIfNeeded()
-            if self?.stream != nil { try? await Task.sleep(for: .milliseconds(150)) }
-            guard !Task.isCancelled else { return }
-            self?.startStream(pixels)
+            guard let self, await self.connect() else { return }
+            if self.stream != nil { try? await Task.sleep(for: .milliseconds(150)) }
+            guard !Task.isCancelled, let pixels = self.wantedPixels else { return }
+            self.startStream(pixels)
         }
     }
 
+    /// Off screen: the stream stops, the connection stays for when the pane comes back.
     func hide() {
-        restart?.cancel()
+        wantedPixels = nil
+        restart?.cancel(); restart = nil
+        retryTask?.cancel(); retryTask = nil
         stream?.cancel(); stream = nil; streamBox = nil
     }
 
+    /// The pane closed.
     func stop() {
         hide()
         if recording != nil { toggleRecording() }
-        connection?.close(); connection = nil
+        dropConnection()
     }
 
-    /// Tries again once the emulator is (back) in the running list: putting the screen back makes it
-    /// ask for frames, which connects.
-    func retry() { if status != .live { status = .connecting } }
+    /// The emulator is (back) in the running list: reconnect now rather than at the next retry.
+    func retry() {
+        guard status != .live, let pixels = wantedPixels else { return }
+        retryTask?.cancel(); retryTask = nil
+        show(at: pixels)
+    }
 
-    private func connectIfNeeded() async {
-        guard connection == nil else { return }
+    /// One connection attempt at a time, whoever asks; true once connected.
+    private func connect() async -> Bool {
+        if connection != nil { return true }
+        if let connecting { return await connecting.value }
+        // Unstructured on purpose, so cancelling the caller (a newer resize) does not cancel the RPCs.
+        let attempt = Task { await self.openConnection() }
+        connecting = attempt
+        let connected = await attempt.value
+        connecting = nil
+        if !connected { scheduleRetry() }
+        return connected
+    }
+
+    private func openConnection() async -> Bool {
+        if status != .live { status = .connecting }
         guard let emulator = emulator ?? RunningEmulator.scan().first(where: { $0.deviceId == deviceId }) else {
-            status = .notRunning; return
+            status = .notRunning
+            return false
         }
         do {
             let connection = try EmulatorConnection(emulator)
-            hardware = try await connection.hardware()
+            do {
+                hardware = try await connection.hardware()
+            } catch {
+                connection.close()
+                throw error
+            }
             self.connection = connection
             status = .live
+            Self.log.info("connected to \(emulator.avdId, privacy: .public) on \(emulator.grpcPort)")
+            return true
         } catch {
+            Self.log.error("could not connect to \(emulator.avdId, privacy: .public): \(error, privacy: .public)")
             status = .failed("\(error)")
+            return false
+        }
+    }
+
+    private func dropConnection() {
+        connection?.close(); connection = nil
+    }
+
+    /// While the pane is on screen and its emulator is listed, keeps trying: a connection refused while
+    /// an emulator boots, or a stream cut by a snapshot load, comes back on its own.
+    private func scheduleRetry() {
+        guard wantedPixels != nil, retryTask == nil else { return }
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled, let self else { return }
+            self.retryTask = nil
+            guard let pixels = self.wantedPixels, self.emulator != nil else { return }
+            self.show(at: pixels)
         }
     }
 
@@ -122,6 +178,7 @@ final class DeviceScreenModel {
         stream?.cancel()
         streamBox = box
         stream = Task { [weak self] in
+            var failure: (any Error)?
             do {
                 for try await frame in connection.frames(width: box.0, height: box.1) {
                     guard let self else { return }
@@ -129,13 +186,19 @@ final class DeviceScreenModel {
                     self.screen?.draw(frame, geometry: ScreenGeometry(displayWidth: hardware.width, displayHeight: hardware.height,
                                                                       quarterTurns: frame.quarterTurns, folded: frame.folded))
                 }
-            } catch is CancellationError {
             } catch {
-                guard !Task.isCancelled, let self else { return }
-                // The emulator went away, or the stream failed; the next show() reconnects.
-                self.connection?.close(); self.connection = nil; self.stream = nil; self.streamBox = nil
-                self.status = self.emulator == nil ? .notRunning : .failed("\(error)")
+                failure = error
             }
+            // Cancelled by hide() or a newer stream: nothing to repair.
+            guard !Task.isCancelled, let self else { return }
+            // Otherwise the stream ended under us, with an error or without one. Either way the
+            // connection is suspect: drop it, and reconnect while the pane is still on screen.
+            Self.log.error("stream from \(self.deviceId, privacy: .public) ended: \(String(describing: failure), privacy: .public)")
+            self.stream = nil; self.streamBox = nil
+            if self.connection === connection { self.dropConnection() }
+            self.status = self.emulator == nil ? .notRunning : .connecting
+            self.screen?.clear()
+            self.scheduleRetry()
         }
     }
 
@@ -277,7 +340,7 @@ final class DeviceScreenModel {
 /// the scroll wheel scrolls, and keys typed while it has the keyboard go to the device — except ⌘
 /// chords, which reach Clinic's menus first.
 final class DeviceScreenNSView: NSView {
-    let model: DeviceScreenModel
+    private(set) var model: DeviceScreenModel
     private let screenLayer = CALayer()
     /// The size of the image last drawn, and how its pixels map to the device.
     private var imageSize: CGSize?
@@ -297,13 +360,30 @@ final class DeviceScreenNSView: NSView {
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
+    /// Shows another pane's device: the old one stops streaming into this view, and the new one starts.
+    func attach(_ newModel: DeviceScreenModel) {
+        guard newModel !== model else { return }
+        if model.screen === self { model.hide() }
+        model = newModel
+        model.screen = self
+        clear()
+        requestFrames()
+    }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { model.hide() } else { requestFrames() }
+        // A view SwiftUI replaced can leave its window after the new one asked for frames; only the
+        // model's current view may stop the stream.
+        if window == nil {
+            if model.screen === self { model.hide() }
+        } else {
+            model.screen = self
+            requestFrames()
+        }
     }
 
     override func layout() {
@@ -348,6 +428,14 @@ final class DeviceScreenNSView: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         screenLayer.contents = image
         CATransaction.commit()
+    }
+
+    /// Blank until the next frame, so a dropped connection never leaves a stale screen that looks live.
+    func clear() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        screenLayer.contents = nil
+        CATransaction.commit()
+        imageSize = nil; geometry = nil
     }
 
     // MARK: Input
@@ -409,7 +497,9 @@ final class DeviceScreenNSView: NSView {
 private struct DeviceScreen: NSViewRepresentable {
     let model: DeviceScreenModel
     func makeNSView(context: Context) -> DeviceScreenNSView { DeviceScreenNSView(model: model) }
-    func updateNSView(_ view: DeviceScreenNSView, context: Context) {}
+    /// SwiftUI hands a view made for one pane to the next pane shown in the same place (a device tab
+    /// closed and another opened, or two device tabs switched), so the view is moved to this model.
+    func updateNSView(_ view: DeviceScreenNSView, context: Context) { view.attach(model) }
 }
 
 /// The Device pane: Android Studio's device toolbar over the screen.
@@ -421,17 +511,27 @@ struct DevicePane: View {
             DeviceToolbar(model: model)
             Divider()
             ZStack(alignment: .bottom) {
+                // The screen stays mounted whatever the status, so it keeps its size and the model
+                // keeps reconnecting; the status draws over it.
+                DeviceScreen(model: model)
+                    // One screen view per pane, rather than SwiftUI's one per place (see `attach`).
+                    .id(ObjectIdentifier(model))
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 switch model.status {
-                case .connecting, .live:
-                    DeviceScreen(model: model)
-                        .padding(12)
+                case .live:
+                    EmptyView()
+                case .connecting:
+                    ProgressView("Connecting to \(model.name)…").controlSize(.small)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .notRunning:
                     ContentUnavailableView("\(model.name) is not running", systemImage: "candybarphone",
                                            description: Text("Start it from a run configuration or Android Studio's Device Manager, and it shows here."))
+                        .background(Color(nsColor: .underPageBackgroundColor))
                 case .failed(let message):
                     ContentUnavailableView("Could not reach \(model.name)", systemImage: "exclamationmark.triangle",
-                                           description: Text(message))
+                                           description: Text("\(message)\nTrying again…"))
+                        .background(Color(nsColor: .underPageBackgroundColor))
                 }
                 if let notice = model.notice { NoticeCapsule(notice: notice).padding(.bottom, 20) }
             }

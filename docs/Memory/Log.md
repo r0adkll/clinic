@@ -5411,3 +5411,15 @@ toolbar that folds into ⋯ when narrow, rotation and fold-aware touch mapping (
 `getevent`), screenshots and console recordings saved where macOS saves screenshots, snapshots, Extended Controls,
 Stop, and a *Show emulators in Clinic* setting. Checked in Clinic Dev with two emulators: rotate, screenshot and
 record. Clicks, typing and folding still need a person, or a foldable AVD that isn't the user's.
+
+## 2026-10-17 — Device tabs reconnect when closed, reopened or switched
+
+User: closing and reopening device tabs, or opening new ones, lost the connection or never made one. Cause:
+SwiftUI handed the screen `NSView` made for one Device pane to the next pane shown in the same place, and the
+empty `updateNSView` never moved it to the new model. The new pane had no view asking for frames, and the old
+view went on driving the closed pane's stopped model (a frozen frame under *Connecting…*). Fix: the screen is
+`.id`'d per model and `attach`es to a new one. Also fixed: a resize could cancel a connect mid-flight and leave a
+dead *failed* state (connecting is now single-flight and retries while on screen); a stream ending without an
+error was never restarted; only the model's current view may stop its stream. Checked in Clinic Dev by
+accessibility: three close/reopen cycles each logged a fresh connection, and switching between two device tabs
+kept both live.
