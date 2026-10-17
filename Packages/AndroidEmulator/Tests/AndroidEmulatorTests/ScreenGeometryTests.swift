@@ -43,4 +43,14 @@ import Testing
         let turned = ScreenGeometry(displayWidth: 2000, displayHeight: 2000, quarterTurns: 1, folded: fold)
         #expect(turned.visibleFraction == (0, 0, 1, 0.5))
     }
+
+    /// campfire-reader-fold folded: the emulator sends 1080×2152 frames (or 200×400 when asked for 400×400),
+    /// already only the outer screen, so cropping again would draw half of it.
+    @Test func aFrameAlreadyCutToTheFoldIsNotCroppedAgain() {
+        let fold = EmulatorFrame.Region(x: 0, y: 0, width: 1080, height: 2152)
+        let g = ScreenGeometry(displayWidth: 2076, displayHeight: 2152, quarterTurns: 0, folded: fold)
+        #expect(g.crop(frameWidth: 1080, frameHeight: 2152) == (0, 0, 1, 1))
+        #expect(g.crop(frameWidth: 200, frameHeight: 400) == (0, 0, 1, 1))
+        #expect(g.crop(frameWidth: 2076, frameHeight: 2152) == g.visibleFraction)
+    }
 }

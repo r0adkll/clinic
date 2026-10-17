@@ -417,7 +417,7 @@ final class DeviceScreenNSView: NSView {
                                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
                                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
         else { return }
-        let visible = geometry.visibleFraction
+        let visible = geometry.crop(frameWidth: frame.width, frameHeight: frame.height)
         if visible.width < 1 || visible.height < 1 {
             let w = Double(frame.width), h = Double(frame.height)
             let crop = CGRect(x: visible.x * w, y: visible.y * h, width: visible.width * w, height: visible.height * h).integral

@@ -5434,3 +5434,14 @@ a valid jwk"), then a `typ` header. A live test signs in to a real emulator with
 AndroidEmulator tests pass with `CLINIC_TEST_AVD`. Not yet tried in the app against Studio's own emulator (none
 was running). Installed Clinic crashed three times today during this session's builds (layout loop; see the
 crash thread and ADR-225 on main).
+
+## 2026-10-17 — A folded foldable's screen is no longer cut in half
+
+User: the closed Pixel 10 Pro Fold drew half its screen. Measured on campfire-reader-fold (2076×2152 inner,
+folded region 0,0,1080×2152): folded, the emulator already sends frames cut to the folded region (1080×2152, or
+200×400 for a 400×400 box), and the pane cropped them to the region a second time. `ScreenGeometry.crop` now
+crops only a frame that still has the whole display's shape. Separately, on that AVD's API 36 google_apis image
+the guest never re-lays-out when folded (`wm folded-area` is set, device state goes CLOSED, but the display stays
+2076×2152 and launcher content runs past the fold). `setPosture`, the hinge angle and the console's `fold` all
+behave the same, so that is the image, not the pane. The user's Pixel 10 Pro Fold (API 37.1 Play image) was not
+booted to compare.

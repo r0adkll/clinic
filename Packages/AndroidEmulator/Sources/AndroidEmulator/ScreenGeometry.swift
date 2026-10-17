@@ -35,6 +35,16 @@ public struct ScreenGeometry: Sendable, Equatable {
         }
     }
 
+    /// The part of a `frameWidth`×`frameHeight` frame to draw. Emulator 36.6 sends a folded foldable's
+    /// frames already cut down to the folded region (1080×2152 of a 2076×2152 display), so only a frame that
+    /// still has the whole display's shape is cropped.
+    public func crop(frameWidth: Int, frameHeight: Int) -> (x: Double, y: Double, width: Double, height: Double) {
+        guard frameWidth > 0, frameHeight > 0 else { return (0, 0, 1, 1) }
+        let aspect = Double(frameWidth) / Double(frameHeight)
+        if abs(aspect - visibleAspect) / visibleAspect < 0.02 { return (0, 0, 1, 1) }
+        return visibleFraction
+    }
+
     /// The aspect ratio (width / height) the visible part has on screen.
     public var visibleAspect: Double {
         let w = Double(region.width), h = Double(region.height)
