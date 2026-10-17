@@ -83,6 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// be "restored" into no window at all.
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.set(true, forKey: "ApplePersistenceIgnoreState")
+        // Before anything that can throw: an exception that ends the app leaves its report and the workspace (ADR-225).
+        CrashEvidence.install { [unowned self] in self.tabs.workspaceDump() }
     }
 
     /// The development flavor wears a DEV band across its Dock icon while it runs (ADR-176), so the

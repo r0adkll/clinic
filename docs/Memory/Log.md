@@ -5349,3 +5349,36 @@ ADR-223, superseding ADR-212's persistence section and closing its build order a
 The ADRs the per-session workspace changed now say so: ADR-049 is superseded by ADR-212. ADR-013, 036, 041, 059,
 079, 081, 104, 120, 130, 172 and 198 carry a status note and a `superseded-by` naming the part replaced. ADR-042 is
 noted as confirmed by ADR-223.
+
+## 2026-10-17 — Crashes leave evidence (ADR-225)
+
+Installed Clinic 0.5.0 crashed twice (11:26:41, 11:33:30) with AppKit's "more Update Constraints in Window passes
+than there are views" layout-loop exception. The second trace runs the window's root render into
+`ToolbarBridge.preferencesDidChange` → `requestUpdate` on every pass. **Cause not found.**
+- Not reproduced in Clinic Dev (main, full screen, the same 1800×1130) with:
+  - fast session switching, with and without the panel;
+  - a live Chat;
+  - synthetic hook state flips;
+  - the CLI's busy-terminal sequences written straight to the sessions' ttys;
+  - `swift build` bursts under an open Files pane.
+- Both crashes fell while the emulator session's terminal was busy in installed Clinic: generating after
+  compaction, then `swift test`. Its MCP traffic, the device store (it does not poll) and turn snapshots (nothing
+  in the toolbar reads them) were checked and ruled out.
+
+The finding worth keeping is why there was so little to go on. AppKit ends the process with `exit(6)` after an
+exception in a display cycle. No signal, so no `.ips`, and nothing on the way out runs. I tried each in turn:
+`NSApplicationCrashOnExceptions` (Info.plist and registered default), the uncaught handler, `atexit`, wrapping
+`reportException:`, and an `NSApplication` subclass (SwiftUI ignores `NSPrincipalClass` and uses
+`AppKitApplication`). So `CrashEvidence` writes at the throw from an exception preprocessor: the exception, then a
+workspace dump. The report is provisional and deleted if the app survives 10 s. MetricKit payloads go in the same
+`diagnostics/` folder.
+
+Also fixed: the pane host's 34 pt strip and the Run bars are `required − 1`. A pane laid out at zero height had
+logged a constraint conflict for every session opened; now none.
+
+Verified in Clinic Dev with the new `-ClinicRaiseInLayoutAfter` seam (report written with the throw stack and the
+session's panes), a normal run (no file), and zero conflicts across opening sessions and toggling the panel. 725
+ClinicCore and 7 GhosttyBridge tests pass. Not verified: MetricKit delivery to this app.
+
+*When a process dies with no report, check launchd's exit status before reaching for crash APIs.* 1536 is
+`exit(6)`, and that alone ruled out every handler that runs at termination.

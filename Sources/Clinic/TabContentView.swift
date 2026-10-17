@@ -172,6 +172,9 @@ final class TabContentView: NSView, NSSplitViewDelegate {
         rememberWidth()
     }
 
+    /// The frames the split view gave the areas, for a crash's workspace dump (ADR-225); nil for a hidden panel.
+    var areaFrames: (main: NSRect, panel: NSRect?) { (main.frame, panel.superview == nil ? nil : panel.frame) }
+
     /// Smoke hook (`-ClinicDragPanelTo <points>`): stands in for a divider drag, which the tests cannot do.
     func setPanelWidth(_ width: CGFloat) {
         guard outer.arrangedSubviews.count == 2, outer.bounds.width > 0 else { return }
@@ -239,8 +242,8 @@ final class PaneHostView: NSView {
     /// The Run pane's header band and failure bar, around the surface (ADR-122). Zero height when unused.
     private let terminalHeaderHost = NSHostingView<AnyView>(rootView: AnyView(EmptyView()))
     private let terminalFooterHost = NSHostingView<AnyView>(rootView: AnyView(EmptyView()))
-    private lazy var headerHeight = terminalHeaderHost.heightAnchor.constraint(equalToConstant: 0)
-    private lazy var footerHeight = terminalFooterHost.heightAnchor.constraint(equalToConstant: 0)
+    private lazy var headerHeight = Self.yielding(terminalHeaderHost.heightAnchor.constraint(equalToConstant: 0))
+    private lazy var footerHeight = Self.yielding(terminalFooterHost.heightAnchor.constraint(equalToConstant: 0))
     private static let footerBarHeight: CGFloat = 44
     /// Claude's surface, in the main area only. Added once and never shown through `show`, which would
     /// re-parent it.
@@ -276,7 +279,7 @@ final class PaneHostView: NSView {
             chromeHost.leadingAnchor.constraint(equalTo: leadingAnchor),
             chromeHost.trailingAnchor.constraint(equalTo: trailingAnchor),
             chromeHost.topAnchor.constraint(equalTo: topAnchor),
-            chromeHost.heightAnchor.constraint(equalToConstant: Self.barHeight),
+            Self.yielding(chromeHost.heightAnchor.constraint(equalToConstant: Self.barHeight)),
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.topAnchor.constraint(equalTo: chromeHost.bottomAnchor),
@@ -297,6 +300,15 @@ final class PaneHostView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// A bar's fixed height, just short of required (ADR-225). A pane is first laid out at zero height, as
+    /// an arranged subview of the split view or a tab created before its window; with required heights the
+    /// strip's 34 pt could not fit, and AppKit broke the strip's height or Claude's surface's pin to recover,
+    /// logging the conflict for every session opened. Below required the bars give way until there is room.
+    private static func yielding(_ c: NSLayoutConstraint) -> NSLayoutConstraint {
+        c.priority = .required - 1
+        return c
+    }
 
     private static func pin(_ view: NSView, to container: NSView) -> [NSLayoutConstraint] {
         [view.leadingAnchor.constraint(equalTo: container.leadingAnchor),

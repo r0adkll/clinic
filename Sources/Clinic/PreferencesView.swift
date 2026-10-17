@@ -508,6 +508,13 @@ private struct AdvancedPane: View {
                         NSWorkspace.shared.activateFileViewerSelecting([dir])
                     }
                 }
+                LabeledContent("Crash reports") {
+                    Button("Reveal in Finder") {
+                        let dir = DiagnosticsArchive.standard.directory
+                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.activateFileViewerSelecting([dir])
+                    }
+                }
                 LabeledContent("Unified log") {
                     Button("Copy log command") {
                         NSPasteboard.general.clearContents()
