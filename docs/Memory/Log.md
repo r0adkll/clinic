@@ -5423,3 +5423,14 @@ dead *failed* state (connecting is now single-flight and retries while on screen
 error was never restarted; only the model's current view may stop its stream. Checked in Clinic Dev by
 accessibility: three close/reopen cycles each logged a fresh connection, and switching between two device tabs
 kept both live.
+
+## 2026-10-17 — Device panes connect to Android Studio's emulators
+
+Android Studio's emulators (and any started without `-grpc-use-token`) write no `grpc.token`, only a `grpc.jwks`
+key directory, so the Device pane could list them but never connect. `EmulatorJWT` now registers a process-wide
+P-256 key there as a JWK set, waits for `grpc.jwk_active` to list it, and signs a fresh ES256 token (issuer
+`android-studio`) per call (ADR-224). The emulator's Tink validator first rejected a bare JWK ("does not contain
+a valid jwk"), then a `typ` header. A live test signs in to a real emulator with its token stripped; all 13
+AndroidEmulator tests pass with `CLINIC_TEST_AVD`. Not yet tried in the app against Studio's own emulator (none
+was running). Installed Clinic crashed three times today during this session's builds (layout loop; see the
+crash thread and ADR-225 on main).

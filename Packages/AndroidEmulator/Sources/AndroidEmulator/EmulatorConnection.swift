@@ -14,11 +14,25 @@ public final class EmulatorConnection: Sendable {
     private let controller: Android_Emulation_Control_EmulatorController.Client<HTTP2ClientTransport.Posix>
     private let ui: Android_Emulation_Control_UiController.Client<HTTP2ClientTransport.Posix>
     private let snapshots: Android_Emulation_Control_SnapshotService.Client<HTTP2ClientTransport.Posix>
-    private let metadata: Metadata
+    /// Asked for on every call, so a signed token is always fresh.
+    private var metadata: Metadata { Self.metadata(for: emulator) }
+
+    private static func metadata(for emulator: RunningEmulator) -> Metadata {
+        var metadata = Metadata()
+        if let token = emulator.token {
+            metadata.addString("Bearer \(token)", forKey: "authorization")
+        } else if emulator.jwksDirectory != nil {
+            metadata.addString("Bearer \(EmulatorJWT.token())", forKey: "authorization")
+        }
+        return metadata
+    }
+
     /// Every input event goes down one client stream, so a touch's down, moves and up arrive in the
     /// order they happened; separate unary calls could overtake each other.
     private let input: AsyncStream<EmulatorInputEvent>.Continuation
     private let tasks: [Task<Void, Never>]
+    /// Clinic's key reaching an emulator that takes signed tokens; done at once for one that does not.
+    private let ready: Task<Void, any Error>
 
     public init(_ emulator: RunningEmulator) throws {
         self.emulator = emulator
@@ -31,17 +45,16 @@ public final class EmulatorConnection: Sendable {
         self.controller = .init(wrapping: client)
         self.ui = .init(wrapping: client)
         self.snapshots = .init(wrapping: client)
-        var metadata = Metadata()
-        if let token = emulator.token { metadata.addString("Bearer \(token)", forKey: "authorization") }
-        self.metadata = metadata
-
         let (events, continuation) = AsyncStream<EmulatorInputEvent>.makeStream(bufferingPolicy: .unbounded)
         self.input = continuation
         let controller = self.controller
+        let ready = Task { try await EmulatorJWT.register(with: emulator) }
+        self.ready = ready
         tasks = [
             Task { try? await client.runConnections() },
-            Task {
-                _ = try? await controller.streamInputEvent(metadata: metadata, requestProducer: { writer in
+            Task { [emulator] in
+                guard (try? await ready.value) != nil else { return }
+                _ = try? await controller.streamInputEvent(metadata: Self.metadata(for: emulator), requestProducer: { writer in
                     for await event in events { try await writer.write(event) }
                 })
             },
@@ -61,6 +74,7 @@ public final class EmulatorConnection: Sendable {
     /// The display's size in device pixels — in its natural orientation, which touch coordinates are
     /// always given in, however the device is turned — and the postures a foldable can take.
     public func hardware() async throws -> EmulatorHardware {
+        try await ready.value
         let status = try await controller.getStatus(Google_Protobuf_Empty(), metadata: metadata)
         let config = Dictionary(status.hardwareConfig.entry.map { ($0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
         guard let width = config["hw.lcd.width"].flatMap(Int.init), let height = config["hw.lcd.height"].flatMap(Int.init) else {

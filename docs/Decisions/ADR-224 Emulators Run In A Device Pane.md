@@ -30,6 +30,12 @@ support multiple emulators (and later physical devices)."*
 - **Running emulators are found, not launched.** Every emulator writes
   `~/Library/Caches/TemporaryItems/avd/running/pid_<pid>.ini` with its gRPC port and token. Clinic offers each
   one from the `+` menu and the empty panel's *Devices* section, including Android Studio's and headless ones.
+- **Two ways in.** An emulator started with `-grpc-use-token` takes the token from its discovery file. Every other
+  one, Android Studio's included, takes only signed JWTs (`-grpc-use-jwt` is the default). For those, Clinic puts a
+  P-256 public key, as a JWK set, in the emulator's `grpc.jwks` directory, waits for `grpc.jwk_active` to list it,
+  and signs a ten-minute ES256 token per call with issuer `android-studio`, which the SDK's
+  `emulator_access.json` allows every service the pane calls. Tink, the emulator's validator, refuses a `typ`
+  header and a bare JWK (not a set).
 - **An emulator a run boots has no window** (amends [[ADR-124 Runs Get A Device Ready]]). It starts with
   `-qt-hide-window -grpc-use-token`, and its Device pane opens and is fronted in the run's tab. One already
   running is left as it is. Settings ▸ Sessions ▸ Runs ▸ *Show emulators in Clinic* turns this off, on by default.

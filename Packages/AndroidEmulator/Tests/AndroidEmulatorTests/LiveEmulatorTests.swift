@@ -24,4 +24,19 @@ import Testing
         }
         #expect(frames == 1)
     }
+
+    /// Android Studio's emulators write no `grpc.token`, only a key directory, so Clinic must sign in with
+    /// its own key. The discovery file is read without its token to force that path.
+    @Test(.enabled(if: avd != nil)) func signsInWithItsOwnKeyWhenThereIsNoToken() async throws {
+        let directory = RunningEmulator.discoveryDirectory
+        let found = try #require(RunningEmulator.scan().first { $0.avdId == Self.avd })
+        let ini = try String(contentsOf: directory.appendingPathComponent("pid_\(found.pid).ini"), encoding: .utf8)
+            .split(whereSeparator: \.isNewline).filter { !$0.hasPrefix("grpc.token=") }.joined(separator: "\n")
+        let emulator = try #require(RunningEmulator(ini: ini, pid: found.pid))
+        #expect(emulator.token == nil && emulator.jwksDirectory != nil)
+        let connection = try EmulatorConnection(emulator)
+        defer { connection.close() }
+        let hardware = try await connection.hardware()
+        #expect(hardware.width > 0)
+    }
 }

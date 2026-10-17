@@ -15,6 +15,11 @@ public struct RunningEmulator: Sendable, Hashable, Identifiable {
     public let grpcPort: Int
     /// Sent as `authorization: Bearer <token>`; nil for an emulator started without `-grpc-use-token`.
     public let token: String?
+    /// Where an emulator that takes signed JWTs instead (`-grpc-use-jwt`, the default without
+    /// `-grpc-use-token`) loads the public keys it trusts (`grpc.jwks`), and the file it rewrites with every
+    /// key it has loaded (`grpc.jwk_active`).
+    public let jwksDirectory: URL?
+    public let activeJWKFile: URL?
     /// The SDK the emulator was launched from (the parent of `launcher.dir`), for its adb.
     public let sdkDirectory: URL?
 
@@ -40,6 +45,8 @@ public struct RunningEmulator: Sendable, Hashable, Identifiable {
         self.serialPort = values["port.serial"].flatMap(Int.init) ?? 0
         self.grpcPort = grpcPort
         self.token = values["grpc.token"].flatMap { $0.isEmpty ? nil : $0 }
+        self.jwksDirectory = values["grpc.jwks"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        self.activeJWKFile = values["grpc.jwk_active"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
         self.sdkDirectory = values["launcher.dir"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0).deletingLastPathComponent() }
     }
 
