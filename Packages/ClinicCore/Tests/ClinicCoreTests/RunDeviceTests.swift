@@ -7,6 +7,8 @@ import Testing
     @Test func anEmbeddedEmulatorBootsWithoutAWindow() {
         #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: false) == ["-avd", "Pixel_9"])
         #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: true) == ["-avd", "Pixel_9", "-qt-hide-window", "-grpc-use-token"])
+        #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: false, coldBoot: true) == ["-avd", "Pixel_9", "-no-snapshot-load"])
+        #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: false, wipeData: true) == ["-avd", "Pixel_9", "-no-snapshot-load", "-wipe-data"])
     }
 
     @Test func parsesADBDevicesIgnoringHeaderAndDaemonChatter() {

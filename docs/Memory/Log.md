@@ -5445,3 +5445,14 @@ the guest never re-lays-out when folded (`wm folded-area` is set, device state g
 2076×2152 and launcher content runs past the fold). `setPosture`, the hinge angle and the console's `fold` all
 behave the same, so that is the image, not the pane. The user's Pixel 10 Pro Fold (API 37.1 Play image) was not
 booted to compare.
+
+## 2026-10-17 — Emulators are started and stopped from Clinic (ADR-226)
+
+User: not obvious how to start or close an emulator, and a stopped one left its tab "disconnected". Mocked three
+directions (Devices pane, capsule, `+` menu) and the stopped states on a canvas, then one Grill round; every
+recommendation taken. Every AVD is now in `+` and the empty panel and boots into its tab; the capsule popover has
+Start/Stop; Stop Emulator closes its tab after *Shutting down…*; otherwise a tab says *is off* (shut down) or
+*quit* (discovery file left behind) with Start. Verified in Clinic Dev by accessibility and window captures: start
+from `+`, Stop Emulator closing the tab, `adb emu kill` → off, `kill -9` → quit (log). Clinic Dev's window then
+left the AX tree (another Space), so the off state's Start, the capsule buttons, Cold Boot and Wipe Data were not
+clicked. `log show` needs `--info` to show the device category's info lines.

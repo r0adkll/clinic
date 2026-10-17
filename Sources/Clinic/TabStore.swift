@@ -1425,6 +1425,25 @@ final class TabStore {
         showPane(.device(deviceId), in: tab)
     }
 
+    /// A device row in the `+` menu or the empty panel (ADR-226): its tab, fronted, after starting the AVD
+    /// with its window hidden when it is not running, so the tab shows it starting. A failed start still
+    /// opens the tab, which offers Start again.
+    func openDevice(_ deviceId: String, in tab: Tab, area: Tab.Area = .right, coldBoot: Bool = false, wipeData: Bool = false) {
+        if EmulatorDirectory.shared.emulator(deviceId) == nil {
+            try? EmulatorDirectory.shared.start(deviceId, coldBoot: coldBoot, wipeData: wipeData)
+        }
+        showPane(.device(deviceId), in: tab, area: area)
+    }
+
+    /// A Device pane closing itself: after Stop Emulator, or from its *off* state's Close Tab.
+    func closeDevicePane(_ model: DeviceScreenModel) {
+        for tab in tabs {
+            for area in [Tab.Area.main, .right] {
+                if let pane = tab.group(area).panes.first(where: { $0.device === model }) { closePane(pane, in: tab); return }
+            }
+        }
+    }
+
     func openRunPane(_ key: RunKey, in tab: Tab, front: Bool) {
         if !front {
             // Never shows the panel or moves the keyboard: Claude started this, or a turn ended, and
@@ -1484,7 +1503,7 @@ final class TabStore {
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
         }
-        kinds += EmulatorDirectory.shared.running.map { PanelPane.Kind.device($0.deviceId) }
+        kinds += EmulatorDirectory.shared.deviceIds.map { PanelPane.Kind.device($0) }
         return kinds.filter { $0.allowsSeveral || !tab.isOpen($0) }
     }
 
@@ -1496,7 +1515,7 @@ final class TabStore {
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Media (\(count))" : "Media"
         case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
-        case .device(let id): return EmulatorDirectory.shared.emulator(id)?.name ?? kind.defaultTitle
+        case .device(let id): return EmulatorDirectory.shared.emulator(id)?.name ?? EmulatorDirectory.name(of: id)
         case .grill:
             // The count on the chip is what still needs the reader, which is the only number that
             // would make them open the pane (ADR-131).

@@ -68,4 +68,10 @@ public struct RunningEmulator: Sendable, Hashable, Identifiable {
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
+    /// Whether this emulator's discovery file is still there. An emulator that shuts down removes it, so
+    /// once the process has gone, a file left behind means it quit unexpectedly or was killed.
+    public func leftDiscoveryFile(in directory: URL = discoveryDirectory) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("pid_\(pid).ini").path)
+    }
 }

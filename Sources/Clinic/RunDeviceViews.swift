@@ -137,17 +137,22 @@ struct RunDevicePopover: View {
                         ForEach(groups(list), id: \.title) { group in
                             PopoverMenuHeader(title: group.title)
                             ForEach(group.devices) { device in
-                                PopoverMenuRow(title: device.name, subtitle: device.problem,
-                                               trailing: trailing(device), checked: device.id == chosen?.id) {
-                                    store.choose(device, projectPath: projectPath)
-                                } icon: { Image(systemName: device.symbol) }
-                                .disabled(device.problem != nil)
+                                HStack(spacing: 4) {
+                                    PopoverMenuRow(title: device.name, subtitle: device.problem,
+                                                   trailing: trailing(device), checked: device.id == chosen?.id) {
+                                        store.choose(device, projectPath: projectPath)
+                                    } icon: { Image(systemName: device.symbol) }
+                                    .disabled(device.problem != nil)
+                                    if device.kind == .emulator { EmulatorPowerButton(device: device) }
+                                }
                             }
                         }
                     }
                 }
                 .frame(maxHeight: 420)
                 .fixedSize(horizontal: false, vertical: true)
+                // A start or stop from a row changes what is running; list again once it has.
+                .onChange(of: EmulatorDirectory.shared.running.map(\.avdId)) { store.refresh(platform, projectPath: projectPath) }
             }
             PopoverMenuDivider()
             PopoverMenuRow(title: store.loading.contains(platform) ? "Refreshing…" : "Refresh", checked: list.isEmpty ? nil : false) {
@@ -179,6 +184,43 @@ struct RunDevicePopover: View {
         case .emulator: return device.isRunning ? "running" : "boots"
         case .simulator: return device.isRunning ? device.detail : nil
         }
+    }
+}
+
+/// Start or Stop beside an emulator in the capsule's popover (ADR-226), without choosing it as the run's
+/// device. A start follows Settings ▸ Sessions ▸ Runs: with *Show emulators in Clinic* on, the emulator has
+/// no window and its Device pane opens in this tab.
+private struct EmulatorPowerButton: View {
+    @Environment(TabStore.self) private var tabs
+    let device: RunDevice
+
+    var body: some View {
+        let directory = EmulatorDirectory.shared
+        let running = directory.emulator(device.id)
+        let avd = device.avdName ?? String(device.id.dropFirst(4))
+        if directory.stopping.contains(avd) || directory.starting[avd] != nil {
+            ProgressView().controlSize(.small).frame(width: 26, height: 22)
+        } else if let running {
+            button("stop.fill", help: "Stop \(device.name)") { directory.stop(running) }
+        } else if !device.isRunning {
+            button("play.fill", help: "Start \(device.name)") { start(avd) }
+        }
+    }
+
+    private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 10)).frame(width: 26, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func start(_ avd: String) {
+        let embedded = UserDefaults.standard.object(forKey: RunStore.emulatorsInClinicKey) as? Bool ?? true
+        try? EmulatorDirectory.shared.start(device.id, embedded: embedded)
+        if embedded, let tab = tabs.selectedTab { tabs.showPane(.device(device.id), in: tab) }
     }
 }
 

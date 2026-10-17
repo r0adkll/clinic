@@ -3,6 +3,7 @@ import Observation
 import os
 import SwiftUI
 import AndroidEmulator
+import ClinicCore
 
 // An Android emulator drawn in a workspace pane the way Android Studio's Running Devices panel draws it
 // (docs/Research/Embedded Android Emulator.md): the emulator's own window hidden, its screen streamed
@@ -10,23 +11,44 @@ import AndroidEmulator
 // device controls in a toolbar over the screen. Each pane holds its own connection, so any number of
 // devices can be open side by side, in either area.
 
-/// The emulators running now, for the `+` menu and the empty panel. Rescanned every two seconds; a scan
-/// is one directory listing.
+/// This Mac's emulators, for the `+` menu, the empty panel, the device capsule and each Device pane:
+/// every AVD, which are running, and the starts and stops Clinic asked for. The running list is one
+/// directory listing, rescanned every two seconds (every second while a start or stop is pending);
+/// the AVDs are `emulator -list-avds`, every 30 seconds.
 @MainActor
 @Observable
 final class EmulatorDirectory {
     static let shared = EmulatorDirectory()
+
+    /// How an AVD that was running stopped, kept while it stays stopped.
+    enum Ending: Equatable {
+        /// Shut down: from its pane, Android Studio, or `adb emu kill`.
+        case stopped(Date)
+        /// Exited without shutting down, which leaves its discovery file behind, or failed to start.
+        case quit(Date)
+    }
+
     private(set) var running: [RunningEmulator] = []
+    /// Every AVD by id, running or not.
+    private(set) var avds: [String] = []
+    /// Starts Clinic asked for whose emulator has not appeared yet, by AVD id.
+    private(set) var starting: [String: Date] = [:]
+    /// Stops Clinic asked for whose emulator is still running.
+    private(set) var stopping: Set<String> = []
+    private(set) var endings: [String: Ending] = [:]
+    @ObservationIgnored private var launchers: [String: Process] = [:]
+    @ObservationIgnored private var lastAVDScan = Date.distantPast
     @ObservationIgnored private var task: Task<Void, Never>?
+    private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "device")
 
     private init() {
         running = RunningEmulator.scan()
         task = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                let found = await Task.detached { RunningEmulator.scan() }.value
                 guard let self else { return }
-                if found != self.running { self.running = found }
+                await self.scan()
+                let busy = !self.starting.isEmpty || !self.stopping.isEmpty
+                try? await Task.sleep(for: .seconds(busy ? 1 : 2))
             }
         }
     }
@@ -34,8 +56,82 @@ final class EmulatorDirectory {
     /// By a Device pane's id, `avd:<id>`.
     func emulator(_ deviceId: String) -> RunningEmulator? { running.first { $0.deviceId == deviceId } }
 
+    /// Every AVD as a Device pane id, the running ones first.
+    var deviceIds: [String] {
+        let live = running.map(\.deviceId)
+        return live + avds.map { "avd:" + $0 }.filter { !live.contains($0) }
+    }
+
+    /// An AVD's name before it runs, when only its id is known.
+    static func name(of deviceId: String) -> String {
+        AndroidDevices.displayName(deviceId.hasPrefix("avd:") ? String(deviceId.dropFirst(4)) : deviceId)
+    }
+
     /// Reads the directory now, for a caller that just booted one and cannot wait for the next scan.
-    func rescan() { running = RunningEmulator.scan() }
+    func rescan() { apply(RunningEmulator.scan()) }
+
+    private func scan() async {
+        apply(await Task.detached { RunningEmulator.scan() }.value)
+        guard Date().timeIntervalSince(lastAVDScan) > 30 else { return }
+        lastAVDScan = Date()
+        let list = await RunDeviceProbe.avds(projectRoot: nil)
+        if list != avds { avds = list }
+    }
+
+    private func apply(_ found: [RunningEmulator]) {
+        let live = Set(found.map(\.avdId))
+        for gone in running where !live.contains(gone.avdId) {
+            let asked = stopping.remove(gone.avdId) != nil
+            let quit = !asked && gone.leftDiscoveryFile()
+            endings[gone.avdId] = quit ? .quit(Date()) : .stopped(Date())
+            Self.log.info("\(gone.avdId, privacy: .public) \(quit ? "quit" : "stopped", privacy: .public)")
+        }
+        for id in live { starting[id] = nil; launchers[id] = nil; endings[id] = nil }
+        for (id, since) in starting {
+            // The launcher stays up while its emulator runs, so one that exited with an error failed.
+            if let launcher = launchers[id], !launcher.isRunning, launcher.terminationStatus != 0 {
+                starting[id] = nil; launchers[id] = nil; endings[id] = .quit(Date())
+            } else if Date().timeIntervalSince(since) > 240 {
+                starting[id] = nil; launchers[id] = nil
+            }
+        }
+        if found != running { running = found }
+    }
+
+    /// Starts an AVD, with its window hidden unless `embedded` is false; it outlives Clinic, as Android
+    /// Studio's do. Throws when the emulator cannot be launched at all.
+    func start(_ deviceId: String, coldBoot: Bool = false, wipeData: Bool = false, embedded: Bool = true) throws {
+        let avd = deviceId.hasPrefix("avd:") ? String(deviceId.dropFirst(4)) : deviceId
+        guard emulator("avd:" + avd) == nil, starting[avd] == nil else { return }
+        launchers[avd] = try RunDeviceProbe.startEmulator(avd: avd, projectRoot: nil, embedded: embedded,
+                                                          coldBoot: coldBoot, wipeData: wipeData)
+        starting[avd] = Date()
+        endings[avd] = nil
+        Self.log.info("starting \(avd, privacy: .public)\(coldBoot ? " cold" : "")\(wipeData ? " wiped" : "")")
+    }
+
+    /// Shuts an emulator down as its own window's close button would, over `connection` when the caller
+    /// has one. One that has not gone after 20 seconds, or cannot be reached, is killed through adb.
+    func stop(_ emulator: RunningEmulator, using connection: EmulatorConnection? = nil) {
+        guard !stopping.contains(emulator.avdId) else { return }
+        stopping.insert(emulator.avdId)
+        Task {
+            do {
+                if let connection {
+                    try await connection.shutDown()
+                } else {
+                    let own = try EmulatorConnection(emulator)
+                    defer { own.close() }
+                    try await own.shutDown()
+                }
+                try await Task.sleep(for: .seconds(20))
+            } catch {
+                Self.log.error("could not shut down \(emulator.avdId, privacy: .public): \(error, privacy: .public)")
+            }
+            guard running.contains(where: { $0.pid == emulator.pid }) else { return }
+            _ = await DeviceScreenModel.adb(emulator, ["emu", "kill"])
+        }
+    }
 }
 
 /// One Device pane's connection to its emulator. Long-lived on the pane, so moving the pane between
@@ -71,7 +167,10 @@ final class DeviceScreenModel {
     init(deviceId: String) { self.deviceId = deviceId }
 
     var emulator: RunningEmulator? { EmulatorDirectory.shared.emulator(deviceId) }
-    var name: String { emulator?.name ?? String(deviceId.dropFirst(4)).replacingOccurrences(of: "_", with: " ") }
+    var name: String { emulator?.name ?? EmulatorDirectory.name(of: deviceId) }
+    var avdId: String { String(deviceId.dropFirst(4)) }
+    /// Stop Emulator was chosen in this pane, so the pane closes once the emulator has gone.
+    private(set) var closesWhenStopped = false
 
     // MARK: Streaming
 
@@ -221,7 +320,18 @@ final class DeviceScreenModel {
     }
 
     func shutDown() {
-        perform("Could not stop \(name)") { try await $0.shutDown() }
+        guard let emulator else { return }
+        closesWhenStopped = true
+        EmulatorDirectory.shared.stop(emulator, using: connection)
+    }
+
+    /// Starts the AVD again from the pane's *off* or *quit* state; the pane reconnects when it appears.
+    func start(coldBoot: Bool = false) {
+        do {
+            try EmulatorDirectory.shared.start(deviceId, coldBoot: coldBoot)
+        } catch {
+            say("Could not start \(name): \(error.localizedDescription)")
+        }
     }
 
     func takeScreenshot() {
@@ -321,7 +431,7 @@ final class DeviceScreenModel {
         FileManager.default.displayName(atPath: file.deletingLastPathComponent().path)
     }
 
-    private static func adb(_ emulator: RunningEmulator, _ arguments: [String]) async -> String? {
+    static func adb(_ emulator: RunningEmulator, _ arguments: [String]) async -> String? {
         await Task.detached {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: emulator.adb.hasPrefix("/") ? emulator.adb : "/usr/bin/env")
@@ -504,7 +614,9 @@ private struct DeviceScreen: NSViewRepresentable {
 
 /// The Device pane: Android Studio's device toolbar over the screen.
 struct DevicePane: View {
+    @Environment(TabStore.self) private var tabs
     let model: DeviceScreenModel
+    private var directory: EmulatorDirectory { .shared }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -518,21 +630,7 @@ struct DevicePane: View {
                     .id(ObjectIdentifier(model))
                     .padding(12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                switch model.status {
-                case .live:
-                    EmptyView()
-                case .connecting:
-                    ProgressView("Connecting to \(model.name)…").controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .notRunning:
-                    ContentUnavailableView("\(model.name) is not running", systemImage: "candybarphone",
-                                           description: Text("Start it from a run configuration or Android Studio's Device Manager, and it shows here."))
-                        .background(Color(nsColor: .underPageBackgroundColor))
-                case .failed(let message):
-                    ContentUnavailableView("Could not reach \(model.name)", systemImage: "exclamationmark.triangle",
-                                           description: Text("\(message)\nTrying again…"))
-                        .background(Color(nsColor: .underPageBackgroundColor))
-                }
+                status
                 if let notice = model.notice { NoticeCapsule(notice: notice).padding(.bottom, 20) }
             }
             .animation(.easeOut(duration: 0.2), value: model.notice)
@@ -540,6 +638,79 @@ struct DevicePane: View {
         .background(Color(nsColor: .underPageBackgroundColor))
         .onChange(of: model.emulator) { _, emulator in
             if emulator != nil { model.retry() }
+        }
+        // Stopped from this pane: the tab goes with the emulator, as a window would.
+        .onChange(of: directory.endings[model.avdId]) { _, ending in
+            if ending != nil, model.closesWhenStopped { tabs.closeDevicePane(model) }
+        }
+    }
+
+    /// What draws over the screen: nothing while it is live; otherwise starting, shutting down,
+    /// connecting, or the emulator being off.
+    @ViewBuilder private var status: some View {
+        if directory.stopping.contains(model.avdId) {
+            ProgressView("Shutting down \(model.name)…").controlSize(.small)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.35))
+        } else if model.emulator != nil {
+            switch model.status {
+            case .live:
+                EmptyView()
+            case .connecting, .notRunning:
+                ProgressView("Connecting to \(model.name)…").controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .failed(let message):
+                ContentUnavailableView("Could not reach \(model.name)", systemImage: "exclamationmark.triangle",
+                                       description: Text("\(message)\nTrying again…"))
+                    .background(Color(nsColor: .underPageBackgroundColor))
+            }
+        } else if directory.starting[model.avdId] != nil {
+            ProgressView("Starting \(model.name)…").controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .underPageBackgroundColor))
+        } else {
+            DeviceOffView(name: model.name, ending: directory.endings[model.avdId],
+                          start: { model.start() }, coldBoot: { model.start(coldBoot: true) },
+                          close: { tabs.closeDevicePane(model) })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .underPageBackgroundColor))
+        }
+    }
+}
+
+/// A Device pane whose emulator is not running: stopped (here or elsewhere), never started, or quit.
+private struct DeviceOffView: View {
+    let name: String
+    let ending: EmulatorDirectory.Ending?
+    let start: () -> Void
+    let coldBoot: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        if case .quit = ending {
+            ContentUnavailableView {
+                Label("\(name) quit", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("The emulator exited without being stopped.")
+            } actions: {
+                Button("Start Again", action: start).buttonStyle(.borderedProminent)
+                Button("Cold Boot", action: coldBoot)
+            }
+        } else {
+            ContentUnavailableView {
+                Label("\(name) is off", systemImage: "candybarphone")
+            } description: {
+                if case .stopped(let at) = ending {
+                    Text("Stopped at \(at.formatted(date: .omitted, time: .shortened)).")
+                } else {
+                    Text("Start it here, or from a run or Android Studio, and it shows in this tab.")
+                }
+            } actions: {
+                Button("Start", action: start).buttonStyle(.borderedProminent)
+                Button("Close Tab", action: close)
+            }
         }
     }
 }
@@ -735,4 +906,64 @@ private struct DeviceControlButton: View {
         .help(label)
         .accessibilityLabel(label)
     }
+}
+
+/// The `+` menu's devices (ADR-226): every AVD, running or not. Choosing one that is not running starts
+/// it with its window hidden and opens its tab, which shows it starting. *More Devices* starts one cold,
+/// or wiped back to a factory state after asking.
+struct DeviceMenuSection: View {
+    @Environment(TabStore.self) private var tabs
+    let deviceIds: [String]
+    let tab: Tab
+    let area: Tab.Area
+
+    var body: some View {
+        let directory = EmulatorDirectory.shared
+        let off = deviceIds.filter { directory.emulator($0) == nil && directory.starting[String($0.dropFirst(4))] == nil }
+        Section("Devices") {
+            ForEach(deviceIds, id: \.self) { id in
+                Button { tabs.openDevice(id, in: tab, area: area) } label: {
+                    Text(tabs.paneTitle(.device(id), in: tab))
+                    Text(subtitle(id))
+                    Image(systemName: "candybarphone")
+                }
+            }
+            if !off.isEmpty {
+                Menu("More Devices") {
+                    Section("Cold Boot") {
+                        ForEach(off, id: \.self) { id in
+                            Button(EmulatorDirectory.name(of: id)) { tabs.openDevice(id, in: tab, area: area, coldBoot: true) }
+                        }
+                    }
+                    Section("Wipe Data") {
+                        ForEach(off, id: \.self) { id in
+                            Button(EmulatorDirectory.name(of: id) + "…") {
+                                if confirmWipeData(EmulatorDirectory.name(of: id)) { tabs.openDevice(id, in: tab, area: area, wipeData: true) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func subtitle(_ id: String) -> String {
+        let directory = EmulatorDirectory.shared
+        if let emulator = directory.emulator(id) { return tab.isOpen(.device(id)) ? "Open · \(emulator.serial)" : "Running · \(emulator.serial)" }
+        if directory.starting[String(id.dropFirst(4))] != nil { return "Starting…" }
+        return "Not running · starts it"
+    }
+}
+
+/// Wiping an AVD's data cannot be undone, so it is asked first, as Android Studio's Device Manager asks.
+@MainActor
+func confirmWipeData(_ name: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "Wipe \(name)'s data?"
+    alert.informativeText = "Everything on the emulator is erased: apps, accounts, files and settings. It then starts as a new device."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "Wipe Data")
+    alert.addButton(withTitle: "Cancel")
+    alert.buttons.first?.hasDestructiveAction = true
+    return alert.runModal() == .alertFirstButtonReturn
 }

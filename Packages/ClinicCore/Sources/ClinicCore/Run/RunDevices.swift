@@ -272,9 +272,24 @@ public enum RunDeviceProbe {
     }
 
     /// The emulator's arguments. Embedded is how Android Studio starts one for its Running Devices
-    /// panel: the window hidden, and gRPC behind a token for whoever draws the screen instead.
-    public static func emulatorArguments(avd: String, embedded: Bool) -> [String] {
+    /// panel: the window hidden, and gRPC behind a token for whoever draws the screen instead. A cold
+    /// boot skips the quick-boot snapshot; wiping data also returns the device to a factory state.
+    public static func emulatorArguments(avd: String, embedded: Bool, coldBoot: Bool = false, wipeData: Bool = false) -> [String] {
         ["-avd", avd] + (embedded ? ["-qt-hide-window", "-grpc-use-token"] : [])
+            + (coldBoot || wipeData ? ["-no-snapshot-load"] : []) + (wipeData ? ["-wipe-data"] : [])
+    }
+
+    /// The AVDs this Mac has, by id (`emulator -list-avds`), running or not.
+    public static func avds(projectRoot: String?) async -> [String] {
+        let emulator = AndroidSDK.tool("emulator/emulator", in: AndroidSDK.locate(projectRoot: projectRoot), fallback: "emulator")
+        return await run(emulator, ["-list-avds"], timeout: .seconds(8)).map { AndroidDevices.parseAVDs(string($0)) } ?? []
+    }
+
+    /// Starts an AVD, detached so it outlives Clinic, and returns at once; the caller watches for it to
+    /// appear (its discovery file, or `adb devices`). The process is returned so a start can be cancelled.
+    public static func startEmulator(avd: String, projectRoot: String?, embedded: Bool, coldBoot: Bool = false, wipeData: Bool = false) throws -> Process {
+        let emulator = AndroidSDK.tool("emulator/emulator", in: AndroidSDK.locate(projectRoot: projectRoot), fallback: "emulator")
+        return try launchDetached(emulator, emulatorArguments(avd: avd, embedded: embedded, coldBoot: coldBoot, wipeData: wipeData))
     }
 
     private static func prepareAndroid(_ device: RunDevice, sdk: URL?, embedded: Bool, progress: @escaping @Sendable (String) -> Void) async throws -> [String: String] {

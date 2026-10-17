@@ -352,7 +352,9 @@ struct PaneTabStrip: View {
     /// openers are gone (ADR-213).
     private var addMenu: some View {
         PaneIconMenu(symbol: "plus", help: area == .main ? "Open a view beside Claude" : "Open a view in this panel") {
-            let available = tabs.availablePanes(for: tab)
+            let all = tabs.availablePanes(for: tab)
+            let available = all.filter { if case .device = $0 { false } else { true } }
+            let devices = all.compactMap { if case .device(let id) = $0 { id } else { nil } }
             if !available.isEmpty {
                 Section("Add") {
                     ForEach(available, id: \.self) { kind in
@@ -363,6 +365,7 @@ struct PaneTabStrip: View {
                     }
                 }
             }
+            if !devices.isEmpty { DeviceMenuSection(deviceIds: devices, tab: tab, area: area) }
             let here = group.panes
             if area == .main || !here.isEmpty {
                 Section("Open") {
@@ -629,8 +632,9 @@ struct SidePanelEmptyState: View {
                         section("Devices") {
                             ForEach(devices, id: \.self) { id in
                                 let emulator = EmulatorDirectory.shared.emulator(id)
-                                EmptyPanelRow(title: emulator?.name ?? id, detail: "Android emulator · \(emulator?.serial ?? "running")",
-                                              open: { tabs.addPane(.device(id), in: tab, area: .right) }) {
+                                EmptyPanelRow(title: emulator?.name ?? EmulatorDirectory.name(of: id),
+                                              detail: emulator.map { "Android emulator · \($0.serial)" } ?? "Not running · opening starts it",
+                                              open: { tabs.openDevice(id, in: tab) }) {
                                     AccentTile(symbol: "candybarphone", size: 26, glyph: 12)
                                 }
                             }
