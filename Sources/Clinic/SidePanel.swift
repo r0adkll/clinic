@@ -21,6 +21,8 @@ final class PanelPane: Identifiable {
         case pr(PullRequestRef)
         /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
         case run(RunKey)
+        /// A running Android emulator's screen, by AVD id (prototype; docs/Research).
+        case device(String)
 
         /// Whether a session may hold more than one pane of this kind (ADR-198). The quick action still
         /// fronts the one used last; *New …* adds another. Shells, and Files since ADR-212.
@@ -35,6 +37,7 @@ final class PanelPane: Identifiable {
             case .grill: "flame"
             case .pr: PullRequestMark.symbol
             case .run: "play.fill"
+            case .device: "candybarphone"
             }
         }
 
@@ -62,6 +65,7 @@ final class PanelPane: Identifiable {
             case .grill: "Grill"
             case .pr(let ref): ref.codeHost.reference(ref.number)
             case .run(let key): key.configId
+            case .device(let avd): avd.replacingOccurrences(of: "_", with: " ")
             }
         }
 
@@ -81,6 +85,8 @@ final class PanelPane: Identifiable {
             // A question's body runs to paragraphs and its choices to full sentences, so this is the
             // widest minimum in the panel.
             case .grill: 460
+            // A phone's screen is tall and narrow; the panel can be too.
+            case .device: 260
             }
         }
     }
@@ -102,6 +108,7 @@ final class PanelPane: Identifiable {
     /// The round on screen and the reader's answers to it (ADR-131). Long-lived, so switching panes
     /// never loses a half-typed answer.
     var grill: GrillPaneModel?
+    var device: DeviceScreenModel?
 
     /// When this pane was last fronted, on one clock for every pane in every area, so "the one used
     /// last" holds across the main area and the right panel (ADR-198, ADR-212). Zero: never fronted.
@@ -117,6 +124,7 @@ final class PanelPane: Identifiable {
         editor?.stop()
         terminal?.free()
         terminal = nil
+        device?.stop()
     }
 }
 
@@ -578,6 +586,7 @@ struct SidePanelEmptyState: View {
         // Newest first: ⌘⇧P opens the newest PR, so the row carrying its chord leads.
         let refs = available.compactMap { if case .pr(let ref) = $0 { ref } else { nil } }.reversed()
         let runs = available.compactMap { if case .run(let key) = $0 { key } else { nil } }
+        let devices = available.compactMap { if case .device(let avd) = $0 { avd } else { nil } }
         // Centred in the pane when it fits, scrolling from the top when it does not (ADR-120's rule).
         GeometryReader { proxy in
             ScrollView {
@@ -607,6 +616,17 @@ struct SidePanelEmptyState: View {
                                 EmptyPanelRow(title: run?.name ?? key.configId, detail: "Run output · " + RunText.status(run),
                                               open: { tabs.addPane(.run(key), in: tab, area: .right) }) {
                                     RunStatusGlyph(run: run, size: 13).frame(width: 26, height: 26)
+                                }
+                            }
+                        }
+                    }
+                    if !devices.isEmpty {
+                        section("Devices") {
+                            ForEach(devices, id: \.self) { avd in
+                                let emulator = EmulatorDirectory.shared.emulator(avd)
+                                EmptyPanelRow(title: emulator?.name ?? avd, detail: "Android emulator · \(emulator?.serial ?? "running")",
+                                              open: { tabs.addPane(.device(avd), in: tab, area: .right) }) {
+                                    AccentTile(symbol: "candybarphone", size: 26, glyph: 12)
                                 }
                             }
                         }
@@ -693,7 +713,7 @@ struct SidePanelEmptyState: View {
         case .grill:
             let waiting = waitingQuestions
             return waiting > 0 ? "\(waiting) question\(waiting == 1 ? "" : "s") waiting for you" : "Answer Claude's question rounds as a form"
-        case .pr, .run: return ""
+        case .pr, .run, .device: return ""
         }
     }
 
@@ -715,7 +735,7 @@ struct SidePanelEmptyState: View {
         case .files: .toggleEditor
         case .attachments: .toggleAttachments
         case .grill: .toggleGrill
-        case .pr, .run: nil
+        case .pr, .run, .device: nil
         }
     }
 
@@ -731,7 +751,7 @@ private extension PanelPane.Kind {
     /// One of the fixed views, as opposed to something this session produced (a PR, a run).
     var isView: Bool {
         switch self {
-        case .pr, .run: false
+        case .pr, .run, .device: false
         default: true
         }
     }

@@ -26,6 +26,9 @@ packages:
     path: Packages/ClinicCore
   GhosttyBridge:
     path: Packages/GhosttyBridge
+  # The emulator's gRPC client, for the Device pane (prototype; docs/Research/Embedded Android Emulator.md).
+  AndroidEmulator:
+    path: Packages/AndroidEmulator
   CodeEditSourceEditor:
     url: https://github.com/CodeEditApp/CodeEditSourceEditor
     exactVersion: "0.15.2"
@@ -57,6 +60,7 @@ targets:
     dependencies:
       - package: ClinicCore
       - package: GhosttyBridge
+      - package: AndroidEmulator
       - package: CodeEditSourceEditor
       - package: swift-cmark
         product: cmark-gfm

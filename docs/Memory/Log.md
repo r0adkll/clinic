@@ -5382,3 +5382,22 @@ ClinicCore and 7 GhosttyBridge tests pass. Not verified: MetricKit delivery to t
 
 *When a process dies with no report, check launchd's exit status before reaching for crash APIs.* 1536 is
 `exit(6)`, and that alone ruled out every handler that runs at termination.
+
+## 2026-10-17 — Spike: the Android emulator in a panel
+
+User asked whether the emulator could live in a panel like Android Studio's Running Devices. Yes: Studio hides the
+emulator's window (`-qt-hide-window -grpc-use-token`) and draws frames from gRPC `streamScreenshot`, sending input
+back with `sendTouch`/`sendKey`. Measured on this Mac: 60 fps at full resolution through the `MMAP` transport,
+47–67 ms from touch to a changed frame, idle screens push almost nothing. Running emulators are discovered from
+`~/Library/Caches/TemporaryItems/avd/running/pid_*.ini` (port and token). An `MMAP` request without explicit
+dimensions killed a headless emulator once. Findings and a build outline are in [[Embedded Android Emulator]].
+No ADR yet; building it needs one, plus grpc-swift recorded in ADR-058.
+
+## 2026-10-17 — Prototype: a Device pane for running emulators
+
+Built in a worktree, not on main. `Packages/AndroidEmulator` holds the gRPC client generated from the SDK's
+proto (grpc-swift 2, checked in) plus discovery and an `EmulatorConnection`. A `device(avdId)` pane kind draws
+the emulator in a workspace pane from shared memory frames, with clicks, the wheel and keys sent back. Seen in
+Clinic Dev: the live screen in the right panel, and Home reaching the device. Clicks, scrolling and typing are
+not yet checked in the app. Shipping it needs an ADR for the pane and for booting emulators hidden, and the
+packages recorded in ADR-058. Details in [[Embedded Android Emulator]].

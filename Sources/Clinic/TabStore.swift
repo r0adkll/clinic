@@ -1477,6 +1477,7 @@ final class TabStore {
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
         }
+        kinds += EmulatorDirectory.shared.running.map { PanelPane.Kind.device($0.avdId) }
         return kinds.filter { $0.allowsSeveral || !tab.isOpen($0) }
     }
 
@@ -1488,6 +1489,7 @@ final class TabStore {
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Media (\(count))" : "Media"
         case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
+        case .device(let avd): return EmulatorDirectory.shared.emulator(avd)?.name ?? kind.defaultTitle
         case .grill:
             // The count on the chip is what still needs the reader, which is the only number that
             // would make them open the pane (ADR-131).
@@ -1546,6 +1548,8 @@ final class TabStore {
             pane.changes = DiffBrowser()
         case .run:
             break
+        case .device(let avd):
+            pane.device = DeviceScreenModel(avdId: avd)
         }
         return pane
     }
