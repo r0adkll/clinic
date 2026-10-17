@@ -2,6 +2,7 @@
 status: accepted
 date: 2026-09-11
 amends: ADR-122 (a `device` field, a preparing step, the set-up prompt); builds the destination picker ADR-122 deferred
+amended-by: "[[ADR-224 Emulators Run In A Device Pane]] (an emulator a run boots has no window; its screen opens in a Device pane)"
 tags: [adr, ui, runs, android, ios]
 ---
 # ADR-124: Runs get a device ready

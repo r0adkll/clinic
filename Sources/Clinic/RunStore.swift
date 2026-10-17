@@ -56,6 +56,8 @@ final class Run: Identifiable {
 @Observable
 final class RunStore {
     private static let log = Logger(subsystem: "com.r0adkll.clinic", category: "runs")
+    /// Whether an emulator a run boots starts with no window, its screen in a Device pane (on by default).
+    static let emulatorsInClinicKey = "ClinicEmulatorsInClinic"
 
     /// What a checkout's `run.json` said when last read. `error` is set when it would not parse; the file is
     /// then shown as broken and never overwritten.
@@ -292,7 +294,8 @@ final class RunStore {
         run.prepareTask = Task { [weak self, weak run] in
             guard let self, let run else { return }
             do {
-                let (device, env) = try await self.devices.prepare(platform, projectPath: run.projectPath) { message in
+                let embedded = UserDefaults.standard.object(forKey: Self.emulatorsInClinicKey) as? Bool ?? true
+                let (device, env) = try await self.devices.prepare(platform, projectPath: run.projectPath, embedded: embedded) { message in
                     Task { @MainActor in if run.prepareTask != nil { run.preparing = message } }
                 }
                 try Task.checkCancellation()
@@ -301,6 +304,10 @@ final class RunStore {
                 run.prepareTask = nil
                 if !self.launch(run, extraEnvironment: env) {
                     self.failBeforeStart(run, since: since, problem: "The terminal for \(run.name) could not be created.")
+                } else if embedded, !device.isRunning, device.kind == .emulator, device.platform == .android,
+                          let host = run.hostTabId, let tab = self.tabs?.tabs.first(where: { $0.id == host }) {
+                    // Booted by this run with no window of its own: its screen goes beside the run.
+                    self.tabs?.openDevicePane(device.id, in: tab)
                 }
             } catch is CancellationError {
                 return

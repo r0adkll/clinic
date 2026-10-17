@@ -113,6 +113,27 @@ Built in the `zazzy-drifting-parasol` worktree to try the idea in Clinic Dev:
 - **Not yet checked in the app:** click, drag, scroll and typing. Touch over gRPC was measured in the spike,
   but the pane's coordinate mapping has not been exercised.
 
+## Toward shipping (2026-10-17, ADR-224)
+The user chose a connection per pane, hidden boot for emulators Clinic starts, Studio's full toolbar over the
+screen, several devices at once, and physical devices later ([[ADR-224 Emulators Run In A Device Pane]]). Measured
+while building it:
+- **Rotation.** `setPhysicalModel(ROTATION, [0, 0, 90·n])` turns the device. The frame then shows the natural
+  screen turned n quarter turns counter-clockwise (`Image.format.rotation` = n), confirmed by pixel comparison for
+  n = 1, 2, 3. Touches still land at natural-orientation pixels: a touch sent at (200, 900) in landscape read
+  back from `getevent` as `ABS_MT_POSITION` 6067/13652 of 32767, which is (200, 900) on the 1080×2160 panel.
+  This holds even while Android's own display stays at ROTATION_0 (a portrait-locked launcher shows sideways, as
+  on a real phone). `ScreenGeometry` undoes the turn, and has tests.
+- **Foldables** declare `hw.sensor.posture_list` in `getStatus().hardwareConfig`. Not exercised: the only
+  foldable AVD here that boots is the user's own Studio emulator, and `Pixel_9_Pro_Fold` has a broken
+  `config.ini`.
+- **Recording.** `adb emu screenrecord start <path>` works, but the console splits its line on spaces. The
+  emulator writes to a space-free temporary path, and the file is moved to its real name after `stop`.
+- **Extended Controls.** `UiController.showExtendedControls` opens the emulator's own window even with
+  `-qt-hide-window`, and `closeExtendedControls` closes it.
+- **Seen in Clinic Dev:** two emulators as two tabs. Rotate Left and Right redrew the tablet. Take Screenshot
+  wrote a 1920×1200 PNG to the Desktop. Record and Stop wrote a 3 MB `.webm`. Clicks and typing are still
+  unchecked in the app, because a guarded click refuses whenever another app's window covers Clinic Dev.
+
 ## Not tested
 Typed text and key events, rotation and fold, two clients at once (Clinic and Studio's panel viewing the same
 emulator), a Swift gRPC client, audio, multi-display, CPU cost of a Swift renderer. Swift and two-client viewing

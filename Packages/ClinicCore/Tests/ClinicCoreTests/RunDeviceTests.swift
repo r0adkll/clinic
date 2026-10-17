@@ -3,6 +3,12 @@ import Testing
 @testable import ClinicCore
 
 @Suite struct RunDeviceTests {
+    /// Embedded is Android Studio's Running Devices launch: no window, gRPC behind a token.
+    @Test func anEmbeddedEmulatorBootsWithoutAWindow() {
+        #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: false) == ["-avd", "Pixel_9"])
+        #expect(RunDeviceProbe.emulatorArguments(avd: "Pixel_9", embedded: true) == ["-avd", "Pixel_9", "-qt-hide-window", "-grpc-use-token"])
+    }
+
     @Test func parsesADBDevicesIgnoringHeaderAndDaemonChatter() {
         let out = """
         * daemon not running; starting now at tcp:5037

@@ -260,23 +260,30 @@ public enum RunDeviceProbe {
 
     /// Makes `device` ready and returns the environment the run's command needs. Boots an emulator or
     /// a simulator that is not running — detached, so it outlives the run, as Android Studio's do.
+    /// An emulator booted `embedded` has no window of its own: Clinic shows it in a Device pane.
     /// `progress` hears each step; cancelling stops the waiting, not the boot.
-    public static func prepare(_ device: RunDevice, projectRoot: String?,
+    public static func prepare(_ device: RunDevice, projectRoot: String?, embedded: Bool = false,
                                progress: @escaping @Sendable (String) -> Void) async throws -> [String: String] {
         if let problem = device.problem { throw RunDeviceError("\(device.name): \(problem)") }
         switch device.platform {
-        case .android: return try await prepareAndroid(device, sdk: AndroidSDK.locate(projectRoot: projectRoot), progress: progress)
+        case .android: return try await prepareAndroid(device, sdk: AndroidSDK.locate(projectRoot: projectRoot), embedded: embedded, progress: progress)
         case .ios: return try await prepareIOS(device, progress: progress)
         }
     }
 
-    private static func prepareAndroid(_ device: RunDevice, sdk: URL?, progress: @escaping @Sendable (String) -> Void) async throws -> [String: String] {
+    /// The emulator's arguments. Embedded is how Android Studio starts one for its Running Devices
+    /// panel: the window hidden, and gRPC behind a token for whoever draws the screen instead.
+    public static func emulatorArguments(avd: String, embedded: Bool) -> [String] {
+        ["-avd", avd] + (embedded ? ["-qt-hide-window", "-grpc-use-token"] : [])
+    }
+
+    private static func prepareAndroid(_ device: RunDevice, sdk: URL?, embedded: Bool, progress: @escaping @Sendable (String) -> Void) async throws -> [String: String] {
         if device.isRunning, let serial = device.serial { return ["ANDROID_SERIAL": serial] }
         guard let avd = device.avdName else { throw RunDeviceError("\(device.name) is not connected.") }
         let adb = AndroidSDK.tool("platform-tools/adb", in: sdk, fallback: "adb")
         let emulator = AndroidSDK.tool("emulator/emulator", in: sdk, fallback: "emulator")
         progress("Starting \(device.name)…")
-        let process = try launchDetached(emulator, ["-avd", avd])
+        let process = try launchDetached(emulator, emulatorArguments(avd: avd, embedded: embedded))
         let deadline = Date().addingTimeInterval(240)
         var serial: String?
         while serial == nil {

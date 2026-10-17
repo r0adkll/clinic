@@ -11,7 +11,8 @@ import Testing
         let emulator = try #require(RunningEmulator.scan().first { $0.avdId == Self.avd })
         let connection = try EmulatorConnection(emulator)
         defer { connection.close() }
-        let size = try await connection.displaySize()
+        let hardware = try await connection.hardware()
+        let size = (width: hardware.width, height: hardware.height)
         #expect(size.width > 0 && size.height > 0)
         var frames = 0
         for try await frame in connection.frames(width: size.width / 2, height: size.height / 2) {

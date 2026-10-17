@@ -5401,3 +5401,13 @@ the emulator in a workspace pane from shared memory frames, with clicks, the whe
 Clinic Dev: the live screen in the right panel, and Home reaching the device. Clicks, scrolling and typing are
 not yet checked in the app. Shipping it needs an ADR for the pane and for booting emulators hidden, and the
 packages recorded in ADR-058. Details in [[Embedded Android Emulator]].
+
+## 2026-10-17 — Emulators run in a Device pane (ADR-224)
+
+User decided the shippable shape: a connection per pane, emulators Clinic boots start hidden and open beside
+the run, Android Studio's full toolbar over the screen, several devices at once, physical devices later. Recorded
+as ADR-224 (amends ADR-124), with the grpc-swift packages added to ADR-058. Built in the worktree: a Studio-order
+toolbar that folds into ⋯ when narrow, rotation and fold-aware touch mapping (`ScreenGeometry`, measured with
+`getevent`), screenshots and console recordings saved where macOS saves screenshots, snapshots, Extended Controls,
+Stop, and a *Show emulators in Clinic* setting. Checked in Clinic Dev with two emulators: rotate, screenshot and
+record. Clicks, typing and folding still need a person, or a foldable AVD that isn't the user's.

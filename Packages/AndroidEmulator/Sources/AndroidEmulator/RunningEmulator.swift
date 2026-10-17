@@ -15,9 +15,15 @@ public struct RunningEmulator: Sendable, Hashable, Identifiable {
     public let grpcPort: Int
     /// Sent as `authorization: Bearer <token>`; nil for an emulator started without `-grpc-use-token`.
     public let token: String?
+    /// The SDK the emulator was launched from (the parent of `launcher.dir`), for its adb.
+    public let sdkDirectory: URL?
 
     public var id: String { avdId }
     public var serial: String { "emulator-\(serialPort)" }
+    /// The id a Device pane and a run's device use for this emulator: `avd:<id>`, since the serial
+    /// changes on every boot.
+    public var deviceId: String { "avd:" + avdId }
+    public var adb: String { sdkDirectory.map { $0.appendingPathComponent("platform-tools/adb").path } ?? "adb" }
 
     /// Parses one discovery file. Nil when it lacks the AVD or the gRPC port.
     public init?(ini: String, pid: Int32) {
@@ -34,6 +40,7 @@ public struct RunningEmulator: Sendable, Hashable, Identifiable {
         self.serialPort = values["port.serial"].flatMap(Int.init) ?? 0
         self.grpcPort = grpcPort
         self.token = values["grpc.token"].flatMap { $0.isEmpty ? nil : $0 }
+        self.sdkDirectory = values["launcher.dir"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0).deletingLastPathComponent() }
     }
 
     /// Where emulators write their discovery files on macOS.

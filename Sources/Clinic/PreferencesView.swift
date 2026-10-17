@@ -403,6 +403,7 @@ private struct SessionsPane: View {
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
     @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
     @AppStorage(TabStore.fileLinksInFilesKey) private var fileLinksInFiles = true
+    @AppStorage(RunStore.emulatorsInClinicKey) private var emulatorsInClinic = true
 
     var body: some View {
         Form {
@@ -450,6 +451,16 @@ private struct SessionsPane: View {
                 Text("⌘-click a file Claude Code names, or a path printed in a shell, and it opens in the session's "
                      + "Files pane, at its line when the link names one. Off, files open in their default app. "
                      + "Folders, and files the pane cannot show, always do.")
+            }
+
+            Section {
+                Toggle("Show emulators in Clinic", isOn: $emulatorsInClinic)
+            } header: {
+                Text("Runs")
+            } footer: {
+                Text("An emulator a run starts opens in the session's panel instead of its own window, with "
+                     + "Android Studio's device controls over its screen. Off, it opens in the emulator's own window. "
+                     + "Emulators started elsewhere can always be opened from the panel's + menu.")
             }
 
             Section {

@@ -348,11 +348,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         tabs.selectedTab?.surface.sendLine("")
                     }
                 }
-                // `-ClinicOpenDeviceOnLaunch <avd id>`: that running emulator in the tab's panel (prototype).
-                if let avd = UserDefaults.standard.string(forKey: "ClinicOpenDeviceOnLaunch"), !avd.isEmpty {
+                // `-ClinicOpenDeviceOnLaunch <avd id>[,<avd id>…]`: those running emulators in the tab's panel.
+                if let avds = UserDefaults.standard.string(forKey: "ClinicOpenDeviceOnLaunch"), !avds.isEmpty {
                     Task {
                         try? await Task.sleep(for: .seconds(2))
-                        tabs.showPane(.device(avd), area: .right)
+                        for avd in avds.split(separator: ",") { tabs.showPane(.device("avd:" + avd), area: .right) }
                     }
                 }
                 let interrupt = UserDefaults.standard.double(forKey: "ClinicInterruptAfter")

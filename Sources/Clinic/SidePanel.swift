@@ -21,7 +21,8 @@ final class PanelPane: Identifiable {
         case pr(PullRequestRef)
         /// A run's output (ADR-122). The surface belongs to `RunStore`, not to the pane.
         case run(RunKey)
-        /// A running Android emulator's screen, by AVD id (prototype; docs/Research).
+        /// A device's screen, by the id runs use for it: `avd:<id>` for an emulator (a physical device
+        /// would be its serial). docs/Research/Embedded Android Emulator.md.
         case device(String)
 
         /// Whether a session may hold more than one pane of this kind (ADR-198). The quick action still
@@ -65,7 +66,7 @@ final class PanelPane: Identifiable {
             case .grill: "Grill"
             case .pr(let ref): ref.codeHost.reference(ref.number)
             case .run(let key): key.configId
-            case .device(let avd): avd.replacingOccurrences(of: "_", with: " ")
+            case .device(let id): String(id.hasPrefix("avd:") ? id.dropFirst(4) : id[...]).replacingOccurrences(of: "_", with: " ")
             }
         }
 
@@ -116,7 +117,11 @@ final class PanelPane: Identifiable {
     private static var clock = 0
     func markFronted() { Self.clock += 1; frontedAt = Self.clock }
 
-    init(kind: Kind) { self.kind = kind }
+    init(kind: Kind) {
+        self.kind = kind
+        // Here rather than in TabStore.makePane, because a run opens its device's pane directly.
+        if case .device(let id) = kind { device = DeviceScreenModel(deviceId: id) }
+    }
 
     /// Releases the pane's resources; called when the pane or its tab closes.
     func tearDown() {
@@ -586,7 +591,7 @@ struct SidePanelEmptyState: View {
         // Newest first: ⌘⇧P opens the newest PR, so the row carrying its chord leads.
         let refs = available.compactMap { if case .pr(let ref) = $0 { ref } else { nil } }.reversed()
         let runs = available.compactMap { if case .run(let key) = $0 { key } else { nil } }
-        let devices = available.compactMap { if case .device(let avd) = $0 { avd } else { nil } }
+        let devices = available.compactMap { if case .device(let id) = $0 { id } else { nil } }
         // Centred in the pane when it fits, scrolling from the top when it does not (ADR-120's rule).
         GeometryReader { proxy in
             ScrollView {
@@ -622,10 +627,10 @@ struct SidePanelEmptyState: View {
                     }
                     if !devices.isEmpty {
                         section("Devices") {
-                            ForEach(devices, id: \.self) { avd in
-                                let emulator = EmulatorDirectory.shared.emulator(avd)
-                                EmptyPanelRow(title: emulator?.name ?? avd, detail: "Android emulator · \(emulator?.serial ?? "running")",
-                                              open: { tabs.addPane(.device(avd), in: tab, area: .right) }) {
+                            ForEach(devices, id: \.self) { id in
+                                let emulator = EmulatorDirectory.shared.emulator(id)
+                                EmptyPanelRow(title: emulator?.name ?? id, detail: "Android emulator · \(emulator?.serial ?? "running")",
+                                              open: { tabs.addPane(.device(id), in: tab, area: .right) }) {
                                     AccentTile(symbol: "candybarphone", size: 26, glyph: 12)
                                 }
                             }

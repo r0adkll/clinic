@@ -39,7 +39,7 @@ final class RunDeviceStore {
 
     /// Lists afresh (so "running" is current), picks, and gets the device ready. Returns the device and
     /// the environment the command needs.
-    func prepare(_ platform: RunDevicePlatform, projectPath: String,
+    func prepare(_ platform: RunDevicePlatform, projectPath: String, embedded: Bool = false,
                  progress: @escaping @Sendable (String) -> Void) async throws -> (RunDevice, [String: String]) {
         let list = await RunDeviceProbe.list(platform, projectRoot: projectPath)
         devices[platform] = list
@@ -51,7 +51,7 @@ final class RunDeviceStore {
         if device.isRunning, device.problem == nil {
             return (device, try await RunDeviceProbe.prepare(device, projectRoot: projectPath, progress: progress))
         }
-        let task = inflight[device.id] ?? Task { try await RunDeviceProbe.prepare(device, projectRoot: projectPath, progress: progress) }
+        let task = inflight[device.id] ?? Task { try await RunDeviceProbe.prepare(device, projectRoot: projectPath, embedded: embedded, progress: progress) }
         inflight[device.id] = task
         defer { inflight[device.id] = nil; refresh(platform, projectPath: projectPath) }
         // A stopped run's prepare task is cancelled, but the shared boot is not: another run may be

@@ -1418,6 +1418,13 @@ final class TabStore {
 
     /// Opens a run's pane in a tab — fronted, or added behind the pane on screen (a re-run after a turn
     /// never fronts anything, ADR-122).
+    /// An emulator a run just booted with its window hidden (ADR pending; docs/Research): its screen in
+    /// the run's tab, fronted, since there is no other window to see it in.
+    func openDevicePane(_ deviceId: String, in tab: Tab) {
+        EmulatorDirectory.shared.rescan()
+        showPane(.device(deviceId), in: tab)
+    }
+
     func openRunPane(_ key: RunKey, in tab: Tab, front: Bool) {
         if !front {
             // Never shows the panel or moves the keyboard: Claude started this, or a turn ended, and
@@ -1477,7 +1484,7 @@ final class TabStore {
         if let checkout = runs.checkout(for: tab) {
             kinds += runs.runs(inCheckout: checkout).filter { $0.surface != nil }.map { PanelPane.Kind.run($0.key) }
         }
-        kinds += EmulatorDirectory.shared.running.map { PanelPane.Kind.device($0.avdId) }
+        kinds += EmulatorDirectory.shared.running.map { PanelPane.Kind.device($0.deviceId) }
         return kinds.filter { $0.allowsSeveral || !tab.isOpen($0) }
     }
 
@@ -1489,7 +1496,7 @@ final class TabStore {
             let count = tab.sessionId.flatMap { sessions.state.attachments[$0]?.count } ?? 0
             return count > 0 ? "Media (\(count))" : "Media"
         case .run(let key): return runs.run(forKey: key)?.name ?? key.configId
-        case .device(let avd): return EmulatorDirectory.shared.emulator(avd)?.name ?? kind.defaultTitle
+        case .device(let id): return EmulatorDirectory.shared.emulator(id)?.name ?? kind.defaultTitle
         case .grill:
             // The count on the chip is what still needs the reader, which is the only number that
             // would make them open the pane (ADR-131).
@@ -1548,8 +1555,8 @@ final class TabStore {
             pane.changes = DiffBrowser()
         case .run:
             break
-        case .device(let avd):
-            pane.device = DeviceScreenModel(avdId: avd)
+        case .device:
+            break   // PanelPane makes its model
         }
         return pane
     }
