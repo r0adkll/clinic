@@ -20,6 +20,30 @@ import Testing
         #expect(SessionNaming.displayName(for: s, manualName: "Manual") == "Manual")
     }
 
+    /// `attach_pr`'s PRs survive a rescan by being re-applied after the transcript's own (ADR-228).
+    @Test func attachedPullRequestsFollowTheTranscriptsOwn() throws {
+        let a = try #require(PullRequestRef(url: URL(string: "https://github.com/o/r/pull/1")!))
+        let b = try #require(PullRequestRef(url: URL(string: "https://github.com/o/r/pull/2")!))
+        let c = try #require(PullRequestRef(url: URL(string: "https://github.com/o/r/pull/3")!))
+        var s = SessionSummary(id: SessionID("abcdef01-0000-0000-0000-000000000000"), transcriptPath: "p")
+        s.pullRequests = [a, b]
+        // One the transcript also names keeps its place; a new one goes last.
+        #expect(s.withAttached([b, c]).pullRequests.map(\.number) == [1, 2, 3])
+        #expect(s.withAttached([]).pullRequests == s.pullRequests)
+    }
+
+    @Test func stateKeepsAttachedPullRequests() throws {
+        var state = ClinicState()
+        let id = SessionID.generate()
+        state.attachedPullRequests[id] = [try #require(PullRequestRef(url: URL(string: "https://github.com/o/r/pull/7")!))]
+        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        let back = try d.decode(ClinicState.self, from: e.encode(state))
+        #expect(back.attachedPullRequests == state.attachedPullRequests)
+        // Older state files have no key.
+        #expect(try d.decode(ClinicState.self, from: Data(#"{"version":1}"#.utf8)).attachedPullRequests.isEmpty)
+    }
+
     @Test func encodedProjectDirectoryName() {
         #expect(ClaudePaths.encodedProjectDirectoryName(for: "/Users/r0adkll/SoftwareProjects/main/clinic") == "-Users-r0adkll-SoftwareProjects-main-clinic")
         #expect(ClaudePaths.encodedProjectDirectoryName(for: "/private/tmp/a_b.c") == "-private-tmp-a-b-c")

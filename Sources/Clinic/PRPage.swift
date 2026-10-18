@@ -1085,39 +1085,65 @@ struct GitHubUnavailableView: View {
     }
 }
 
-/// Footer chip for one PR (ADR-053): the service's state glyph with its attention dot, and the
-/// service's reference — `#7`, `!482` (ADR-116).
+/// One of a session's PRs in the footer (ADR-228): the service's state glyph with its attention dot, and
+/// the service's reference — `#7`, `!482` (ADR-116). It rests unfilled like the footer's other controls;
+/// outlined while its pane is open behind another, accent while it is in front.
 struct PRChip: View {
     @Environment(PRStore.self) private var prs
     let ref: PullRequestRef
     let active: Bool
-    /// The PR's panel tab exists but another pane is in front.
+    /// The PR's pane exists but another pane is in front.
     var open = false
     let onTap: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         let mark = prs.mark(for: ref)
         let host = ref.codeHost
         Button(action: onTap) {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 PRGlyph(host: host, mark: mark, size: PRStyle.glyphSize.chip)
                 Text(host.reference(ref.number)).monospacedDigit()
             }
-            .font(.callout)
-            .lineLimit(1)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(active ? Color.accent.opacity(0.18) : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(open && !active ? Color.accent.opacity(0.35) : .clear))
-            .foregroundStyle(active ? Color.accent : .primary)
+            .modifier(PRChipChrome(active: active, open: open, hovering: hovering))
         }
         .buttonStyle(.plain)
-        .help(mark?.summary ?? "\(host.noun) \(host.reference(ref.number))")
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.1), value: hovering)
+        .help((mark?.summary ?? "\(host.noun) \(host.reference(ref.number))") + " — ⌥-click to open it beside Claude")
         .contextMenu {
             Button(host.openTitle) { NSWorkspace.shared.open(ref.url) }
             Button("Copy URL") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(ref.url.absoluteString, forType: .string) }
             Button("Refresh") { Task { await prs.refresh(ref) } }
         }
         .task { prs.ensureLoaded([ref]) }
+    }
+}
+
+/// The footer PR chip's shape: unfilled at rest like the footer's other controls, a fill under the pointer,
+/// outlined while its pane is open behind another, accent while it is in front (ADR-228).
+struct PRChipChrome: ViewModifier {
+    var active = false
+    var open = false
+    let hovering: Bool
+
+    private var fill: Color {
+        if active { return Color.accent.opacity(hovering ? 0.24 : 0.18) }
+        if hovering { return Color.primary.opacity(0.09) }
+        return .clear
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .font(.callout)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .frame(height: PaneMetrics.control)
+            .background(fill, in: RoundedRectangle(cornerRadius: PaneMetrics.radius))
+            .overlay(RoundedRectangle(cornerRadius: PaneMetrics.radius).strokeBorder(open && !active ? Color.accent.opacity(0.35) : .clear))
+            .foregroundStyle(active ? Color.accent : .secondary)
+            .contentShape(Rectangle())
     }
 }
 
@@ -1153,7 +1179,7 @@ enum PRStyle {
     /// `arrow.trianglehead.pull`'s narrow shape: the service glyphs of ADR-116 are drawn on a 16 pt grid
     /// and fill it, so each size only has to sit a point or so over its neighbouring text.
     enum glyphSize {
-        /// Footer chip, beside a 12 pt `.callout` label.
+        /// The footer's PR chip, beside a 12 pt `.callout` label.
         static let chip: CGFloat = 14
         /// Sidebar row, beside 10 pt secondary text.
         static let sidebar: CGFloat = 12

@@ -39,7 +39,8 @@ public struct SessionSummary: Hashable, Codable, Sendable, Identifiable {
     public var lastActivityAt: Date?
     public var fileSize: Int64
     public var fileModifiedAt: Date
-    /// Pull requests linked from the transcript (`pr-link` records) or mentioned in the first prompt, oldest first, unique by URL.
+    /// Pull requests linked from the transcript (`pr-link` records) or mentioned in the first prompt, oldest first, unique by URL,
+    /// then any `attach_pr` attached that the transcript does not name (`withAttached`, ADR-228).
     public var pullRequests: [PullRequestRef] = []
     /// Absolute paths the agent wrote (Write/Edit/MultiEdit/NotebookEdit), newest last, de-duplicated, capped at 50.
     public var recentFiles: [String] = []
@@ -117,6 +118,17 @@ public enum SessionNaming {
             if !words.isEmpty { return words.joined(separator: " ") + (p.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count > maxWords ? "…" : "") }
         }
         return "New session"
+    }
+}
+
+extension SessionSummary {
+    /// This summary with the PRs `attach_pr` attached added after the transcript's own (ADR-228). The
+    /// attachments are Clinic's record, kept in `ClinicState.attachedPullRequests`, because a rescan rebuilds
+    /// the summary from the transcript and would drop them. A PR the transcript also names keeps its place.
+    public func withAttached(_ attached: [PullRequestRef]) -> SessionSummary {
+        var s = self
+        for ref in attached where !s.pullRequests.contains(where: { $0.id == ref.id }) { s.pullRequests.append(ref) }
+        return s
     }
 }
 

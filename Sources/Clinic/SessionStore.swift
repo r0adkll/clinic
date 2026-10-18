@@ -47,7 +47,7 @@ final class SessionStore {
         isScanning = true
         let found = await scanner.scanAll()
         var map: [SessionID: SessionSummary] = [:]
-        for s in found { map[s.id] = s; pending[s.id] = nil }
+        for s in found { map[s.id] = s.withAttached(state.attachedPullRequests[s.id] ?? []); pending[s.id] = nil }
         for (id, p) in pending where map[id] == nil { map[id] = p }
         sessions = map
         // Owned ids whose transcript never appeared (a session closed before its first prompt while the app was quit) are stale.
@@ -56,6 +56,8 @@ final class SessionStore {
         // A child whose transcript is gone has nothing to hang under its parent (ADR-181).
         let orphans = state.parents.keys.filter { map[$0] == nil }
         if !orphans.isEmpty { update { s in for id in orphans { s.parents[id] = nil; s.collapsedSessions.remove(id) } } }
+        let unattached = state.attachedPullRequests.keys.filter { map[$0] == nil }
+        if !unattached.isEmpty { update { s in for id in unattached { s.attachedPullRequests[id] = nil } } }
         rebuildProjects()
         isScanning = false
     }
@@ -64,7 +66,7 @@ final class SessionStore {
     func refresh(transcriptPath: String) async {
         if let s = await scanner.scan(file: URL(fileURLWithPath: transcriptPath)) {
             pending[s.id] = nil
-            sessions[s.id] = s
+            sessions[s.id] = s.withAttached(state.attachedPullRequests[s.id] ?? [])
             rebuildProjects()
         }
     }
@@ -242,10 +244,13 @@ final class SessionStore {
             }
     }
 
-    /// PRs attached by the `attach_pr` tool are merged into the session's transcript-derived list.
+    /// PRs attached by the `attach_pr` tool are merged into the session's transcript-derived list. They are
+    /// recorded in the state file too, since the next rescan rebuilds the summary from the transcript (ADR-228).
     func attachPullRequest(_ ref: PullRequestRef, to id: SessionID) {
-        guard var s = sessions[id], !s.pullRequests.contains(where: { $0.url == ref.url }) else { return }
-        s.pullRequests.append(ref)
+        if state.attachedPullRequests[id]?.contains(where: { $0.id == ref.id }) != true {
+            update { s in s.attachedPullRequests[id, default: []].append(ref) }
+        }
+        guard let s = sessions[id]?.withAttached([ref]) else { return }
         sessions[id] = s
         pending[id] = pending[id] != nil ? s : nil
     }

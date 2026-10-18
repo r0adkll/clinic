@@ -5466,3 +5466,18 @@ a live session, or whether the show rate rises. That needs a week of sessions an
 
 *A deferred tool's description is invisible until the agent already wants the tool. Put the trigger in the
 server instructions.*
+
+## 2026-10-18 — The footer shows the session's pull requests (ADR-228)
+User missed the at-a-glance PR tile that ADR-213 removed with the openers. `PRChip` (unused since ADR-212) is
+restyled as an unfilled, secondary chip and drawn in the footer before the context gauge, newest three; click
+opens like ⌘⇧P, ⌥-click beside Claude. First built beside the panel toggle in the main strip; the user preferred
+the bottom bar. Then: while any PR is open, merged and closed ones move behind a `+N` chip whose popover lists
+them with glyph, title and summary (a popover because a menu cannot draw the service glyph).
+
+Asked whether a session takes several PRs: it does from `pr-link` records, but `attach_pr` only patched the
+in-memory summary, which the next hook-driven refresh rebuilt from the transcript. Attached PRs are now kept in
+`ClinicState.attachedPullRequests` and re-applied on every scan. 728 ClinicCore tests pass and Clinic Dev builds.
+Not verified on screen: Clinic Dev had no session with a PR, and no live session called `attach_pr` against this
+build.
+
+*Anything Clinic adds to a transcript-derived summary is gone at the next refresh unless the state file holds it.*

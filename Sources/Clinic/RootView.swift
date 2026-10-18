@@ -169,7 +169,7 @@ struct DetailView: View {
 }
 
 /// The bar under both of a session's areas (milestone 2, Collins footer; ADR-216): model ▾ and effort ▾, the
-/// working directory, which a click copies, and how full the context window is.
+/// working directory, which a click copies, the session's PRs (ADR-228), and how full the context window is.
 struct TabFooter: View {
     let tab: Tab
 
@@ -189,6 +189,7 @@ struct TabFooter: View {
                 .help("Working directory (click to copy): \(pwd)")
             }
             Spacer(minLength: 8)
+            SessionPRChips(tab: tab)
             if let report = tab.statusLine, report.contextUsedPercentage != nil {
                 ContextMeter(report: report)
             }
@@ -214,6 +215,136 @@ struct TabFooter: View {
         guard let family = parts.first else { return id }
         let version = parts.dropFirst().joined(separator: ".")
         return family.capitalized + (version.isEmpty ? "" : " " + version)
+    }
+}
+
+/// The session's PRs in the footer, before the context gauge (ADR-228). While any is open, the open ones get
+/// chips and the merged and closed ones wait behind a `+N` chip's popover; with none open, the finished ones
+/// get the chips. At most three chips, the newest; the rest join the popover. A PR not read yet counts as open,
+/// so it shows rather than hiding until it loads. A click fronts the PR's pane wherever it is open, else opens
+/// it in the right panel; ⌥-click brings it beside Claude, as ⌥ does for every opener (ADR-220).
+struct SessionPRChips: View {
+    @Environment(TabStore.self) private var tabs
+    @Environment(PRStore.self) private var prs
+    let tab: Tab
+    private static let limit = 3
+
+    var body: some View {
+        let refs = tabs.pullRequests(for: tab)
+        if !refs.isEmpty {
+            let isOpen = { (ref: PullRequestRef) in (prs.mark(for: ref)?.state ?? .open) == .open }
+            let open = refs.filter(isOpen)
+            let finished = refs.filter { !isOpen($0) }
+            let candidates = open.isEmpty ? finished : open
+            let shown = Array(candidates.suffix(Self.limit))
+            // Most recent first: the open ones that did not fit, then everything finished.
+            let hiddenOpen = open.isEmpty ? [] : Array(open.dropLast(Self.limit).reversed())
+            let hiddenFinished = Array((open.isEmpty ? Array(finished.dropLast(Self.limit)) : finished).reversed())
+            HStack(spacing: 2) {
+                if !hiddenOpen.isEmpty || !hiddenFinished.isEmpty {
+                    MorePRsChip(tab: tab, open: hiddenOpen, finished: hiddenFinished, onOpen: openPR)
+                }
+                ForEach(shown, id: \.self) { ref in
+                    PRChip(ref: ref, active: tab.isFront(.pr(ref)), open: tab.isOpen(.pr(ref))) { openPR(ref) }
+                }
+            }
+            // Every ref, not only the chips': which ones are finished is only known once each is read.
+            .task(id: refs) { prs.ensureLoaded(refs) }
+        }
+    }
+
+    private func openPR(_ ref: PullRequestRef) {
+        tabs.togglePRPage(tab, ref: ref, area: NSEvent.modifierFlags.contains(.option) ? .main : .right)
+    }
+}
+
+/// The footer's `+N` before the PR chips (ADR-228): the hidden PRs' strongest state and attention as one glyph,
+/// and a popover listing them, open ones that did not fit first, then *Merged and Closed*.
+private struct MorePRsChip: View {
+    @Environment(PRStore.self) private var prs
+    let tab: Tab
+    let open: [PullRequestRef]
+    let finished: [PullRequestRef]
+    let onOpen: (PullRequestRef) -> Void
+    @State private var hovering = false
+    @State private var showing = false
+
+    private var all: [PullRequestRef] { open + finished }
+
+    var body: some View {
+        let mark = prs.aggregateMark(for: all)
+        Button { showing.toggle() } label: {
+            HStack(spacing: 4) {
+                if let host = all.first?.codeHost { PRGlyph(host: host, mark: mark, size: PRStyle.glyphSize.chip) }
+                Text("+\(all.count)").monospacedDigit()
+            }
+            .modifier(PRChipChrome(active: showing, hovering: hovering))
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.1), value: hovering)
+        .help(finished.isEmpty ? "\(all.count) more pull request\(all.count == 1 ? "" : "s")"
+                               : "\(finished.count) merged or closed" + (open.isEmpty ? "" : ", \(open.count) more open"))
+        .popover(isPresented: $showing, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                if !open.isEmpty {
+                    rows(open)
+                    if !finished.isEmpty { Divider().padding(.vertical, 4) }
+                }
+                if !finished.isEmpty {
+                    Text("Merged and Closed").font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.bottom, 2)
+                    rows(finished)
+                }
+            }
+            .padding(8)
+            .frame(width: 320)
+        }
+    }
+
+    private func rows(_ refs: [PullRequestRef]) -> some View {
+        ForEach(refs, id: \.self) { ref in
+            PRPopoverRow(ref: ref, front: tab.isFront(.pr(ref))) { showing = false; onOpen(ref) }
+        }
+    }
+}
+
+/// One PR in the footer's `+N` popover: its glyph, reference and title, and its summary under them.
+private struct PRPopoverRow: View {
+    @Environment(PRStore.self) private var prs
+    let ref: PullRequestRef
+    let front: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let host = ref.codeHost
+        let mark = prs.mark(for: ref)
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                PRGlyph(host: host, mark: mark, size: PRStyle.glyphSize.chip)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        Text(host.reference(ref.number)).monospacedDigit().foregroundStyle(.secondary)
+                        Text(prs.pullRequest(for: ref)?.title ?? host.noun).lineLimit(1).truncationMode(.tail)
+                    }
+                    if let summary = mark?.summary {
+                        Text(summary).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.callout)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(front ? Color.accent.opacity(0.14) : hovering ? Color.primary.opacity(0.08) : .clear,
+                        in: RoundedRectangle(cornerRadius: PaneMetrics.radius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(mark?.summary ?? "\(host.noun) \(host.reference(ref.number))")
     }
 }
 

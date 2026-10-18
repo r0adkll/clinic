@@ -34,6 +34,9 @@ public struct ClinicState: Codable, Sendable, Equatable {
     /// Sessions started from a task, and the task (ADR-114). Clinic's own record, so it lives here
     /// rather than on the transcript-derived `SessionSummary` a rescan rebuilds.
     public var workItemLinks: [SessionID: [WorkItemRef]] = [:]
+    /// PRs the agent attached with `attach_pr`, oldest first (ADR-228). Clinic's own record for the same reason
+    /// as `workItemLinks`: the transcript never names them, so a rescan would drop them from the summary.
+    public var attachedPullRequests: [SessionID: [PullRequestRef]] = [:]
     /// The run configuration ⌘R starts, per project (ADR-122). Never written into the repo's run.json.
     public var runSelectionByProject: [String: String] = [:]
     /// Which Open In target a project opens in, by project path, overriding the global default
@@ -141,7 +144,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, parents, collapsedSessions, reports, childReporting, soundPacks, projectGroups, collapsedGroups
+        case version, manualNames, favorites, archived, projectOrder, projectsAddedAt, lastModelByProject, lastWorktreeByProject, worktreeBaseByProject, selectedSessionId, windowFrame, mutedSessions, ownedSessions, removedProjects, attachments, collapsedProjects, automations, taskSources, workItemLinks, attachedPullRequests, runSelectionByProject, trustedRunCommands, runDeviceByProject, watchedPullRequests, grillRounds, openInByProject, parents, collapsedSessions, reports, childReporting, soundPacks, projectGroups, collapsedGroups
     }
 
     /// Tolerant decoding so state files written by older builds keep loading when fields are added.
@@ -168,6 +171,7 @@ public struct ClinicState: Codable, Sendable, Equatable {
         automations = ((try? c.decodeIfPresent([FailableAutomation].self, forKey: .automations)) ?? [])?.compactMap(\.value) ?? []
         taskSources = (try? c.decodeIfPresent([String: [WorkItemSource]].self, forKey: .taskSources)) ?? [:]
         workItemLinks = (try? c.decodeIfPresent([SessionID: [WorkItemRef]].self, forKey: .workItemLinks)) ?? [:]
+        attachedPullRequests = (try? c.decodeIfPresent([SessionID: [PullRequestRef]].self, forKey: .attachedPullRequests)) ?? [:]
         runSelectionByProject = (try? c.decodeIfPresent([String: String].self, forKey: .runSelectionByProject)) ?? [:]
         openInByProject = (try? c.decodeIfPresent([String: String].self, forKey: .openInByProject)) ?? [:]
         trustedRunCommands = (try? c.decodeIfPresent(Set<String>.self, forKey: .trustedRunCommands)) ?? []
