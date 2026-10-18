@@ -126,7 +126,7 @@ public struct MCPToolSpec: Sendable, Identifiable, Hashable {
     public static let all: [MCPToolSpec] = [
         MCPToolSpec(name: "set_session_title", description: "Set the title Clinic shows for this session in its sidebar. Call once you know what the session is about (≤ 8 words).", schema: #"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#, defaultEnabled: true),
         MCPToolSpec(name: "notify_user", description: "Notify the user through Clinic (system notification when they are away). Use when you need their attention or finished something they asked to be told about.", schema: #"{"type":"object","properties":{"message":{"type":"string"},"title":{"type":"string"}},"required":["message"]}"#, defaultEnabled: true),
-        MCPToolSpec(name: "show_image", description: "Show an image, animated image (GIF, APNG, WebP) or video file (MP4, MOV) to the user in Clinic's Media panel — screenshots, diagrams, generated images, screen recordings. Path must be absolute.", schema: #"{"type":"object","properties":{"path":{"type":"string"},"caption":{"type":"string"}},"required":["path"]}"#, defaultEnabled: true),
+        MCPToolSpec(name: "show_image", description: "Call this whenever you capture or make an image or recording the user would want to see — a screenshot or screen recording of a change, a simulator or device capture, a GIF, a diagram, a generated image. A file you only saved or Read is invisible to the user; this shows it in Clinic's Media panel. Takes images, animated images (GIF, APNG, WebP) and videos (MP4, MOV). Path must be absolute.", schema: #"{"type":"object","properties":{"path":{"type":"string"},"caption":{"type":"string"}},"required":["path"]}"#, defaultEnabled: true),
         MCPToolSpec(name: "read_terminal", description: "Read the text currently visible in this session's terminal (what the user sees), up to `lines` lines from the bottom.", schema: #"{"type":"object","properties":{"lines":{"type":"integer","minimum":1,"maximum":500}}}"#, defaultEnabled: true),
         MCPToolSpec(name: "run_in_terminal", description: "Type a shell command into one of the user's shell panes beside this session (not your own tool shell): the one they used last if it is at its prompt, another idle one, or a new one when every shell is busy, so a running job never receives it. The user sees it run. Returns immediately.", schema: #"{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"#, defaultEnabled: false),
         MCPToolSpec(name: "attach_pr", description: "Attach a GitHub pull request URL to this session so Clinic shows its status and page.", schema: #"{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}"#, defaultEnabled: true),
@@ -214,6 +214,13 @@ public struct MCPToolSpec: Sendable, Identifiable, Hashable {
     private static let instructionByTool: [String: String] = [
         "set_session_title": "Use set_session_title once you know what the session is about.",
         "notify_user": "Use notify_user when you need the user's attention.",
+        // ADR-227. Clinic's tools are deferred, so until the agent loads one it sees only the name and this
+        // text — the description's own trigger never reaches it. Most captures went unshown for that reason.
+        "show_image": """
+            When you capture or make an image or recording the user would want to see — a screenshot or \
+            recording of a change, a simulator or device capture, a GIF, a diagram — call show_image with \
+            its absolute path in the same turn. A file you only saved or Read is invisible to them.
+            """,
         "report_to_parent": "report_to_parent is how you hand a result to the session that started you: call it when your work is done.",
         "ask_round": """
             When you are about to ask the user a round of numbered questions that each carry your \

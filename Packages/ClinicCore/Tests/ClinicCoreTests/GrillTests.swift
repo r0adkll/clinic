@@ -270,6 +270,9 @@ import Testing
         #expect(text.contains("ask_round"))
         #expect(text.contains("grilling"))
         #expect(text.contains("set_session_title"))
+        // Deferred tools show only their names, so the instructions carry show_image's trigger (ADR-227).
+        #expect(text.contains("call show_image with its absolute path"))
+        #expect(!MCPToolSpec.instructions(for: all.filter { $0.name != "show_image" }).contains("show_image"))
 
         // A tool the user switched off is not listed by tools/list, so the instructions must not
         // promise it either (ADR-131).

@@ -5456,3 +5456,13 @@ Start/Stop; Stop Emulator closes its tab after *Shutting down…*; otherwise a t
 from `+`, Stop Emulator closing the tab, `adb emu kill` → off, `kill -9` → quit (log). Clinic Dev's window then
 left the AX tree (another Space), so the off state's Start, the capsule buttons, Cold Boot and Wipe Data were not
 clicked. `log show` needs `--info` to show the device category's info lines.
+## 2026-10-18 — Captured media is shown (ADR-227)
+Asked why some sessions never send their screenshots and recordings to the Media pane. A transcript tally said
+`show_image` never failed; agents just did not call it (clinic: 217 captures, 7 shows, 16 of 17 sessions none).
+Claude Code defers MCP tools, so the agent sees only the name and the server instructions, and the instructions
+said nothing about `show_image`. Added a trigger there (only when the tool is offered) and rewrote the
+description to lead with when to use it. Extended the instructions test; 725 ClinicCore tests pass. Not verified:
+a live session, or whether the show rate rises. That needs a week of sessions and a re-run of the tally.
+
+*A deferred tool's description is invisible until the agent already wants the tool. Put the trigger in the
+server instructions.*
