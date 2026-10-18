@@ -5477,7 +5477,6 @@ them with glyph, title and summary (a popover because a menu cannot draw the ser
 Asked whether a session takes several PRs: it does from `pr-link` records, but `attach_pr` only patched the
 in-memory summary, which the next hook-driven refresh rebuilt from the transcript. Attached PRs are now kept in
 `ClinicState.attachedPullRequests` and re-applied on every scan. 728 ClinicCore tests pass and Clinic Dev builds.
-Not verified on screen: Clinic Dev had no session with a PR, and no live session called `attach_pr` against this
-build.
+Not verified on screen by me: Clinic Dev had no session with a PR. The user then tried it and confirmed it works.
 
 *Anything Clinic adds to a transcript-derived summary is gone at the next refresh unless the state file holds it.*
