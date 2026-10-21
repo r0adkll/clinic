@@ -5503,3 +5503,11 @@ case about 205 characters). Checked by a layout probe and in Clinic Dev: 260 pt 
 
 *NSAlert picks stacked or row buttons by height, about 240 characters of text beside four buttons. Keep an
 alert's text short when its button order matters.*
+
+Then the user asked for the Close actions in red. The second answer uses `hasDestructiveAction`. The default
+answer gets a red `bezelColor` instead, keeping Return. Probed in a scratch app, active: NSAlert resets the
+default button's attributed title, so red text on it is lost, but the bezel colour survives. Checked in Clinic
+Dev with the app brought to the front for one capture.
+
+*An alert's default button can be coloured only through `bezelColor`; its title colour and the destructive
+flag are both taken from it.*

@@ -45,9 +45,13 @@ why ADR-190's popup sheet was wide.
   runs, the summary, and *Remove deletes the worktree and its branch for good.* Names longer than 24
   characters are shortened in the middle. The worst case is about 205 characters and 400 pt tall, so the four
   buttons always stack. The Background sentence is left out when asking; the other sheets keep it.
-- **A Remove that is not the default is drawn destructive**, in red. One that is the default is drawn as a
-  plain default button, because AppKit would otherwise take Return off it. The user chose that default; the
-  sheet's text still says Remove deletes the worktree and its branch for good.
+- **Every answer is red, since each ends the session.** User: *"Is it possible to colorize the Close actions
+  in the dialog? Like make them Red to emphasize their destructive actions?"* The second answer has
+  `hasDestructiveAction`: red text on a red tint. The default answer cannot have it, because AppKit would take
+  Return off it. Red title text on it does not work either: NSAlert resets the default button's title colour.
+  So it gets `bezelColor = .systemRed` and is a solid red button that Return still presses. *Background* and
+  *Cancel* stay plain. The same holds for the single *Close* or *Stop* button when the setting does not ask.
+  First built with only a non-default Remove in red.
 - **A clean worktree is not asked about.** It has nothing to lose, so under Ask it takes the default answer.
   Close shows the plain sheet (*Close*, *Background*, *Cancel*) saying what will happen. Stop no longer shows
   a sheet for it at all. `WorktreeExitFacts.answersToOffer(setting:askDefault:)` decides what the sheet
@@ -67,7 +71,9 @@ why ADR-190's popup sheet was wide.
   trust dialog defaults to *No* on this machine. With default Remove, the sheet's default button (read by
   accessibility) was *Close and Remove Worktree* and pressing it closed the tab. With default Keep, Keep
   came first and Remove second in red. After the brief text, the sheet came up 260 pt wide with the four
-  buttons stacked, the default on top. The CLI's own exit dialog was not part of that run; the digit
+  buttons stacked, the default on top. With the red answers, a capture of Clinic Dev in front showed the
+  default solid red and the other answer red on a tint, and accessibility still named the default button.
+  An inactive window draws the default button plain, as AppKit always does. The CLI's own exit dialog was not part of that run; the digit
   watcher that answers it is ADR-190's and unchanged.
 - No new smoke key: the run used ADR-166's `-ClinicSessionOnLaunch` with the settings passed as launch
   arguments.

@@ -1143,8 +1143,9 @@ final class TabStore {
         alert.alertStyle = .warning
         for (index, answer) in answers.enumerated() {
             let button = alert.addButton(withTitle: asking ? "\(verb) and \(answer == .remove ? "Remove" : "Keep") Worktree" : verb)
-            // NSAlert takes Return off a destructive button, so only a Remove that is not the default is drawn as one.
-            button.hasDestructiveAction = index > 0 && answer == .remove
+            // Every answer ends the session, so each is red. NSAlert takes Return off a destructive button and
+            // resets a default button's title colour, so the default is red by its bezel instead (ADR-229).
+            if index == 0 { button.bezelColor = .systemRed } else { button.hasDestructiveAction = true }
         }
         if canBackground { alert.addButton(withTitle: "Background") }
         alert.addButton(withTitle: "Cancel")
