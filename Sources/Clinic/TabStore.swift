@@ -1006,14 +1006,20 @@ final class TabStore {
     }
 
     /// Stop from a menu or a row: a worktree session is asked about first when the setting says to
-    /// ask (ADR-190). Quit and the smoke keys use `stop`, which takes the setting, or Keep.
+    /// ask (ADR-190), unless it is clean and so takes the default answer at once (ADR-229). Quit and
+    /// the smoke keys use `stop`, which takes the setting, or Keep.
     func stopSession(_ tab: Tab) {
         guard tab.isRunningClaude else { return }
         guard let root = worktreeRoot(of: tab), worktreeExitSetting == .ask, tab.worktreeExitAnswer == nil else { stop(tab); return }
         Task {
             let facts = await GitRepository.worktreeExitFacts(at: root)
-            guard tab.isRunningClaude, case .close(let answer) = confirmCloseWorktreeTab(tab, facts: facts, stopping: true) else { return }
-            tab.worktreeExitAnswer = answer
+            guard tab.isRunningClaude else { return }
+            let offered = facts.answersToOffer(setting: .ask, askDefault: worktreeExitAskDefault)
+            if offered.count == 1 { tab.worktreeExitAnswer = offered[0] }
+            else {
+                guard case .close(let answer) = confirmCloseWorktreeTab(tab, facts: facts, stopping: true) else { return }
+                tab.worktreeExitAnswer = answer
+            }
             stop(tab)
         }
     }
@@ -1050,6 +1056,11 @@ final class TabStore {
     /// The Settings answer. *Ask* is resolved by a sheet before the stop; where no sheet can be shown it means Keep.
     var worktreeExitSetting: WorktreeExitAnswer {
         WorktreeExitAnswer(rawValue: UserDefaults.standard.string(forKey: WorktreeExitAnswer.preferenceKey) ?? "") ?? .keep
+    }
+
+    /// The answer the *Ask* sheet puts first (ADR-229).
+    var worktreeExitAskDefault: WorktreeExitAnswer {
+        WorktreeExitAnswer.askDefault(UserDefaults.standard.string(forKey: WorktreeExitAnswer.askDefaultKey))
     }
 
     /// Close a worktree session: read what the worktree holds, ask once, then stop with the answer
@@ -1108,39 +1119,34 @@ final class TabStore {
     enum WorktreeCloseChoice { case close(WorktreeExitAnswer), background, cancel }
 
     /// The close (or stop) sheet for a worktree session: names the worktree, says what it holds and
-    /// what will happen to it, and, when the setting is *Ask*, takes the answer in a popup.
+    /// what will happen to it. Under *Ask*, a worktree with something to lose takes the answer from the
+    /// sheet's own buttons, the default answer first so Return takes it; a clean one takes the default
+    /// (ADR-229).
     func confirmCloseWorktreeTab(_ tab: Tab, facts: WorktreeExitFacts, stopping: Bool) -> WorktreeCloseChoice {
-        let setting = worktreeExitSetting
+        let answers = facts.answersToOffer(setting: worktreeExitSetting, askDefault: worktreeExitAskDefault)
+        let asking = answers.count > 1
         let alert = NSAlert()
         alert.messageText = stopping ? "Stop this session?" : "Close this session?"
         let canBackground = !stopping && tab.sessionId != nil && tab.isAtPrompt
         let verb = stopping ? "Stop" : "Close"
         var text = "Claude Code is still running in the worktree \(facts.name). \(facts.summary)"
-        switch setting {
-        case .keep: text += " \(verb) asks it to exit cleanly and keeps the worktree."
-        case .remove: text += facts.isClean ? " \(verb) asks it to exit cleanly and removes the worktree." : " \(verb) asks it to exit cleanly and removes the worktree, its branch and that work."
-        case .ask: text += " \(verb) asks it to exit cleanly; choose below what happens to the worktree."
-        }
+        if asking { text += " \(verb) asks it to exit cleanly. Removing the worktree deletes it and its branch for good, uncommitted work included." }
+        else if answers[0] == .keep { text += " \(verb) asks it to exit cleanly and keeps the worktree." }
+        else { text += facts.isClean ? " \(verb) asks it to exit cleanly and removes the worktree." : " \(verb) asks it to exit cleanly and removes the worktree, its branch and that work." }
         if facts.isClean { text += " Claude Code removes a clean worktree itself unless the session was named." }
         if canBackground { text += " Background keeps it running detached so you can attach again." }
         alert.informativeText = text
         alert.alertStyle = .warning
-        var popup: NSPopUpButton?
-        if setting == .ask {
-            let p = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
-            p.addItems(withTitles: ["Keep the worktree", facts.isClean ? "Remove the worktree" : "Remove the worktree and its branch"])
-            alert.accessoryView = p
-            popup = p
+        for (index, answer) in answers.enumerated() {
+            let button = alert.addButton(withTitle: asking ? "\(verb) and \(answer == .remove ? "Remove" : "Keep") Worktree" : verb)
+            // NSAlert takes Return off a destructive button, so only a Remove that is not the default is drawn as one.
+            button.hasDestructiveAction = index > 0 && answer == .remove
         }
-        alert.addButton(withTitle: verb)
         if canBackground { alert.addButton(withTitle: "Background") }
         alert.addButton(withTitle: "Cancel")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            return .close(setting == .ask ? (popup?.indexOfSelectedItem == 1 ? .remove : .keep) : setting)
-        case .alertSecondButtonReturn: return canBackground ? .background : .cancel
-        default: return .cancel
-        }
+        let index = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        if answers.indices.contains(index) { return .close(answers[index]) }
+        return canBackground && index == answers.count ? .background : .cancel
     }
 
     /// Detach the session with `/bg`; the tab closes when the CLI hands the shell back (ADR-061).

@@ -400,6 +400,7 @@ private struct SessionsPane: View {
     @AppStorage(Prefs.defaultModel) private var defaultModel = "default"
     @AppStorage("ClinicArchiveWorktree") private var archiveWorktree = "ask"
     @AppStorage(WorktreeExitAnswer.preferenceKey) private var worktreeExit = "keep"
+    @AppStorage(WorktreeExitAnswer.askDefaultKey) private var worktreeExitAskDefault = "keep"
     @AppStorage("ClinicMergeMethod") private var mergeMethod = "squash"
     @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
     @AppStorage(TabStore.fileLinksInFilesKey) private var fileLinksInFiles = true
@@ -429,6 +430,12 @@ private struct SessionsPane: View {
                     Text("Remove the worktree and its branch").tag("remove")
                     Text("Ask when closing").tag("ask")
                 }
+                if worktreeExit == "ask" {
+                    Picker("Default answer", selection: $worktreeExitAskDefault) {
+                        Text("Keep the worktree").tag("keep")
+                        Text("Remove the worktree and its branch").tag("remove")
+                    }
+                }
                 Picker("Archiving a session in a worktree", selection: $archiveWorktree) {
                     Text("Ask").tag("ask")
                     Text("Always trash the worktree").tag("always")
@@ -439,8 +446,10 @@ private struct SessionsPane: View {
             } footer: {
                 Text("Claude Code asks what to do with a worktree as its session exits. Clinic answers with this choice, "
                      + "after the close sheet says what the worktree holds. Remove is the CLI's own: the directory, its "
-                     + "branch and any uncommitted work go for good. A clean worktree of an unnamed session is removed by "
-                     + "Claude Code itself. Archiving offers to trash a kept worktree instead; Undo Archive brings it back.")
+                     + "branch and any uncommitted work go for good. Ask puts Keep and Remove on the close sheet as its "
+                     + "buttons, the default answer first so Return takes it; a clean worktree has nothing to lose and "
+                     + "takes the default unasked. A clean worktree of an unnamed session is removed by Claude Code "
+                     + "itself. Archiving offers to trash a kept worktree instead; Undo Archive brings it back.")
             }
 
             Section {

@@ -38,6 +38,29 @@ struct WorktreeExitTests {
         #expect(WorktreeExitAnswer(rawValue: "remove") == .remove)
     }
 
+    @Test func askOffersBothAnswersDefaultFirst() {
+        let dirty = WorktreeExitFacts(path: "/r/.claude/worktrees/x", uncommittedFiles: 2)
+        #expect(dirty.answersToOffer(setting: .ask, askDefault: .remove) == [.remove, .keep])
+        #expect(dirty.answersToOffer(setting: .ask, askDefault: .keep) == [.keep, .remove])
+        #expect(WorktreeExitFacts(path: "/r/.claude/worktrees/x", unverified: true).answersToOffer(setting: .ask, askDefault: .keep) == [.keep, .remove])
+    }
+
+    @Test func aCleanWorktreeOrAFixedSettingIsNotAsked() {
+        let clean = WorktreeExitFacts(path: "/r/.claude/worktrees/x")
+        #expect(clean.answersToOffer(setting: .ask, askDefault: .remove) == [.remove])
+        #expect(clean.answersToOffer(setting: .ask, askDefault: .ask) == [.keep])
+        let dirty = WorktreeExitFacts(path: "/r/.claude/worktrees/x", commits: 1)
+        #expect(dirty.answersToOffer(setting: .keep, askDefault: .remove) == [.keep])
+        #expect(dirty.answersToOffer(setting: .remove, askDefault: .keep) == [.remove])
+    }
+
+    @Test func askDefaultIsKeepUnlessRemove() {
+        #expect(WorktreeExitAnswer.askDefault("remove") == .remove)
+        #expect(WorktreeExitAnswer.askDefault("keep") == .keep)
+        #expect(WorktreeExitAnswer.askDefault("ask") == .keep)
+        #expect(WorktreeExitAnswer.askDefault(nil) == .keep)
+    }
+
     @Test func worktreeRootFromAnyDirectoryInside() {
         #expect(WorktreeExitFacts.worktreeRoot(forCwd: "/r/.claude/worktrees/foo") == "/r/.claude/worktrees/foo")
         #expect(WorktreeExitFacts.worktreeRoot(forCwd: "/r/.claude/worktrees/foo/src/a") == "/r/.claude/worktrees/foo")

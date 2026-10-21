@@ -5480,3 +5480,18 @@ in-memory summary, which the next hook-driven refresh rebuilt from the transcrip
 Not verified on screen by me: Clinic Dev had no session with a PR. The user then tried it and confirmed it works.
 
 *Anything Clinic adds to a transcript-derived summary is gone at the next refresh unless the state file holds it.*
+
+## 2026-10-21 — The close sheet's buttons answer the worktree question (ADR-229)
+User wanted a default for the close sheet's Keep/Remove choice (theirs: Remove) and fewer clicks. Under *Ask*
+the popup is gone. *Close and Remove Worktree* and *Close and Keep Worktree* are the sheet's buttons, the
+new *Default answer* setting picks which comes first, and Return takes it. A clean worktree is not asked about,
+so Stop needs no sheet for it. 8 `WorktreeExitTests` pass without git; `factsFromARealWorktree` fails here
+because the scratch repo's commit is signed through 1Password, which this shell cannot reach.
+
+Checked in Clinic Dev with a real worktree. The CLI's trust dialog defaults to *No* on this machine, under the
+clinic checkout and under `~/Library/Caches` alike, so `-w` would not start. The session was started inside a
+`git worktree add` directory instead and given a state with a synthetic `SessionStart`. First run: Remove came
+first but accessibility reported no default button.
+
+*NSAlert takes Return off any button with `hasDestructiveAction`, and resets it again in `layout()` and
+`runModal()`. A destructive default button cannot be had; draw Remove red only when it is not the default.*

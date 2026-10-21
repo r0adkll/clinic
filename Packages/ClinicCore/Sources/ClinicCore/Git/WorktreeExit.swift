@@ -12,6 +12,11 @@ public enum WorktreeExitAnswer: String, Codable, Sendable, CaseIterable {
     case ask
 
     public static let preferenceKey = "ClinicWorktreeExitAnswer"
+    /// The answer *Ask* offers first, where Return takes it (ADR-229): `keep` or `remove`.
+    public static let askDefaultKey = "ClinicWorktreeExitAskDefault"
+
+    /// The stored *Ask* default: Remove only when it says so, else Keep.
+    public static func askDefault(_ raw: String?) -> WorktreeExitAnswer { raw == remove.rawValue ? .remove : .keep }
 
     /// The digit the dialog takes. A bare key press both selects and confirms (checked against
     /// CLI 2.1.295: `2` alone removed the worktree and its branch).
@@ -64,6 +69,16 @@ public struct WorktreeExitFacts: Equatable, Sendable {
         let rest = cwd[r.upperBound...]
         guard let name = rest.split(separator: "/", omittingEmptySubsequences: true).first, !name.isEmpty else { return nil }
         return String(cwd[..<r.upperBound]) + name
+    }
+
+    /// The answers the close sheet offers as its own buttons, in order (ADR-229). Under *Ask* a worktree
+    /// with something to lose gets both, `askDefault` first so Return takes it; a clean one has nothing
+    /// to lose and gets the default alone, as every other setting gets its own answer.
+    public func answersToOffer(setting: WorktreeExitAnswer, askDefault: WorktreeExitAnswer) -> [WorktreeExitAnswer] {
+        let first: WorktreeExitAnswer = askDefault == .remove ? .remove : .keep
+        guard setting == .ask else { return [setting] }
+        guard !isClean else { return [first] }
+        return first == .remove ? [.remove, .keep] : [.keep, .remove]
     }
 
     /// One sentence of what is in the worktree: *It holds 2 uncommitted files and 1 commit of its own on worktree-x.*

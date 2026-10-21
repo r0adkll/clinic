@@ -2,6 +2,7 @@
 status: accepted (built 2026-10-08)
 date: 2026-10-08
 amends: "[[ADR-037 Close Quit and Exited Flows]] and [[ADR-063 Session Lifecycle Controls]] (what a graceful close waits for), [[ADR-065 Repo Upkeep]] (when the archive offer runs)"
+amended-by: "[[ADR-229 The Close Sheet's Buttons Answer The Worktree Question]] (under Ask the sheet's buttons answer, the default first, and a clean worktree is not asked about)"
 tags: [adr, sessions, git, worktree, ui]
 ---
 # ADR-190: Clinic answers the worktree exit dialog
