@@ -54,6 +54,16 @@ struct WorktreeExitTests {
         #expect(dirty.answersToOffer(setting: .remove, askDefault: .keep) == [.remove])
     }
 
+    @Test func askingTextStaysShortEnoughToStack() {
+        let facts = WorktreeExitFacts(path: "/r/.claude/worktrees/wt229", branch: "worktree-wt229", uncommittedFiles: 1, commits: 1)
+        #expect(facts.askingText == "Claude Code is running in the worktree wt229. It holds 1 uncommitted file and 1 commit of its own "
+                + "on worktree-wt229. Remove deletes the worktree and its branch for good.")
+        let long = String(repeating: "very-long-worktree-name-", count: 4)
+        let worst = WorktreeExitFacts(path: "/r/.claude/worktrees/" + long, branch: "worktree-" + long, uncommittedFiles: 999, commits: 999)
+        #expect(worst.askingText.count <= 220)
+        #expect(worst.askingText.contains("worktree very-long-w…rktree-name-."))
+    }
+
     @Test func askDefaultIsKeepUnlessRemove() {
         #expect(WorktreeExitAnswer.askDefault("remove") == .remove)
         #expect(WorktreeExitAnswer.askDefault("keep") == .keep)

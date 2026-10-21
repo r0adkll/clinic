@@ -5495,3 +5495,11 @@ first but accessibility reported no default button.
 
 *NSAlert takes Return off any button with `hasDestructiveAction`, and resets it again in `layout()` and
 `runModal()`. A destructive default button cannot be had; draw Remove red only when it is not the default.*
+
+Follow-up: the user wanted the buttons as a vertical list. NSAlert keeps its narrow, stacked layout only while
+the alert stays under about 430 pt tall; with four long buttons, ADR-190's full text tipped it into the wide
+row. The asking text is now brief (`WorktreeExitFacts.askingText`, names shortened past 24 characters, worst
+case about 205 characters). Checked by a layout probe and in Clinic Dev: 260 pt wide, four stacked buttons.
+
+*NSAlert picks stacked or row buttons by height, about 240 characters of text beside four buttons. Keep an
+alert's text short when its button order matters.*

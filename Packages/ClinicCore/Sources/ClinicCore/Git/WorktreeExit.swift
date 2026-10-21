@@ -81,6 +81,22 @@ public struct WorktreeExitFacts: Equatable, Sendable {
         return first == .remove ? [.remove, .keep] : [.keep, .remove]
     }
 
+    /// The sheet's text when it asks (ADR-229). NSAlert stacks its buttons only while the alert stays
+    /// short, about 240 characters of text beside four buttons; past that it lays them out in a row. So
+    /// the text is brief and long names are shortened in the middle.
+    public var askingText: String {
+        var brief = self
+        brief.branch = branch.map { Self.shortened($0) }
+        return "Claude Code is running in the worktree \(Self.shortened(name)). \(brief.summary) "
+            + "Remove deletes the worktree and its branch for good."
+    }
+
+    static func shortened(_ name: String, to limit: Int = 24) -> String {
+        guard name.count > limit else { return name }
+        let half = (limit - 1) / 2
+        return String(name.prefix(half)) + "…" + String(name.suffix(limit - 1 - half))
+    }
+
     /// One sentence of what is in the worktree: *It holds 2 uncommitted files and 1 commit of its own on worktree-x.*
     public var summary: String {
         if unverified { return "Clinic could not read what the worktree holds." }

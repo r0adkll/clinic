@@ -18,6 +18,13 @@ Checked against AppKit while building: **NSAlert takes Return off a button with 
 Its `keyEquivalent` is cleared when the button is added, again by `layout()`, and again by `runModal()`.
 The window then has no default button, so Return does nothing. A probe confirmed both resets.
 
+Built first with ADR-190's full text kept. With four long buttons that alert ran past NSAlert's narrow layout
+and came up wide, the buttons in a row. User: *"Maybe have the dialog as a vertical list of buttons (like
+before)"*. A probe found the rule: NSAlert stacks its buttons in the 260 pt layout while the alert stays under
+about 430 pt tall. That is about 240 characters of text beside four buttons and 300 beside three, whatever
+the screen. Past that it switches to the wide layout. An accessory view forces the wide layout too, which is
+why ADR-190's popup sheet was wide.
+
 ## Options
 - **Keep the popup and let a setting pick its starting item.** Removing becomes one click when Remove is the
   default, but the other answer still takes three. Rejected.
@@ -34,6 +41,10 @@ The window then has no default button, so Return does nothing. A probe confirmed
 - **Under Ask, the answers are the sheet's own buttons.** *Close and Remove Worktree* and *Close and Keep
   Worktree* (*Stop and …* on the stop sheet), the default answer first, so it is the default button and Return
   takes it. Then *Background* where it applies, then *Cancel*, which Escape takes. The popup is gone.
+- **They stack, so the asking text is brief.** `WorktreeExitFacts.askingText` is one line on where Claude
+  runs, the summary, and *Remove deletes the worktree and its branch for good.* Names longer than 24
+  characters are shortened in the middle. The worst case is about 205 characters and 400 pt tall, so the four
+  buttons always stack. The Background sentence is left out when asking; the other sheets keep it.
 - **A Remove that is not the default is drawn destructive**, in red. One that is the default is drawn as a
   plain default button, because AppKit would otherwise take Return off it. The user chose that default; the
   sheet's text still says Remove deletes the worktree and its branch for good.
@@ -47,12 +58,16 @@ The window then has no default button, so Return does nothing. A probe confirmed
   was clean, is not offered for the Trash again ([[ADR-065 Repo Upkeep]]'s offer is still its own setting).
 
 ## Consequences
-- `WorktreeExitTests` cover the offered answers, both orders, and the stored default's parsing.
+- `WorktreeExitTests` cover the offered answers, both orders, the stored default's parsing, and the asking
+  text's length with long names.
+- Larger system text makes the alert taller; at a large enough size the buttons go back to a row. The rest
+  still works, just laid out wide.
 - Checked in Clinic Dev on 2026-10-21 against a real worktree holding an uncommitted file and a commit of its
   own. The session was started in the worktree and given a state with a synthetic `SessionStart`, since the CLI's
   trust dialog defaults to *No* on this machine. With default Remove, the sheet's default button (read by
   accessibility) was *Close and Remove Worktree* and pressing it closed the tab. With default Keep, Keep
-  came first and Remove second in red. The CLI's own exit dialog was not part of that run; the digit
+  came first and Remove second in red. After the brief text, the sheet came up 260 pt wide with the four
+  buttons stacked, the default on top. The CLI's own exit dialog was not part of that run; the digit
   watcher that answers it is ADR-190's and unchanged.
 - No new smoke key: the run used ADR-166's `-ClinicSessionOnLaunch` with the settings passed as launch
   arguments.

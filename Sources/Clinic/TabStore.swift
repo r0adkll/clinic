@@ -1129,13 +1129,17 @@ final class TabStore {
         alert.messageText = stopping ? "Stop this session?" : "Close this session?"
         let canBackground = !stopping && tab.sessionId != nil && tab.isAtPrompt
         let verb = stopping ? "Stop" : "Close"
-        var text = "Claude Code is still running in the worktree \(facts.name). \(facts.summary)"
-        if asking { text += " \(verb) asks it to exit cleanly. Removing the worktree deletes it and its branch for good, uncommitted work included." }
-        else if answers[0] == .keep { text += " \(verb) asks it to exit cleanly and keeps the worktree." }
-        else { text += facts.isClean ? " \(verb) asks it to exit cleanly and removes the worktree." : " \(verb) asks it to exit cleanly and removes the worktree, its branch and that work." }
-        if facts.isClean { text += " Claude Code removes a clean worktree itself unless the session was named." }
-        if canBackground { text += " Background keeps it running detached so you can attach again." }
-        alert.informativeText = text
+        if asking {
+            // Brief, or NSAlert lays the four buttons out in a row instead of stacking them (ADR-229).
+            alert.informativeText = facts.askingText
+        } else {
+            var text = "Claude Code is still running in the worktree \(facts.name). \(facts.summary)"
+            if answers[0] == .keep { text += " \(verb) asks it to exit cleanly and keeps the worktree." }
+            else { text += facts.isClean ? " \(verb) asks it to exit cleanly and removes the worktree." : " \(verb) asks it to exit cleanly and removes the worktree, its branch and that work." }
+            if facts.isClean { text += " Claude Code removes a clean worktree itself unless the session was named." }
+            if canBackground { text += " Background keeps it running detached so you can attach again." }
+            alert.informativeText = text
+        }
         alert.alertStyle = .warning
         for (index, answer) in answers.enumerated() {
             let button = alert.addButton(withTitle: asking ? "\(verb) and \(answer == .remove ? "Remove" : "Keep") Worktree" : verb)
