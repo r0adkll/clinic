@@ -1,5 +1,5 @@
 ---
-status: accepted (built 2026-10-18)
+status: accepted (built 2026-10-18; a chip per PR and `+N` superseded by ADR-230)
 date: 2026-10-18
 amends: "[[ADR-213 The Plus Menu Replaces The Openers]] (a session's PRs are one click away again), [[ADR-216 The Footer Returns Under Both Areas]] (the footer holds PR chips, though still no openers)"
 tags: [adr, ui, footer, pr]

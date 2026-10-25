@@ -5511,3 +5511,35 @@ Dev with the app brought to the front for one capture.
 
 *An alert's default button can be coloured only through `bezelColor`; its title colour and the destructive
 flag are both taken from it.*
+
+## 2026-10-25 — A session's pull requests share one chip and one row (ADR-230)
+User found sessions with several PRs cluttered: a child row per open PR on the card, and three footer chips
+plus `+N`. Mocked three directions on a canvas (https://claude.ai/artifact/ST1L7mBorZWdmEEPsuGf43) from two
+real Campfire sessions:
+- **A**: a row and a chip per stack.
+- **B**: one summary row and one chip, each opening a tray.
+- **C**: glyph trains, one glyph per PR.
+
+I recommended B for the card and C for the footer. In the Grill round the user chose B for both, and asked
+for branch chains to count as stacks.
+
+Built:
+- `PRTray`, a popover listing the session's PRs: open stacks top layer first, then open PRs on their own,
+  finished stacks, then *Merged and Closed*.
+- `PRTrayChip` in the footer for two or more PRs.
+- One *N pull requests · 5 failing* child row on the card.
+- `PullRequestGroup` and `PullRequestTally` in ClinicCore. Grouping takes GitHub's stack first, else a
+  branch chain, and a fork breaks the chain.
+
+742 ClinicCore tests pass.
+
+Checked in Clinic Dev against copies of the two transcripts, in an isolated `CLAUDE_CONFIG_DIR`, with the API
+on a closed port. That recipe comes from `scripts/screenshots/run`. Two staging mistakes cost a relaunch
+each:
+- Clinic Dev keeps its state in `<CLINIC_APP_SUPPORT>/Clinic Dev/state.json`, not `Clinic/`.
+- An 81 MB transcript is read head and tail only, so its mid-session `pr-link`s exist only as
+  `attachedPullRequests`, which had to be seeded.
+
+The first look caught the card's tray drawing grey titles: a popover inherits its presenter's environment.
+
+*A popover inherits the presenting view's foreground style; give popover content its own absolute ink.*

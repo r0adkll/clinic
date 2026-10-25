@@ -137,6 +137,13 @@ final class PRStore {
         PullRequestStack.ordered(refs) { stacks[$0.id] }
     }
 
+    /// A session's pull requests gathered into stacks, GitHub's or chained by branch, and single ones (ADR-230).
+    func groups(_ refs: [PullRequestRef]) -> [PullRequestGroup] {
+        PullRequestGroup.grouped(refs, branches: { ref in
+            pullRequests[ref.id].map { PullRequestGroup.Branches(base: $0.baseRefName, head: $0.headRefName) }
+        }, stacks: { stacks[$0.id] })
+    }
+
     // MARK: Watching (ADR-128)
 
     /// The reader asked to be told how this pull request's checks end.

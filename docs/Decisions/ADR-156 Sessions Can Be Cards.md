@@ -1,5 +1,5 @@
 ---
-status: accepted (built 2026-09-16; context size superseded by ADR-157, then drawn as a gauge by ADR-158)
+status: accepted (built 2026-09-16; context size superseded by ADR-157, then drawn as a gauge by ADR-158; several open PRs are one row by ADR-230)
 date: 2026-09-16
 amends: "[[ADR-077 Persistent Projects and Sidebar Polish]] (the session row becomes one of three styles), [[ADR-096 Session Status Indicators]] (a child that needs you raises the glyph)"
 tags: [adr, ui, sidebar, sessions, transcript]

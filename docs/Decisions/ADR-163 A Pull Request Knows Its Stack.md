@@ -1,5 +1,5 @@
 ---
-status: accepted (built 2026-09-17)
+status: accepted (built 2026-09-17; branch chains drawn as stacks, for display only, by ADR-230)
 date: 2026-09-17
 amends: "[[ADR-087 Pull Request Panel Is Status-First]] (a stack adds lines and can block the merge); [[ADR-127 The PR Panel Refreshes On Events Not On A Timer]] (a third read, the stack, on its own rule); [[ADR-129 A Merge In Flight Says So]] (a stacked merge is asynchronous and is polled to its end)"
 tags: [adr, github, ui]

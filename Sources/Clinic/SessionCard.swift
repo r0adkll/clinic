@@ -68,6 +68,14 @@ struct SessionCardChild: Identifiable {
     let status: Status
     let help: String
     let action: @MainActor () -> Void
+    /// Set on the row that stands for several pull requests: a click opens their tray instead (ADR-230).
+    var tray: Tray? = nil
+
+    struct Tray {
+        let refs: [PullRequestRef]
+        let isFront: @MainActor (PullRequestRef) -> Bool
+        let open: @MainActor (PullRequestRef) -> Void
+    }
 }
 
 /// Everything a card shows beyond the compact row, gathered from the stores that know it.
@@ -135,10 +143,24 @@ struct SessionCardContent {
             }
         }
 
-        // Open pull requests (ADR-087). Merged and closed ones stay in the header's badge.
-        for ref in prs.ordered(summary.pullRequests) {
+        // Open pull requests (ADR-087). One gets its own row; several share one row, whose tray lists every
+        // pull request of the session, stacks together (ADR-230). Merged and closed ones stay in the
+        // header's badge.
+        let pullRequests = prs.ordered(summary.pullRequests)
+        let open = pullRequests.filter { (prs.mark(for: $0)?.state ?? .open) == .open }
+        if open.count > 1 {
+            let tally = PullRequestTally(open.map(prs.mark(for:)))
+            let noun = open[0].codeHost.noun.lowercased()
+            let status: SessionCardChild.Status = tally.failing > 0 ? .failed : tally.running > 0 ? .running(since: nil) : .quiet
+            rows.append(SessionCardChild(
+                id: "prs", icon: .pullRequest(open[0], prs.aggregateMark(for: open)), label: "\(open.count) \(noun)s",
+                detail: tally.detail, status: status, help: "Show this session's \(noun)s",
+                action: {},
+                tray: SessionCardChild.Tray(refs: pullRequests, isFront: { tab?.isFront(.pr($0)) ?? false },
+                                            open: { tabs.reveal(sessionId: id, pullRequest: $0) })))
+        }
+        if open.count == 1, let ref = open.first {
             let mark = prs.mark(for: ref)
-            guard mark == nil || mark?.state == .open else { continue }
             let status: SessionCardChild.Status = switch mark?.attention {
             case .checksFailing: .failed
             case .checksPending: .running(since: nil)
@@ -467,9 +489,10 @@ struct SessionCardChildRow: View {
     let child: SessionCardChild
     let isSelected: Bool
     @State private var hovering = false
+    @State private var showingTray = false
 
     var body: some View {
-        Button(action: child.action) {
+        Button { if child.tray != nil { showingTray.toggle() } else { child.action() } } label: {
             HStack(spacing: 6) {
                 icon.frame(width: 14)
                 (Text(child.label) + Text(child.detail.map { " · \($0)" } ?? "").foregroundColor(.secondary))
@@ -481,12 +504,17 @@ struct SessionCardChildRow: View {
             .font(.subheadline)
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 5))
+            .background(hovering || showingTray ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(child.help)
         .onHover { hovering = $0 }
+        .popover(isPresented: $showingTray, arrowEdge: .trailing) {
+            if let tray = child.tray {
+                PRTray(refs: tray.refs, isFront: tray.isFront) { ref in showingTray = false; tray.open(ref) }
+            }
+        }
     }
 
     @ViewBuilder
