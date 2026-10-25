@@ -5577,3 +5577,6 @@ dirties them from `layout()`, and so does the probe now.
 
 *An `@Observable` property written with its current value notifies no one on Swift 6.4, so same-value writes
 can't drive SwiftUI loops.*
+
+Then, at the user's go-ahead, uploaded 0.6.0's dSYMs to its GitHub Release as `Clinic-0.6.0-dSYMs.zip`, before
+the next build replaced them. The UUID matched the installed build, and the size matched on GitHub.

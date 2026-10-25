@@ -139,8 +139,9 @@ rebuilt.
 - A window with fewer than 100 views would reach AppKit's limit before the trip. Session windows have hundreds.
 - A loop spread over many turns, a pass or two per frame, is not caught. It is not the crash's shape.
 - Same-value writes are invisible to the trackers, but they are invisible to SwiftUI too.
-- **dSYMs:** the 0.6.0 dSYM still in `build/release` matches the installed 0.6.0 (`C6E2080F-773B-…`) and zips to
-  79 MB. Earlier releases' symbols are gone, and 0.6.0's go with the next build unless uploaded.
+- **dSYMs:** the 0.6.0 dSYM still in `build/release` matched the installed 0.6.0 (`C6E2080F-773B-…`). It was
+  uploaded to the 0.6.0 release as `Clinic-0.6.0-dSYMs.zip` (82,513,100 bytes, the same on GitHub as on disk) before
+  the next build replaced it. Symbols for releases before 0.6.0 are gone.
 - **Not verified:** a full `make release` and `make publish`. The new dSYM step ran alone against the 0.6.0
   archive, and `publish` compiles.
 - `LoopEvidenceTests` (6) pin the trail's capacity and folding, a loop report's round trip to the millisecond,
