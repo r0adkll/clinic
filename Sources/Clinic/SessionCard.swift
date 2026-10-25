@@ -265,6 +265,7 @@ struct SessionCard: View {
     private static let visibleChildren = 4
 
     var body: some View {
+        let _ = LoopWitness.rendered("SessionCard")
         HStack(alignment: .top, spacing: 8) {
             if let checked {
                 Button(action: onToggle) {

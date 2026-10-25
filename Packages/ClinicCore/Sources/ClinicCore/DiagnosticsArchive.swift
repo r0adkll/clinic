@@ -65,18 +65,45 @@ public struct ExceptionReport: Codable, Sendable, Equatable {
     public var osVersion: String
     /// Nil when the exception was off the main thread, or the dump itself failed.
     public var workspace: WorkspaceDump?
+    /// What the app did just before (ADR-231). Nil in reports from before it.
+    public var breadcrumbs: [Breadcrumb]?
+    /// The layout loop running when it was thrown, if the loop witness had tripped (ADR-231).
+    public var loop: LoopRecord?
 
     public init(name: String, reason: String?, callStack: [String], date: Date, appVersion: String, osVersion: String,
-                workspace: WorkspaceDump? = nil) {
+                workspace: WorkspaceDump? = nil, breadcrumbs: [Breadcrumb]? = nil, loop: LoopRecord? = nil) {
         self.name = name; self.reason = reason; self.callStack = callStack; self.date = date
         self.appVersion = appVersion; self.osVersion = osVersion; self.workspace = workspace
+        self.breadcrumbs = breadcrumbs; self.loop = loop
     }
 
-    public func encoded() throws -> Data {
+    public func encoded() throws -> Data { try DiagnosticsArchive.encoder.encode(self) }
+}
+
+extension DiagnosticsArchive {
+    /// Pretty, sorted JSON with ISO 8601 dates to the millisecond: breadcrumbs a few milliseconds apart must
+    /// stay in order when read (ADR-231).
+    public static var encoder: JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
-        return try e.encode(self)
+        e.dateEncodingStrategy = .custom { date, encoder in
+            var c = encoder.singleValueContainer()
+            try c.encode(date.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+        }
+        return e
+    }
+
+    /// Reads what `encoder` writes, and the whole-second dates of reports from before ADR-231.
+    public static var decoder: JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { decoder in
+            let c = try decoder.singleValueContainer()
+            let text = try c.decode(String.self)
+            if let date = try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) { return date }
+            if let date = try? Date(text, strategy: .iso8601) { return date }
+            throw DecodingError.dataCorruptedError(in: c, debugDescription: "not an ISO 8601 date: \(text)")
+        }
+        return d
     }
 }
 

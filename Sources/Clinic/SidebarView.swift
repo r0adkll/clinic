@@ -15,6 +15,7 @@ struct SidebarView: View {
     @AppStorage(SessionRowStyle.defaultsKey) private var rowStyle = SessionRowStyle.default.rawValue
 
     var body: some View {
+        let _ = LoopWitness.rendered("Sidebar")
         VStack(spacing: 0) {
             ScreenNavRow(screen: .tasks, icon: "list.bullet.clipboard", shortcut: .tasks,
                          help: "Issues from your projects, and sessions to work on them")

@@ -85,6 +85,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(true, forKey: "ApplePersistenceIgnoreState")
         // Before anything that can throw: an exception that ends the app leaves its report and the workspace (ADR-225).
         CrashEvidence.install { [unowned self] in self.tabs.workspaceDump() }
+        // The layout loop behind those exceptions, and what led up to it (ADR-231).
+        LoopWitness.install(subject: { [unowned self] in self.loopSubject(for: $0) }, dump: { [unowned self] in self.tabs.workspaceDump() })
+        // A value written back unchanged notifies no observer, so the probe flips the tab's directory by a trailing
+        // slash: the toolbar reads it for Open In, so it re-renders on each pass as in the real loop.
+        LoopWitness.loopProbeWrite = { [unowned self] in
+            guard let tab = self.tabs.selectedTab, let pwd = tab.pwd else { return }
+            tab.pwd = pwd.hasSuffix("/") ? String(pwd.dropLast()) : pwd + "/"
+        }
+        Breadcrumbs.observeWindows()
     }
 
     /// The development flavor wears a DEV band across its Dock icon while it runs (ADR-176), so the

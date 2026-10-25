@@ -4,7 +4,8 @@ import MetricKit
 import OSLog
 
 /// What a crash leaves behind (ADR-225): the exception and the workspace as it stood, written to
-/// `diagnostics/`, with the crash and hang diagnostics MetricKit delivers on a later launch beside them.
+/// `diagnostics/`, with the crash and hang diagnostics MetricKit delivers on a later launch beside them. The
+/// breadcrumbs and any layout loop running at the throw go in too (ADR-231).
 ///
 /// An exception AppKit catches during a display cycle (the layout loop of 2026-10-17) is logged and the process
 /// then ends with `exit(6)`. That is not a signal, so no crash report is written, and nothing on the way out
@@ -54,7 +55,8 @@ enum CrashEvidence {
         var stack = exception.callStackSymbols.isEmpty ? Thread.callStackSymbols : exception.callStackSymbols
         if let throwFrame = stack.firstIndex(where: { $0.contains("objc_exception_throw") }) { stack.removeFirst(throwFrame) }
         var report = ExceptionReport(name: exception.name.rawValue, reason: exception.reason, callStack: stack,
-                                     date: Date(), appVersion: version, osVersion: info.operatingSystemVersionString)
+                                     date: Date(), appVersion: version, osVersion: info.operatingSystemVersionString,
+                                     breadcrumbs: Breadcrumbs.entries)
         let archive = DiagnosticsArchive.standard
         guard let data = try? report.encoded(), let url = try? archive.write(data, kind: "exception", at: report.date) else {
             lock.lock(); busy = false; lock.unlock()
@@ -63,6 +65,10 @@ enum CrashEvidence {
         lock.lock(); pending = url; lock.unlock()
         if Thread.isMainThread, let dump {
             report.workspace = MainActor.assumeIsolated { dump() }
+            report.loop = MainActor.assumeIsolated {
+                LoopWitness.exceptionThrown()
+                return LoopWitness.current
+            }
             if let data = try? report.encoded() { try? archive.write(data, kind: "exception", at: report.date) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + grace) { survived(url) }

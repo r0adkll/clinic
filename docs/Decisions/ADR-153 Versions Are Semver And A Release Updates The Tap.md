@@ -1,5 +1,5 @@
 ---
-status: accepted (built 2026-09-14)
+status: accepted (built 2026-09-14; amended by ADR-231: the GitHub Release also carries the build's dSYMs)
 date: 2026-09-14
 amends: "[[ADR-010 Distribution]] (the release automation it deferred to the first tag) and [[ADR-024 Milestones and Versioning]] (what a version number is and where it lives)"
 tags: [adr, release, process]

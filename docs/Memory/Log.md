@@ -5543,3 +5543,37 @@ each:
 The first look caught the card's tray drawing grey titles: a popover inherits its presenter's environment.
 
 *A popover inherits the presenting view's foreground style; give popover content its own absolute ink.*
+
+## 2026-10-25 — Layout loops are witnessed, and releases keep their symbols (ADR-231)
+
+Installed 0.6.0 died at 21:29 on 10-24 with ADR-225's layout-loop exception, after a 20-second hang. ADR-225's
+report was there, and so was an unread one from 10-21 11:38. Both say only that it looped: every frame is Apple's.
+The unified log had AppKit's display-cycle trace for the last passes. Each pass rendered the root, the toolbar's
+preferences came out changed, and `Toolbar.LocationStorage.updatedVendedItems(newFocusedValues:)` dirtied the
+window again. In all five crashes the selected session was working. Ghostty's breakpad also left a crash dump of
+the same death in `~/.local/state/ghostty/crash/`, 250 ms after the throw.
+
+The user asked what release builds could record, then for all of it, with the dSYMs uploaded to each GitHub
+Release. Built:
+- **`LoopWitness`** swaps `-[NSWindow updateConstraintsIfNeeded]` to count passes per window per run-loop turn
+  and trips at 100. It then arms one observation tracker per value the window reads, has the main views note
+  their renders, records 60 passes in full, and writes `diagnostics/loop-<time>.json`. A loop the app survives
+  leaves a file too.
+- **`Breadcrumbs`** keeps a trail of 300 events, folding repeats, in both reports.
+- **dSYMs**: `release.sh` zips them after checking the UUID; `publish` uploads them.
+
+Checked with the new `-ClinicLoopProbe` seam. 200 passes survived and named `tab.pwd`, `RootToolbar` and
+`TabFooter`. 10000 passes reproduced the real exception text and left both files. Normal use left nothing.
+748 ClinicCore tests pass.
+
+Two findings changed the plan:
+- **Swift 6.4's `@Observable` skips notifying when an `Equatable` value is written back unchanged** (checked with
+  a probe program). That rules out the unconditional `tab.pwd = p` I had suspected.
+- **A settling display cycle takes up to 25 window passes in one turn.** The first trip point of 40 was too
+  close, so it is 100.
+
+The first probe dirtied constraints from inside `updateConstraints`, and AppKit refused at once. The real loop
+dirties them from `layout()`, and so does the probe now.
+
+*An `@Observable` property written with its current value notifies no one on Swift 6.4, so same-value writes
+can't drive SwiftUI loops.*

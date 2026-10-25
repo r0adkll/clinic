@@ -43,8 +43,6 @@ import Testing
                                 showing: nil, toolbar: ["run", "device:android"])],
                 tabs: [.init(id: "t", window: "w", session: "s", title: "Device pane", project: "/p", state: "working",
                              replay: false, focusedArea: "main", main: area, panel: area)]))
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        #expect(try d.decode(ExceptionReport.self, from: report.encoded()) == report)
+        #expect(try DiagnosticsArchive.decoder.decode(ExceptionReport.self, from: report.encoded()) == report)
     }
 }

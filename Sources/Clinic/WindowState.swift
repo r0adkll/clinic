@@ -151,6 +151,7 @@ struct TerminalStack: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalStackView { TerminalStackView() }
 
     func updateNSView(_ v: TerminalStackView, context: Context) {
+        LoopWitness.rendered("TerminalStack.update")
         v.sync(tabs: live, selected: selectedId, visible: visible)
         for tab in live {
             tab.contentView.setMain(mainContent(tab))

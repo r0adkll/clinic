@@ -49,6 +49,7 @@ final class SessionStore {
         var map: [SessionID: SessionSummary] = [:]
         for s in found { map[s.id] = s.withAttached(state.attachedPullRequests[s.id] ?? []); pending[s.id] = nil }
         for (id, p) in pending where map[id] == nil { map[id] = p }
+        Breadcrumbs.add("sessions", "rescanned \(map.count)", key: "rescan")
         sessions = map
         // Owned ids whose transcript never appeared (a session closed before its first prompt while the app was quit) are stale.
         let stale = state.ownedSessions.keys.filter { map[$0] == nil }
@@ -66,6 +67,7 @@ final class SessionStore {
     func refresh(transcriptPath: String) async {
         if let s = await scanner.scan(file: URL(fileURLWithPath: transcriptPath)) {
             pending[s.id] = nil
+            Breadcrumbs.add("sessions", "re-read \(s.id.rawValue.prefix(8))", key: "refresh \(s.id.rawValue)")
             sessions[s.id] = s.withAttached(state.attachedPullRequests[s.id] ?? [])
             rebuildProjects()
         }

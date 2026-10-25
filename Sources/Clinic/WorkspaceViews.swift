@@ -49,6 +49,7 @@ struct SessionHeader: View {
     let tab: Tab
 
     var body: some View {
+        let _ = LoopWitness.rendered("SessionHeader")
         HStack(spacing: 10) {
             ProjectIcon(project: Project(path: tab.projectPath), size: 26)
             VStack(alignment: .leading, spacing: 1) {

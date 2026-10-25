@@ -26,6 +26,7 @@ struct RootView: View {
     private var isActive: Bool { (tabs.activeWindowId ?? tabs.windows.first?.id) == windowId }
 
     var body: some View {
+        let _ = LoopWitness.rendered("RootView")
         let window = self.window
         NavigationSplitView {
             SidebarView(showNewSession: $showNewSession)
@@ -114,6 +115,7 @@ struct DetailView: View {
     @Environment(WindowState.self) private var window
 
     var body: some View {
+        let _ = LoopWitness.rendered("DetailView")
         let mine = tabs.tabs(in: window)
         let selected = mine.first { $0.id == window.selectedTabId }
         VStack(spacing: 0) {
@@ -174,6 +176,7 @@ struct TabFooter: View {
     let tab: Tab
 
     var body: some View {
+        let _ = LoopWitness.rendered("TabFooter")
         HStack(spacing: 10) {
             if tab.sessionId != nil {
                 ModelMenu(tab: tab)
@@ -336,6 +339,7 @@ private struct RootToolbar: ViewModifier {
     let window: WindowState
 
     func body(content: Content) -> some View {
+        let _ = LoopWitness.rendered("RootToolbar")
         // A screen or the composer is not a tab: the tab's controls step aside for them.
         let tab = tabs.selectedTab(in: window)
         let runTab = tab.flatMap { $0.replay == nil && !window.isShowingScreen && window.editingDraft == nil ? $0 : nil }

@@ -37,5 +37,13 @@ xcrun notarytool submit "$ZIP" --keychain-profile clinic-notary --wait
 xcrun stapler staple "$APP"
 rm -f "$ZIP"; ditto -c -k --keepParent "$APP" "$ZIP"
 spctl -a -vv "$APP" 2>&1 | tail -2
+# The build's debug symbols, published beside the app (ADR-231): a crash report, a MetricKit payload or a crash
+# dump from this build can only be read with the dSYM whose UUID matches its binary.
+DSYMS="$OUT/Clinic-$VERSION-dSYMs.zip"
+app_uuid="$(dwarfdump --uuid "$APP/Contents/MacOS/Clinic" | awk '{print $2}')"
+dsym_uuid="$(dwarfdump --uuid "$OUT/Clinic.xcarchive/dSYMs/Clinic.app.dSYM" | awk '{print $2}')"
+[ -n "$app_uuid" ] && [ "$app_uuid" = "$dsym_uuid" ] || { echo "error: Clinic.app.dSYM ($dsym_uuid) does not match the exported app ($app_uuid)" >&2; exit 1; }
+ditto -c -k --norsrc --noextattr --noacl --keepParent "$OUT/Clinic.xcarchive/dSYMs" "$DSYMS"
 echo "release artifact: $ZIP"
+echo "debug symbols: $DSYMS (Clinic $app_uuid)"
 echo "next: make publish  (walks through the smoke test, tag, GitHub Release and cask; pass --reuse-build to keep this zip)"

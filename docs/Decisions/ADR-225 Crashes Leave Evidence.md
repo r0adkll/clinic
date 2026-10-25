@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (amended by ADR-231: reports carry breadcrumbs and any layout loop, and a loop leaves its own file)
 date: 2026-10-17
 amends: "[[ADR-038 Preferences and Diagnostics]] (where a crash's evidence goes) and [[ADR-212 A Session Is A Workspace Of Tabs]] (the pane host's bar heights)"
 tags: [adr, ops, diagnostics, bug]

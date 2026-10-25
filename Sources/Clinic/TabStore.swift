@@ -220,6 +220,7 @@ final class TabStore {
             nsWindow.setFrame(nsWindow.constrainFrameRect(rect, to: key.screen), display: true)
         }
         if nsWindow.isKeyWindow { activeWindowId = window.id }
+        Breadcrumbs.watchFocus(in: nsWindow)
         for o in window.observers { NotificationCenter.default.removeObserver(o) }
         window.observers = [
             NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nsWindow, queue: .main) { [weak self, weak window] _ in
@@ -895,6 +896,8 @@ final class TabStore {
 
     /// Occlusion follows each window's selection (ADR-019); called by `WindowState` when its selection changes.
     func selectionChanged(in window: WindowState) {
+        Breadcrumbs.add("select", "window \(window.id.uuidString.prefix(8)) → "
+                        + (selectedTab(in: window).map { "\($0.id.uuidString.prefix(8)) \"\($0.title.prefix(40))\"" } ?? "nothing"))
         for t in tabs(in: window) {
             t.syncOcclusion(hidden: t.id != window.selectedTabId)
         }
@@ -1724,6 +1727,7 @@ final class TabStore {
     private func handle(hookEvent event: HookEvent) {
         // Not a hook: the status line's numbers, many times a turn. It changes no state (ADR-157).
         if let report = event.statusLine {
+            Breadcrumbs.add("hook", "status line \(event.sessionId.rawValue.prefix(8))", key: "statusline \(event.sessionId.rawValue)")
             // The plan windows are the account's, so they count whether or not the session has a tab here.
             usage?.absorb(report, at: event.receivedAt)
             let reporting = tab(routing: event.sessionId)
@@ -1734,6 +1738,7 @@ final class TabStore {
             }
             return
         }
+        Breadcrumbs.add("hook", "\(event.hookEventName)\(event.toolName.map { " " + $0 } ?? "") \(event.sessionId.rawValue.prefix(8))")
         // A hook usually means the transcript just grew; the card should not wait for the watcher's debounce.
         activities?.nudge()
         var found = tab(routing: event.sessionId)
@@ -1877,6 +1882,7 @@ final class TabStore {
     /// and so do the terminal and the transcript when they correct what the hooks left behind (ADR-166).
     private func transition(_ tab: Tab, to new: SessionState, waitingOn: String? = nil, failed: Bool = false, message: String? = nil) {
         guard let old = tab.state, let sessionId = tab.sessionId else { return }
+        Breadcrumbs.add("state", "\(sessionId.rawValue.prefix(8)) \(old.rawValue) → \(new.rawValue)")
         tab.state = new
         tab.waitingOn = waitingOn
         tab.errorBadge = failed
@@ -2047,12 +2053,14 @@ extension TabStore: GhosttySurfaceDelegate {
             // A panel shell's title names its chip, never the tab (ADR-046, ADR-198).
             if let shellPane { shellPane.shellTitle = t.isEmpty ? nil : t }
             if let tab, !isPanel {
+                Breadcrumbs.add("terminal", "\(tab.id.uuidString.prefix(8)) title \"\(t.prefix(60))\"", key: "title \(tab.id)")
                 titleReported(tab, title: t)
             }
             return true
         case .pwd(let p):
             if let tab, !isPanel {
                 let changed = tab.pwd != p
+                Breadcrumbs.add("terminal", "\(tab.id.uuidString.prefix(8)) pwd \(changed ? "now" : "again") \(p)", key: "pwd \(tab.id)")
                 tab.pwd = p
                 flushPendingInput(tab)
                 if changed { refreshFooter(tab) }
@@ -2061,6 +2069,7 @@ extension TabStore: GhosttySurfaceDelegate {
         case .progressReport(let state, _):
             // `pause` and `error` are not the CLI's; they say nothing about whether a turn is running.
             if let tab, !isPanel, tab.sessionId != nil, state == .remove || state == .set || state == .indeterminate {
+                Breadcrumbs.add("terminal", "\(tab.id.uuidString.prefix(8)) progress \(state)", key: "progress \(tab.id)")
                 progressReported(tab, busy: state != .remove)
             }
             return true
