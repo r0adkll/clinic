@@ -255,7 +255,6 @@ struct SessionCard: View {
     var showPath = false
     var isSelected = false
     var checked: Bool? = nil
-    var onToggle: () -> Void = {}
     /// Where the card sits in its project's tree (ADR-181).
     var lineage = RowLineage()
     @State private var hovering = false
@@ -267,11 +266,7 @@ struct SessionCard: View {
     var body: some View {
         let _ = LoopWitness.rendered("SessionCard")
         HStack(alignment: .top, spacing: 8) {
-            if let checked {
-                Button(action: onToggle) {
-                    Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
-                }.buttonStyle(.plain)
-            }
+            if let checked { SessionSelectBox(id: summary.id, checked: checked) }
             VStack(alignment: .leading, spacing: 3) {
                 header
                 meta
@@ -309,8 +304,12 @@ struct SessionCard: View {
             } else {
                 HStack(spacing: 4) {
                     SessionBadges(summary: summary)
-                    Text(Self.shortAge(summary.activityDate))
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    // Ticks by itself: the card runs only when its session changes (ADR-232), which is no
+                    // longer often enough to keep an age current.
+                    TimelineView(.everyMinute) { context in
+                        Text(Self.shortAge(summary.activityDate, now: context.date))
+                    }
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
         }
@@ -589,7 +588,7 @@ private struct SessionCardFooterRow: View {
 /// Decides, per session, between the card and the compact row, and builds the card's content
 /// (ADR-156). Automatic gives a card to a session that is open, running detached, or has anything
 /// under it still going; Cards gives every session one.
-struct SessionCardSlot: View {
+struct SessionCardSlot: View, Equatable {
     @Environment(SessionStore.self) private var sessions
     @Environment(TabStore.self) private var tabs
     @Environment(PRStore.self) private var prs
@@ -601,10 +600,18 @@ struct SessionCardSlot: View {
     var showPath = false
     var isSelected = false
     var checked: Bool? = nil
-    var onToggle: () -> Void = {}
     var lineage = RowLineage()
 
+    /// The sidebar applies `.equatable()` to the slot, so when it hands a row back unchanged the body does not run
+    /// again (ADR-232). The stores the slot reads still re-run it when they change, as for any view. Nothing here
+    /// may be a closure: SwiftUI cannot compare one, so it counts every row it is handed back as changed.
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.summary == b.summary && a.tab === b.tab && a.style == b.style && a.showPath == b.showPath
+            && a.isSelected == b.isSelected && a.checked == b.checked && a.lineage == b.lineage
+    }
+
     var body: some View {
+        let _ = LoopWitness.rendered("SessionCardSlot")
         // A terminal's foreground job changes without an event to observe, so a card with a terminal
         // pane looks again every few seconds.
         if !(tab?.panelSurfaces.isEmpty ?? true) {
@@ -622,9 +629,9 @@ struct SessionCardSlot: View {
         let live = tab != nil || background.runningAgent(for: summary.id) != nil || content.isLive
         if style == .cards || live {
             SessionCard(summary: summary, tab: tab, activity: activity, content: content, showPath: showPath,
-                        isSelected: isSelected, checked: checked, onToggle: onToggle, lineage: lineage)
+                        isSelected: isSelected, checked: checked, lineage: lineage)
         } else {
-            SessionRow(summary: summary, tab: tab, showPath: showPath, checked: checked, onToggle: onToggle, lineage: lineage)
+            SessionRow(summary: summary, tab: tab, showPath: showPath, checked: checked, lineage: lineage)
         }
     }
 }

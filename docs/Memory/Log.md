@@ -5580,3 +5580,66 @@ can't drive SwiftUI loops.*
 
 Then, at the user's go-ahead, uploaded 0.6.0's dSYMs to its GitHub Release as `Clinic-0.6.0-dSYMs.zip`, before
 the next build replaced them. The UUID matched the installed build, and the size matched on GitHub.
+
+## 2026-10-31 — The layout loop's first witness report
+
+Installed 0.6.1 died at 08:24:46 with the same *more Update Constraints in Window passes* exception, the sixth
+fatal one. [[ADR-231 Layout Loops Are Witnessed And Releases Keep Their Symbols]]'s witness worked. It wrote
+`exception-2026-10-31T12-24-46.376Z.json` and its loop file. It had also caught three loops nobody noticed, which
+the app survived: 10-28 04:11 (163 passes), 10-30 16:17 (112) and 10-30 20:12 (131).
+
+What the four records show:
+- **No observed value changed on any pass**, and no toolbar view, header, root or detail view ran. Toolbar
+  widths, the first responder (the selected tab's `GhosttySurfaceView`) and the window frame held still.
+- **The only Clinic body that ran was `SessionCard`.** Every visible card in the sidebar ran once per full render,
+  about every 38 ms; two cheap passes followed each render.
+- **"The selected session was working" no longer holds.** Today the selected tab was idle and only a background
+  tab worked; on 10-30 20:12 no tab was working.
+- **The only Clinic frames in any stack**, symbolicated with the 0.6.1 dSYM (UUID `51689B3D…`, matching the
+  installed build), are `main` and the witness's own `clinic_countedUpdateConstraintsIfNeeded`.
+- Each loop began, worked back from its pass rate, within about a second of an event touching a sidebar card: a
+  background session's status line, a hook, a title spinner. On 10-30 20:12 it came 3 s after the window became
+  key.
+
+The mechanism, from AppKit's display-cycle trace and a disassembly of SwiftUI on macOS 26.6.2:
+- The root `NSHostingView` renders and its preferences change.
+- `AppKitToolbarStrategy.willReturnUpdates` compares the window's `FocusedValueList.version` with the last one it
+  saw.
+- On any difference, `Toolbar.LocationStorage.updatedVendedItems(newFocusedValues:)` hands every toolbar item's
+  hosting view the focused values and calls `invalidateProperties(.focusedValues, mayDeferUpdate: true)`. It does
+  that with no equality check, which dirties the window again in the same display-cycle flush.
+
+So the loop lasts as long as each render gives the focused-value list a new version. Clinic declares no focused
+values itself, so the contributors are SwiftUI's own, such as the sidebar `List(selection:)`, its
+`contextMenu(forSelectionType:)`, `onExitCommand` and `searchable`. The cards re-rendering inside that `List` are
+the lead. Nothing was changed.
+
+*SwiftUI's macOS toolbar re-invalidates every item whenever the focused-value list's version changes, not when its
+values do, so whatever re-versions it on every render loops the window.*
+
+## 2026-11-01 — Sidebar rows run only when they change (ADR-232)
+
+The user picked the first proposal from the 10-31 findings: stop the sidebar cards running on every render.
+- **Cause.** `SessionCardSlot`, `SessionCard` and `SessionRow` each stored select mode's `onToggle` closure.
+  SwiftUI cannot compare a closure, so every row the list handed back counted as changed.
+- **Measured first** with a standalone SwiftUI program on macOS 26. In a sidebar `List` of 10 rows, 10 parent
+  re-renders ran the closure rows 100 times and the closure-free or `.equatable()` rows 0 times. One change to a
+  value an equatable row read still ran all 10.
+- **Built:**
+  - `SessionSelectBox` toggles `window.bulkSelection` itself and is labelled *Selected* / *Not selected*.
+  - `SessionCardSlot` and `SessionRow` are `Equatable`, and the sidebar applies `.equatable()` to both.
+  - The witness notes `SessionCardSlot` too.
+- **A regression the review caught.** The card's age (*now*, *4m*) had stayed current only because the card ran so
+  often. It now ticks in a `TimelineView(.everyMinute)`.
+- **Checked in Clinic Dev.** For a before-and-after, a temporary probe write flipped `ClinicShowUsage` on each pass,
+  so the sidebar handed its rows back unchanged, on Cards style:
+  - before: `Sidebar` 204, `SessionCard` 204;
+  - after: `Sidebar` 204, no card or slot.
+  The tweak was removed. Select mode, driven by accessibility, still selects and clears a row, and the test
+  preferences were deleted.
+
+Whether this ends the loop is open: the next loop file says. Cards absent from its record but the loop still there
+would point at SwiftUI's own focused-value sources in the sidebar `List`, and then the brake or an AppKit toolbar.
+
+*A closure stored on a SwiftUI view makes every hand-back from its parent a change, so a `List` of such rows runs
+every row's body each time it renders.*

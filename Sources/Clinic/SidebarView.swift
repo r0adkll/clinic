@@ -159,14 +159,16 @@ struct SidebarView: View {
         let item = SidebarItem.session(summary.id)
         let tab = tabs.tab(for: summary.id)
         let checked = window.selectMode ? window.bulkSelection.contains(item) : nil
-        let toggle = { if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) } }
         let style = SessionRowStyle(rawValue: rowStyle) ?? .default
+        // `.equatable()`: a row handed back unchanged does not run its body again (ADR-232).
         if style == .compact {
-            SessionRow(summary: summary, tab: tab, showPath: showFolderPaths, checked: checked, onToggle: toggle, lineage: lineage)
+            SessionRow(summary: summary, tab: tab, showPath: showFolderPaths, checked: checked, lineage: lineage)
+                .equatable()
                 .tag(item)
         } else {
             SessionCardSlot(summary: summary, tab: tab, style: style, showPath: showFolderPaths,
-                            isSelected: selection.wrappedValue.contains(item), checked: checked, onToggle: toggle, lineage: lineage)
+                            isSelected: selection.wrappedValue.contains(item), checked: checked, lineage: lineage)
+                .equatable()
                 .tag(item)
         }
     }
@@ -475,25 +477,26 @@ enum SessionActions {
     }
 }
 
-struct SessionRow: View {
+struct SessionRow: View, Equatable {
     @Environment(SessionStore.self) private var sessions
     let summary: SessionSummary
     let tab: Tab?
     var showPath = false
     /// Non-nil in select mode: shows a checkbox (ADR-074).
     var checked: Bool? = nil
-    var onToggle: () -> Void = {}
     /// Where the row sits in its project's tree (ADR-181).
     var lineage = RowLineage()
     @State private var hovering = false
 
+    /// As `SessionCardSlot`'s (ADR-232): a row the sidebar hands back unchanged does not run its body again.
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.summary == b.summary && a.tab === b.tab && a.showPath == b.showPath && a.checked == b.checked
+            && a.lineage == b.lineage
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            if let checked {
-                Button(action: onToggle) {
-                    Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
-                }.buttonStyle(.plain)
-            }
+            if let checked { SessionSelectBox(id: summary.id, checked: checked) }
             // The glyph column: state above, and under it who this came out of. A collapsed parent
             // carries its folded descendants' status (ADR-181).
             VStack(spacing: 2) {
@@ -523,6 +526,26 @@ struct SessionRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .sidebarRowHover(hovering)
+    }
+}
+
+/// Select mode's checkbox on a session row or card (ADR-074). It toggles the window's selection itself
+/// instead of taking an action from the sidebar. A row that stores a closure never compares equal, so SwiftUI
+/// ran every card's body each time the list handed its rows back, once per render in the layout loop (ADR-232).
+struct SessionSelectBox: View {
+    @Environment(WindowState.self) private var window
+    let id: SessionID
+    let checked: Bool
+
+    var body: some View {
+        Button {
+            let item = SidebarItem.session(id)
+            if window.bulkSelection.contains(item) { window.bulkSelection.remove(item) } else { window.bulkSelection.insert(item) }
+        } label: {
+            Image(systemName: checked ? "checkmark.circle.fill" : "circle").foregroundStyle(checked ? Color.accent : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(checked ? "Selected" : "Not selected")
     }
 }
 
