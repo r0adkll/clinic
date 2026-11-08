@@ -5662,3 +5662,23 @@ every run. Until now only an emulator the run booted itself got a pane.
 
 *`Run.hostTabId` is nil for a run whose pane was never fronted, so anything that follows a run to its tab needs
 the tab it was started from as well.*
+
+## 2026-11-07 — Two more layout-loop crashes, both on 0.6.1 (ADR-232 unreleased)
+
+Installed Clinic died at 09:42 and 22:34 with the layout loop's exception (907 and 1035 passes, 12 s and 15 s).
+- **Both ran 0.6.1 (220).** The `0.6.1` tag is `a4ea5d4`, before ADR-232's `be03af0`, so neither says anything
+  about the fix. No loop has yet been recorded on a build that has it; Clinic Dev's only loop files are ADR-232's
+  own probe runs.
+- **Same signature as 10-31:** no observed value changed, no toolbar or header render, toolbar widths and first
+  responder still, and only `SessionCard` ran: ten cards on every third pass. The selected session was idle in the
+  22:34 one. Breadcrumbs show tab switches and a `SessionStart` 10–30 s before each trip, as in earlier loops, but
+  no single trigger.
+- **Across all seven loop records, the loop ends within five passes of the cards stopping.** The four that
+  survived end right after a pass that ran fewer cards (7, or none after a run of 2s); the fatal ones run ten cards
+  to the end. No loop has continued without cards. That fits ADR-232's theory that the rows sustain the loop,
+  though it cannot tell rows-as-cause from rows-as-passenger of a `List` refresh.
+
+The fix is checked only when a loop file comes from a build with it: no `SessionCard`/`SessionCardSlot` in
+`renderedTotals` and still looping means the brake or an AppKit toolbar is next.
+
+*A loop's per-pass card counts, printed in a row, show where it ends more plainly than its totals.*
