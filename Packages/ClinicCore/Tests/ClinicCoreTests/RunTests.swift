@@ -77,6 +77,21 @@ private struct TempTree {
         #expect(!one.contains("rerunAfterTurn") && !one.contains("env"))
     }
 
+    @Test func showDeviceRoundTripsAndNeedsADevice() throws {
+        let json = #"{"configurations": [{"id": "a", "command": "x", "device": "android", "showDevice": true},"# +
+                   #" {"id": "b", "command": "y", "showDevice": true}, {"id": "c", "command": "z", "showDevice": "yes"}]}"#
+        let file = try RunConfigurationFile.decode(Data(json.utf8))
+        #expect(file.configuration("a")?.showsDevice == true)
+        // Without a device there is nothing to show; a value of the wrong type reads as unset.
+        #expect(file.configuration("b")?.showsDevice == false)
+        #expect(file.configuration("c")?.showDevice == nil && file.configuration("c")?.extra.isEmpty == true)
+        let text = String(decoding: try file.encoded(), as: UTF8.self)
+        #expect(text.components(separatedBy: "\"showDevice\"").count == 3)
+        var off = RunConfiguration(id: "d", name: "D", command: "true", device: .android, showDevice: false)
+        off.extra = [:]
+        #expect(!String(decoding: try RunConfigurationFile(configurations: [off]).encoded(), as: UTF8.self).contains("showDevice"))
+    }
+
     @Test func decodeErrorsAreReadable() {
         #expect(throws: RunConfigurationError.self) { try RunConfigurationFile.decode(Data("{".utf8)) }
         do {

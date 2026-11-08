@@ -18,17 +18,23 @@ public struct RunConfiguration: Codable, Sendable, Equatable, Identifiable, Hash
     public var compound: [String]?
     /// The device it installs onto (ADR-124): Clinic gets one ready and names it in the environment.
     public var device: RunDevicePlatform?
+    /// Open the device's screen in the panel, or front it, every time this runs (ADR-233). Android
+    /// emulators only for now: the iOS Simulator already comes forward on every run.
+    public var showDevice: Bool?
     /// Keys Clinic does not know, kept so a save never drops what someone else wrote.
     public var extra: [String: JSONValue] = [:]
 
     public init(id: String, name: String, icon: String? = nil, command: String? = nil, directory: String? = nil,
-                env: [String: String]? = nil, rerunAfterTurn: Bool? = nil, compound: [String]? = nil, device: RunDevicePlatform? = nil) {
+                env: [String: String]? = nil, rerunAfterTurn: Bool? = nil, compound: [String]? = nil, device: RunDevicePlatform? = nil,
+                showDevice: Bool? = nil) {
         self.id = id; self.name = name; self.icon = icon; self.command = command; self.directory = directory
         self.env = env; self.rerunAfterTurn = rerunAfterTurn; self.compound = compound; self.device = device
+        self.showDevice = showDevice
     }
 
     public var isCompound: Bool { compound != nil && command == nil }
     public var reruns: Bool { rerunAfterTurn ?? false }
+    public var showsDevice: Bool { device != nil && (showDevice ?? false) }
     public var symbol: String { icon.flatMap { $0.isEmpty ? nil : $0 } ?? "play.fill" }
 
     /// A shell command, or a compound with at least one member.
@@ -37,7 +43,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable, Identifiable, Hash
         return !(compound ?? []).isEmpty
     }
 
-    private static let known: Set<String> = ["id", "name", "icon", "command", "directory", "env", "rerunAfterTurn", "compound", "device"]
+    private static let known: Set<String> = ["id", "name", "icon", "command", "directory", "env", "rerunAfterTurn", "compound", "device", "showDevice"]
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -54,6 +60,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable, Identifiable, Hash
         compound = try c.decodeIfPresent([String].self, forKey: AnyKey("compound"))
         // An unknown platform (a newer Clinic's) reads as none rather than failing the whole file.
         device = (try? c.decodeIfPresent(String.self, forKey: AnyKey("device"))).flatMap { $0.flatMap(RunDevicePlatform.init(rawValue:)) }
+        showDevice = try? c.decodeIfPresent(Bool.self, forKey: AnyKey("showDevice"))
         for key in c.allKeys where !Self.known.contains(key.stringValue) {
             extra[key.stringValue] = try c.decode(JSONValue.self, forKey: key)
         }
@@ -70,6 +77,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable, Identifiable, Hash
         if rerunAfterTurn == true { try c.encode(true, forKey: AnyKey("rerunAfterTurn")) }
         try c.encodeIfPresent(compound, forKey: AnyKey("compound"))
         try c.encodeIfPresent(device, forKey: AnyKey("device"))
+        if showDevice == true { try c.encode(true, forKey: AnyKey("showDevice")) }
         for (k, v) in extra where !Self.known.contains(k) { try c.encode(v, forKey: AnyKey(k)) }
     }
 

@@ -1434,9 +1434,24 @@ final class TabStore {
     /// never fronts anything, ADR-122).
     /// An emulator a run just booted with its window hidden (ADR pending; docs/Research): its screen in
     /// the run's tab, fronted, since there is no other window to see it in.
-    func openDevicePane(_ deviceId: String, in tab: Tab) {
+    /// A run's emulator (ADR-224, ADR-233). Started by the user, its pane opens or is fronted like any
+    /// opener's. Started by Claude or after a turn, it still comes forward in the right panel, but the
+    /// keyboard stays put and a pane in the main area is left behind the session the user may be typing in.
+    func showRunDevice(_ deviceId: String, in tab: Tab, byUser: Bool) {
         EmulatorDirectory.shared.rescan()
-        showPane(.device(deviceId), in: tab)
+        let kind = PanelPane.Kind.device(deviceId)
+        if byUser { showPane(kind, in: tab); return }
+        if let existing = tab.pane(kind) {
+            guard tab.area(of: existing) == .right else { return }
+            tab.panel.select(existing)
+        } else if let pane = makePane(kind, in: tab) {
+            tab.panel.append(pane)
+            tab.panel.isVisible = true
+        } else {
+            return
+        }
+        tab.syncOcclusion(hidden: window(of: tab).selectedTabId != tab.id)
+        runs.syncOcclusion()
     }
 
     /// A device row in the `+` menu or the empty panel (ADR-226): its tab, fronted, after starting the AVD

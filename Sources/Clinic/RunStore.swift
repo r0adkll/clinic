@@ -37,6 +37,9 @@ final class Run: Identifiable {
     fileprivate var restartWhenExited = false
     fileprivate var stopEscalation: Task<Void, Never>?
     fileprivate var prepareTask: Task<Void, Never>?
+    /// The tab this start came from, and whether the user started it (ADR-233): where the device's screen
+    /// goes, and whether it may take the front of the session's area.
+    @ObservationIgnored fileprivate var origin: (tabId: UUID, byUser: Bool)?
 
     nonisolated var id: RunKey { key }
     var name: String { config.name }
@@ -255,6 +258,7 @@ final class RunStore {
         var started: [Run] = []
         for (i, member) in members.enumerated() where member.isRunnable {
             guard let run = start(member, checkout: checkout, projectPath: projectPath) else { continue }
+            run.origin = tab.map { ($0.id, front) }
             started.append(run)
             if let tab { tabs?.openRunPane(run.key, in: tab, front: front && i == 0) }
         }
@@ -294,7 +298,9 @@ final class RunStore {
         run.prepareTask = Task { [weak self, weak run] in
             guard let self, let run else { return }
             do {
-                let embedded = UserDefaults.standard.object(forKey: Self.emulatorsInClinicKey) as? Bool ?? true
+                // A configuration that shows its device boots it without a window, whatever the setting says:
+                // its screen is going in the panel anyway (ADR-233).
+                let embedded = (UserDefaults.standard.object(forKey: Self.emulatorsInClinicKey) as? Bool ?? true) || run.config.showsDevice
                 let (device, env) = try await self.devices.prepare(platform, projectPath: run.projectPath, embedded: embedded) { message in
                     Task { @MainActor in if run.prepareTask != nil { run.preparing = message } }
                 }
@@ -304,10 +310,11 @@ final class RunStore {
                 run.prepareTask = nil
                 if !self.launch(run, extraEnvironment: env) {
                     self.failBeforeStart(run, since: since, problem: "The terminal for \(run.name) could not be created.")
-                } else if embedded, !device.isRunning, device.kind == .emulator, device.platform == .android,
-                          let host = run.hostTabId, let tab = self.tabs?.tabs.first(where: { $0.id == host }) {
-                    // Booted by this run with no window of its own: its screen goes beside the run.
-                    self.tabs?.openDevicePane(device.id, in: tab)
+                } else if device.kind == .emulator, device.platform == .android,
+                          run.config.showsDevice || (embedded && !device.isRunning) {
+                    // Booted by this run with no window of its own, or asked for by the configuration
+                    // (ADR-233): its screen goes beside the run.
+                    self.showDevice(device, of: run)
                 }
             } catch is CancellationError {
                 return
@@ -316,6 +323,15 @@ final class RunStore {
             }
         }
         return true
+    }
+
+    /// The device's screen in the tab showing the run, else the tab it was started from. Fronted with the
+    /// keyboard when the user started it; otherwise brought forward without moving the keyboard.
+    private func showDevice(_ device: RunDevice, of run: Run) {
+        guard let tabs else { return }
+        let ids = [run.hostTabId, run.origin?.tabId].compactMap { $0 }
+        guard let tab = ids.lazy.compactMap({ id in tabs.tabs.first { $0.id == id } }).first else { return }
+        tabs.showRunDevice(device.id, in: tab, byUser: run.origin?.byUser ?? false)
     }
 
     private func failBeforeStart(_ run: Run, since: Date, problem: String) {

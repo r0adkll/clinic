@@ -66,6 +66,7 @@ private struct EditableConfig: Identifiable, Equatable {
     var env: [EnvRow]
     var rerun: Bool
     var device: RunDevicePlatform?
+    var showDevice: Bool
     var members: [UUID]?
     var extra: [String: JSONValue]
 
@@ -74,7 +75,7 @@ private struct EditableConfig: Identifiable, Equatable {
     init(_ c: RunConfiguration, isNew: Bool = false) {
         id = c.id; self.isNew = isNew; name = c.name; icon = c.symbol; command = c.command ?? ""
         directory = c.directory ?? ""; env = (c.env ?? [:]).sorted { $0.key < $1.key }.map { EnvRow(key: $0.key, value: $0.value) }
-        rerun = c.reruns; device = c.device; members = nil; extra = c.extra
+        rerun = c.reruns; device = c.device; showDevice = c.showDevice ?? false; members = nil; extra = c.extra
     }
 
     /// A copy under a new identity, named "‹name› Copy", that saves with an id of its own. A duplicated
@@ -304,6 +305,12 @@ struct RunEditorSheet: View {
                 Text("Clinic gets the device chosen in the toolbar ready, booting it if needed, and runs the command with \(platform.environmentKey) set.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            if configs[i].device == .android {
+                Toggle("Show the emulator in the panel on each run", isOn: $configs[i].showDevice)
+                    .toggleStyle(.checkbox).controlSize(.small)
+                Text("Opens its screen in the right panel, or brings it to the front when it is already open.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
         row("Directory") {
             HStack(spacing: 6) {
@@ -469,6 +476,7 @@ struct RunEditorSheet: View {
                 out.env = env.isEmpty ? nil : env
                 out.rerunAfterTurn = c.rerun ? true : nil
                 out.device = c.device
+                out.showDevice = c.showDevice ? true : nil
             }
             out.extra = c.extra
             return out

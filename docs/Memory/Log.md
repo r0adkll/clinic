@@ -5643,3 +5643,22 @@ would point at SwiftUI's own focused-value sources in the sidebar `List`, and th
 
 *A closure stored on a SwiftUI view makes every hand-back from its parent a change, so a `List` of such rows runs
 every row's body each time it renders.*
+
+## 2026-11-07 — A run configuration can show its emulator (ADR-233)
+
+The user asked for a per-configuration setting that opens a run's emulator in the right panel, or fronts it, on
+every run. Until now only an emulator the run booted itself got a pane.
+- **Built:**
+  - `showDevice` in `run.json`, written only when true.
+  - A checkbox under the editor's Device picker, Android only, since the Simulator already comes forward on each
+    run.
+  - After the command starts, the emulator's Device pane opens or is fronted in the run's tab.
+- **Keyboard rule.** A run the user started fronts the pane like any opener. A run Claude or a turn started brings
+  it forward in the right panel without moving the keyboard, and leaves a main-area pane behind the session.
+- **Boot.** A configuration with the field boots its emulator without a window even when *Show emulators in
+  Clinic* is off.
+- **Checked:** the ClinicCore tests pass (a new round-trip test) and Clinic Dev builds. No Android run was made in
+  the app, so the pane opening is unverified by hand.
+
+*`Run.hostTabId` is nil for a run whose pane was never fronted, so anything that follows a run to its tab needs
+the tab it was started from as well.*

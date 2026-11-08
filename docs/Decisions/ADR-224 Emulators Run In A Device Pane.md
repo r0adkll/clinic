@@ -2,7 +2,7 @@
 status: accepted (2026-10-17)
 date: 2026-10-17
 amends: "[[ADR-124 Runs Get A Device Ready]] (an emulator a run boots has no window of its own)"
-amended-by: "[[ADR-226 Emulators Are Started And Stopped From Clinic]] (every AVD in `+`, Start and Stop, and what a tab shows when its emulator stops)"
+amended-by: "[[ADR-226 Emulators Are Started And Stopped From Clinic]] (every AVD in `+`, Start and Stop, and what a tab shows when its emulator stops); [[ADR-233 A Run Configuration Can Show Its Emulator]] (a run shows its emulator when the configuration asks, and keeps the keyboard when Claude started it)"
 tags: [adr, ui, tabs, runs, android]
 ---
 # ADR-224: Emulators run in a Device pane
