@@ -2,7 +2,7 @@
 status: accepted (2026-10-17)
 date: 2026-10-17
 amends: "[[ADR-124 Runs Get A Device Ready]] (an emulator a run boots has no window of its own)"
-amended-by: "[[ADR-226 Emulators Are Started And Stopped From Clinic]] (every AVD in `+`, Start and Stop, and what a tab shows when its emulator stops); [[ADR-233 A Run Configuration Can Show Its Emulator]] (a run shows its emulator when the configuration asks, and keeps the keyboard when Claude started it)"
+amended-by: "[[ADR-226 Emulators Are Started And Stopped From Clinic]] (every AVD in `+`, Start and Stop, and what a tab shows when its emulator stops); [[ADR-233 A Run Configuration Can Show Its Emulator]] (a run shows its emulator when the configuration asks, and keeps the keyboard when Claude started it); [[ADR-234 Device Panes Share The Clipboard]] (clipboard sync and Edit ▸ Cut, Copy, Paste and Select All reach the device)"
 tags: [adr, ui, tabs, runs, android]
 ---
 # ADR-224: Emulators run in a Device pane
@@ -51,6 +51,7 @@ support multiple emulators (and later physical devices)."*
   to the device as Mac key codes; ⌘ chords stay Clinic's. Touches are turned back from the screen's rotation and
   a folded foldable's region, because the emulator takes them in the display's natural orientation.
 - **Physical devices are deferred** to a later effort, as are multi-touch, clipboard sync and device frames.
+  (Clipboard sync: built in [[ADR-234 Device Panes Share The Clipboard]].)
 
 ## Consequences
 - grpc-swift 2 and swift-protobuf join the app through a new local package, `Packages/AndroidEmulator`

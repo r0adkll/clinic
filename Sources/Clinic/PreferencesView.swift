@@ -405,6 +405,7 @@ private struct SessionsPane: View {
     @AppStorage(Prefs.worktreeBase) private var worktreeBase = WorktreeBase.defaultBranch
     @AppStorage(TabStore.fileLinksInFilesKey) private var fileLinksInFiles = true
     @AppStorage(RunStore.emulatorsInClinicKey) private var emulatorsInClinic = true
+    @AppStorage(DeviceScreenModel.clipboardSharingKey) private var emulatorClipboard = true
 
     var body: some View {
         Form {
@@ -464,12 +465,15 @@ private struct SessionsPane: View {
 
             Section {
                 Toggle("Show emulators in Clinic", isOn: $emulatorsInClinic)
+                Toggle("Share the clipboard with emulators", isOn: $emulatorClipboard)
             } header: {
                 Text("Runs")
             } footer: {
                 Text("An emulator a run starts opens in the session's panel instead of its own window, with "
                      + "Android Studio's device controls over its screen. Off, it opens in the emulator's own window. "
-                     + "Emulators started elsewhere can always be opened from the panel's + menu.")
+                     + "Emulators started elsewhere can always be opened from the panel's + menu. Sharing the "
+                     + "clipboard puts text copied on a device on the Mac's clipboard, and the Mac's text on the "
+                     + "device when you use its pane.")
             }
 
             Section {

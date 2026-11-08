@@ -5682,3 +5682,28 @@ The fix is checked only when a loop file comes from a build with it: no `Session
 `renderedTotals` and still looping means the brake or an AppKit toolbar is next.
 
 *A loop's per-pass card counts, printed in a row, show where it ends more plainly than its totals.*
+
+## 2026-11-08 — Device panes share the clipboard (ADR-234)
+
+The user asked whether the emulator pane allowed copy and paste. It did not: ADR-224 deferred clipboard sync and
+kept every ⌘ chord for Clinic. They asked for both.
+- **Built:**
+  - Each pane's connection streams the device's clipboard and puts a device copy on the Mac's clipboard.
+  - The Mac's text goes to the device on the pane's next click or key, when the pasteboard's change count moved.
+  - The screen view answers Edit ▸ Cut, Copy, Paste and Select All by sending the device the Control chord, after
+    any clipboard push has finished.
+  - Settings ▸ Sessions ▸ Runs ▸ *Share the clipboard with emulators*, on by default.
+- **Two surprises, both measured against a headless emulator:**
+  - `streamClipboard` opens with the current text only when it is not empty. So "skip the first message" would
+    have eaten the first real copy on a fresh device. The pane reads `getClipboard` first and drops what matches.
+  - Mac key code 0 (A) is protobuf's default and never goes on the wire, so every A typed in a Device pane had
+    been lost since ADR-224, and so had Control-A. That made Control-C and Control-X look broken: nothing was
+    ever selected. A now goes as evdev 30.
+- **Checked:** typed `a`, Control-A, C, X and V on one connection, reading the focused field through `uiautomator`
+  after each step. A Control-V sent right after `setClipboard` pasted the new text 6 of 6 times. The new live test
+  passes with the others, and Clinic Dev builds.
+- **Not checked in the app:** `CGPreflightPostEventAccess` is false here, so ⌘V into a pane was not driven. The
+  ADR has the recipe for a hand check.
+
+*When a key "does nothing" over gRPC, check whether its code is 0 before suspecting the guest. proto3 drops
+default values, so code 0 never reaches the emulator.*

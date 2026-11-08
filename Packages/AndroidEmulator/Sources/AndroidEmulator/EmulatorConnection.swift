@@ -139,11 +139,19 @@ public final class EmulatorConnection: Sendable {
     }
 
     /// A Mac virtual key code (`NSEvent.keyCode`), which the emulator translates to the device's own.
+    ///
+    /// A is Mac key code 0, which protobuf never sends because it is the field's default, so the
+    /// emulator dropped every A, and with it Control-A. It goes as its Linux evdev code instead.
     public func key(macKeyCode: UInt16, down: Bool) {
         var key = Android_Emulation_Control_KeyboardEvent()
-        key.codeType = .mac
+        if macKeyCode == 0 {
+            key.codeType = .evdev
+            key.keyCode = 30  // KEY_A
+        } else {
+            key.codeType = .mac
+            key.keyCode = Int32(macKeyCode)
+        }
         key.eventType = down ? .keydown : .keyup
-        key.keyCode = Int32(macKeyCode)
         var event = EmulatorInputEvent()
         event.keyEvent = key
         send(event)
@@ -174,6 +182,16 @@ public final class EmulatorConnection: Sendable {
         }
     }
 
+    /// Control and a key, pressed and released in order: the chord a hardware keyboard sends for Android's
+    /// edit shortcuts (Control-X, C, V and A), which text fields in both views and Compose take.
+    public func controlChord(macKeyCode: UInt16) {
+        let control: UInt16 = 59
+        key(macKeyCode: control, down: true)
+        key(macKeyCode: macKeyCode, down: true)
+        key(macKeyCode: macKeyCode, down: false)
+        key(macKeyCode: control, down: false)
+    }
+
     /// A scroll, in the emulator's units: 120 per wheel click.
     public func wheel(dx: Int, dy: Int) {
         var wheel = Android_Emulation_Control_WheelEvent()
@@ -181,6 +199,43 @@ public final class EmulatorConnection: Sendable {
         var event = EmulatorInputEvent()
         event.wheelEvent = wheel
         send(event)
+    }
+
+    // MARK: Clipboard
+
+    /// Puts `text` on the device's clipboard. The emulator does not echo it back to this connection's
+    /// own `clipboard()` stream.
+    public func setClipboard(_ text: String) async throws {
+        try await ready.value
+        var clip = Android_Emulation_Control_ClipData()
+        clip.text = text
+        _ = try await controller.setClipboard(clip, metadata: metadata)
+    }
+
+    /// The device's clipboard text now.
+    public func clipboardText() async throws -> String {
+        try await ready.value
+        return try await controller.getClipboard(Google_Protobuf_Empty(), metadata: metadata).text
+    }
+
+    /// Each change to the device's clipboard text, made on the device or by another client. It opens with
+    /// what the device holds, but only when that is not empty, so a caller cannot tell that first message
+    /// from a change; read `clipboardText()` first and drop what matches it. Very fast changes can be missed.
+    public func clipboard() -> AsyncThrowingStream<String, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await ready.value
+                    try await controller.streamClipboard(Google_Protobuf_Empty(), metadata: metadata) { response in
+                        for try await clip in response.messages { continuation.yield(clip.text) }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     // MARK: Device controls

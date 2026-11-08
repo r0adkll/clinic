@@ -241,6 +241,7 @@ final class DeviceScreenModel {
                 throw error
             }
             self.connection = connection
+            watchClipboard(connection)
             status = .live
             Self.log.info("connected to \(emulator.avdId, privacy: .public) on \(emulator.grpcPort)")
             return true
@@ -252,6 +253,7 @@ final class DeviceScreenModel {
     }
 
     private func dropConnection() {
+        clipboardWatch?.cancel(); clipboardWatch = nil
         connection?.close(); connection = nil
     }
 
@@ -298,6 +300,110 @@ final class DeviceScreenModel {
             self.status = self.emulator == nil ? .notRunning : .connecting
             self.screen?.clear()
             self.scheduleRetry()
+        }
+    }
+
+    // MARK: Clipboard (ADR-234)
+
+    /// Settings ▸ Sessions ▸ Runs ▸ *Share the clipboard with emulators*, on by default. Read at each
+    /// use, so turning it off stops both directions at once.
+    static let clipboardSharingKey = "ClinicEmulatorClipboard"
+    private static var sharesClipboard: Bool {
+        UserDefaults.standard.object(forKey: clipboardSharingKey) as? Bool ?? true
+    }
+
+    @ObservationIgnored private var clipboardWatch: Task<Void, Never>?
+    /// The last push of the Mac's clipboard to the device, so an edit command waits for it.
+    @ObservationIgnored private var clipboardPush: Task<Void, Never>?
+    /// The device's clipboard text as this pane last knew it, to drop echoes in both directions.
+    @ObservationIgnored private var deviceClipboard: String?
+    /// The Mac pasteboard's change count when this pane last read or wrote it.
+    @ObservationIgnored private var seenChangeCount = -1
+
+    /// Copies made on the device land on the Mac's clipboard. What the device holds when the pane
+    /// connects is only remembered: connecting must not replace what the user copied on the Mac. The
+    /// stream repeats it first when it is not empty, and `deviceCopied` drops that as unchanged.
+    private func watchClipboard(_ connection: EmulatorConnection) {
+        clipboardWatch?.cancel()
+        deviceClipboard = nil
+        clipboardWatch = Task { [weak self] in
+            do {
+                let current = try await connection.clipboardText()
+                if let self, self.deviceClipboard == nil { self.deviceClipboard = current }
+                for try await text in connection.clipboard() {
+                    guard !Task.isCancelled, let self else { return }
+                    self.deviceCopied(text)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                Self.log.error("clipboard from \(self?.deviceId ?? "?", privacy: .public) ended: \(error, privacy: .public)")
+            }
+        }
+    }
+
+    private func deviceCopied(_ text: String) {
+        guard text != deviceClipboard else { return }
+        deviceClipboard = text
+        guard Self.sharesClipboard, !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        // Two panes on one emulator both hear the copy; the second finds it already there.
+        if pasteboard.string(forType: .string) != text {
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+        seenChangeCount = pasteboard.changeCount
+    }
+
+    /// The Mac's clipboard text onto the device, if it changed since this pane last looked. Called on
+    /// every click and key the pane takes, so the Mac's text is there for the device's own Paste too,
+    /// and never for a device the user is not using. A change count compare when nothing changed.
+    @discardableResult
+    func shareMacClipboard() -> Task<Void, Never>? {
+        guard Self.sharesClipboard, let connection else { return clipboardPush }
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount != seenChangeCount else { return clipboardPush }
+        seenChangeCount = pasteboard.changeCount
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty, text != deviceClipboard else { return clipboardPush }
+        deviceClipboard = text
+        let previous = clipboardPush
+        let push = Task { [deviceId] in
+            await previous?.value
+            do {
+                try await connection.setClipboard(text)
+                // The emulator hands the text to the guest after it answers. A paste sent at once got
+                // the new text 6 of 6 times; this is margin for a slower guest.
+                try await Task.sleep(for: .milliseconds(Self.clipboardSettle))
+            } catch {
+                Self.log.error("could not share the clipboard with \(deviceId, privacy: .public): \(error, privacy: .public)")
+            }
+        }
+        clipboardPush = push
+        return push
+    }
+
+    private static let clipboardSettle = 50
+
+    /// Edit ▸ Cut, Copy, Paste and Select All while the screen has the keyboard: the device's Control
+    /// chords, after the Mac's clipboard has reached it.
+    enum EditCommand {
+        case cut, copy, paste, selectAll
+        /// Mac virtual key codes for X, C, V and A.
+        var macKeyCode: UInt16 {
+            switch self {
+            case .cut: 7
+            case .copy: 8
+            case .paste: 9
+            case .selectAll: 0
+            }
+        }
+    }
+
+    func edit(_ command: EditCommand) {
+        guard let connection else { return }
+        guard let push = shareMacClipboard() else { connection.controlChord(macKeyCode: command.macKeyCode); return }
+        Task {
+            await push.value
+            connection.controlChord(macKeyCode: command.macKeyCode)
         }
     }
 
@@ -448,8 +554,9 @@ final class DeviceScreenModel {
 
 /// The emulator's screen: frames drawn aspect-fit into a layer; clicks and drags become one finger,
 /// the scroll wheel scrolls, and keys typed while it has the keyboard go to the device — except ⌘
-/// chords, which reach Clinic's menus first.
-final class DeviceScreenNSView: NSView {
+/// chords, which reach Clinic's menus first. Edit ▸ Cut, Copy, Paste and Select All come back here and
+/// go to the device as Control chords, with the clipboard shared both ways (ADR-234).
+final class DeviceScreenNSView: NSView, NSMenuItemValidation {
     private(set) var model: DeviceScreenModel
     private let screenLayer = CALayer()
     /// The size of the image last drawn, and how its pixels map to the device.
@@ -566,6 +673,7 @@ final class DeviceScreenNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        model.shareMacClipboard()
         if let p = devicePoint(event) { model.connection?.touch(x: p.x, y: p.y, down: true) }
     }
 
@@ -589,7 +697,10 @@ final class DeviceScreenNSView: NSView {
         model.connection?.wheel(dx: dx, dy: dy)
     }
 
-    override func keyDown(with event: NSEvent) { model.connection?.key(macKeyCode: event.keyCode, down: true) }
+    override func keyDown(with event: NSEvent) {
+        model.shareMacClipboard()
+        model.connection?.key(macKeyCode: event.keyCode, down: true)
+    }
     override func keyUp(with event: NSEvent) { model.connection?.key(macKeyCode: event.keyCode, down: false) }
 
     override func flagsChanged(with event: NSEvent) {
@@ -601,6 +712,24 @@ final class DeviceScreenNSView: NSView {
         }
         guard let flag else { return }
         model.connection?.key(macKeyCode: event.keyCode, down: event.modifierFlags.contains(flag))
+    }
+
+    // MARK: Edit menu (ADR-234)
+
+    // ⌘X, ⌘C, ⌘V and ⌘A reach the screen through the Edit menu while it has the keyboard, and go to the
+    // device as the Control chords its text fields take. Paste shares the Mac's clipboard first.
+    @objc func cut(_ sender: Any?) { model.edit(.cut) }
+    @objc func copy(_ sender: Any?) { model.edit(.copy) }
+    @objc func paste(_ sender: Any?) { model.edit(.paste) }
+    @objc override func selectAll(_ sender: Any?) { model.edit(.selectAll) }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(cut(_:)), #selector(copy(_:)), #selector(paste(_:)), #selector(selectAll(_:)):
+            model.connection != nil
+        default:
+            true
+        }
     }
 }
 
