@@ -162,7 +162,9 @@ public final class GhosttyConfig {
         return String(cString: v)
     }
 
-    /// Value of a bool-typed key (e.g. `"confirm-close-surface"`, `"wait-after-command"`).
+    /// Value of a bool-typed key (e.g. `"wait-after-command"`). Never an enum key such as
+    /// `"confirm-close-surface"` (`false`/`true`/`always`): libghostty writes a string pointer
+    /// for enums, which would overrun the `Bool`. Read those with ``string(forKey:)``.
     public func bool(forKey key: String) -> Bool? {
         var v = false
         guard ghostty_config_get(handle, &v, key, UInt(key.utf8.count)) else { return nil }
@@ -183,7 +185,7 @@ public final class GhosttyConfig {
         return v
     }
 
-    /// Value of a u8/u32/packed-struct-typed key (e.g. `"scrollback-limit"`, `"bell-features"`).
+    /// Value of a u8/u32/packed-struct-typed key (e.g. `"bell-features"`).
     public func uint(forKey key: String) -> UInt32? {
         var v: CUnsignedInt = 0
         guard ghostty_config_get(handle, &v, key, UInt(key.utf8.count)) else { return nil }

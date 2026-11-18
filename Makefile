@@ -1,7 +1,7 @@
 .PHONY: setup ghostty project build dev dev-build dev-stop dev-reset test release publish screenshots clean
 
 setup:
-	brew install xcodegen zig@0.15 gettext
+	brew install xcodegen zig@0.17 gettext
 	git submodule update --init
 	@xcrun -sdk macosx metal --version >/dev/null 2>&1 || echo "Run: xcodebuild -downloadComponent MetalToolchain"
 

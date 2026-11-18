@@ -5707,3 +5707,22 @@ kept every ⌘ chord for Clinic. They asked for both.
 
 *When a key "does nothing" over gRPC, check whether its code is 0 before suspecting the guest. proto3 drops
 default values, so code 0 never reaches the emulator.*
+
+## 2026-11-17 — Clinic builds on Ghostty 1.4 (ADR-235)
+- **Asked:** prepare for Ghostty 1.4.0 and evaluate its new features and integration surfaces.
+- **Did:** pinned `vendor/ghostty` to `v1.4.0`. Ported GhosttyBridge to the 1.4 header: MIME-aware clipboard reads
+  with explicit deny, binary-safe writes, `ghostty_config_key_is_binding`, the action-name table (three tags inserted
+  mid-enum), Kitty clipboard request kinds, the OSC 8 URL kind. Ported upstream's #13817, so input-method commits
+  are typed input, not pastes. The build script accepts Zig 0.17.x. Setup, the README and CI install `zig@0.17`.
+  The evaluation is in [[Ghostty 1.4]]. Follow-ups are in the Backlog.
+- **Found:** the tests read `confirm-close-surface`, an enum, through `bool(forKey:)`. libghostty writes a string
+  pointer for enums, so 8 bytes landed in a 1-byte `Bool`. The tests passed on 1.3.1 by luck and failed on 1.4.
+  Without the new tag-name test, `TabStore`'s `.unhandled(kind: "reload_config")` would have silently stopped matching.
+- **Machine:** installed Homebrew `zig` 0.17.1 (it unlinked `zig@0.15` from PATH; the keg remains) and Xcode 27.1's
+  Metal Toolchain, which the new Xcode lacked.
+- **Checked:** 11/11 GhosttyBridge tests on the 1.4.0 xcframework. `make dev-build` succeeds. Clinic Dev rendered an
+  offline Claude Code session in a 1.4 surface, with no Ghostty errors in the log. **Not checked:** dictation, Kitty
+  clipboard reads, paste-protection prompts.
+
+*When Ghostty inserts action tags mid-enum, every index-based name table goes stale silently. Pin both ends of such
+a table to the C enum in a test.*

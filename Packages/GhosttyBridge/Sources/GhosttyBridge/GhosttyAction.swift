@@ -42,8 +42,8 @@ public enum GhosttyAction: @unchecked Sendable {
     /// `NSCursor` (the view leaves the pointer unchanged). The view already applied the
     /// cursor before the delegate sees this.
     case mouseShape(NSCursor?)
-    /// The terminal asked to open a URL/path. `kind` is `"text"`, `"html"` or `"unknown"`
-    /// (Ghostty's hint about the target). If neither the surface delegate nor the app
+    /// The terminal asked to open a URL/path. `kind` is `"text"`, `"html"`, `"osc8"` (an
+    /// OSC 8 hyperlink, since Ghostty 1.4) or `"unknown"` (Ghostty's hint about the target). If neither the surface delegate nor the app
     /// handler returns true, the runtime opens it with `NSWorkspace` like Ghostty does.
     case openURL(URL, kind: String)
     /// Derived from a `color_change` of the background color (OSC 11 / theme): `dark`
@@ -61,7 +61,10 @@ public enum GhosttyAction: @unchecked Sendable {
     case unhandled(kind: String)
 
     /// Human readable name of a `ghostty_action_tag_e`, in the same snake_case form
-    /// Ghostty uses in its own logs/config (index == raw value of the tag).
+    /// Ghostty uses in its own logs/config (index == raw value of the tag). Must match the
+    /// pinned header exactly: Ghostty inserts new tags mid-enum (1.4 added
+    /// `export_terminal_io`, `set_window_title` and `selection_changed` in the middle), and
+    /// a stale table mislabels every tag after the first insertion. Tests pin both ends.
     static let tagNames: [String] = [
         "quit", "new_window", "new_tab", "close_tab", "new_split", "close_all_windows",
         "toggle_maximize", "toggle_fullscreen", "toggle_tab_overview",
@@ -70,14 +73,17 @@ public enum GhosttyAction: @unchecked Sendable {
         "goto_split", "goto_window", "resize_split", "equalize_splits",
         "toggle_split_zoom", "present_terminal", "size_limit", "reset_window_size",
         "initial_size", "cell_size", "scrollbar", "render", "inspector",
-        "show_gtk_inspector", "render_inspector", "desktop_notification", "set_title",
-        "set_tab_title", "prompt_title", "pwd", "mouse_shape", "mouse_visibility",
+        "show_gtk_inspector", "render_inspector", "export_terminal_io",
+        "desktop_notification", "set_title", "set_tab_title", "set_window_title",
+        "prompt_title", "pwd", "mouse_shape", "mouse_visibility",
         "mouse_over_link", "renderer_health", "open_config", "quit_timer",
         "float_window", "secure_input", "key_sequence", "key_table", "color_change",
-        "reload_config", "config_change", "close_window", "ring_bell", "undo", "redo",
+        "reload_config", "config_change", "close_window", "ring_bell",
+        "selection_changed", "undo", "redo",
         "check_for_updates", "open_url", "show_child_exited", "progress_report",
         "show_on_screen_keyboard", "command_finished", "start_search", "end_search",
         "search_total", "search_selected", "readonly", "copy_title_to_clipboard",
+        "move_tab_to_new_window", "resize_window",
     ]
 
     static func kindName(_ tag: ghostty_action_tag_e) -> String {
@@ -125,6 +131,7 @@ public enum GhosttyAction: @unchecked Sendable {
         switch kind {
         case GHOSTTY_ACTION_OPEN_URL_KIND_TEXT: return "text"
         case GHOSTTY_ACTION_OPEN_URL_KIND_HTML: return "html"
+        case GHOSTTY_ACTION_OPEN_URL_KIND_OSC8: return "osc8"
         default: return "unknown"
         }
     }
@@ -139,13 +146,54 @@ public enum GhosttyClipboardRequest: Sendable {
     case osc52Read
     /// A program in the terminal wants to *write* the clipboard (OSC 52).
     case osc52Write
+    /// A program wants to *read* the clipboard through Kitty's clipboard protocol (OSC 5522),
+    /// possibly non-text representations such as images.
+    case kittyRead
+    /// A program wants to *write* the clipboard through Kitty's clipboard protocol (OSC 5522).
+    case kittyWrite
+    /// A program wants the list of MIME types the clipboard holds (OSC 5522).
+    case list
 
     init?(_ c: ghostty_clipboard_request_e) {
         switch c {
         case GHOSTTY_CLIPBOARD_REQUEST_PASTE: self = .paste
         case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ: self = .osc52Read
         case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE: self = .osc52Write
+        case GHOSTTY_CLIPBOARD_REQUEST_KITTY_READ: self = .kittyRead
+        case GHOSTTY_CLIPBOARD_REQUEST_KITTY_WRITE: self = .kittyWrite
+        case GHOSTTY_CLIPBOARD_REQUEST_LIST: self = .list
         default: return nil
+        }
+    }
+
+    /// The answer when the host installs no confirmation handler: a user's own paste and a
+    /// program's write go through; a program reading or listing the clipboard does not.
+    public var allowedByDefault: Bool {
+        switch self {
+        case .paste, .osc52Write, .kittyWrite: true
+        case .osc52Read, .kittyRead, .list: false
+        }
+    }
+}
+
+/// One representation of clipboard contents (`ghostty_clipboard_content_s`), copied out of
+/// libghostty's borrowed buffer. Binary-safe since Ghostty 1.4.
+struct GhosttyClipboardContent {
+    let mime: String
+    let data: Data
+
+    init(mime: String, data: Data) {
+        self.mime = mime
+        self.data = data
+    }
+
+    init?(_ c: ghostty_clipboard_content_s) {
+        guard let mime = c.mime else { return nil }
+        self.mime = String(cString: mime)
+        if let bytes = c.data, c.len > 0 {
+            self.data = Data(bytes: bytes, count: c.len)
+        } else {
+            self.data = Data()
         }
     }
 }

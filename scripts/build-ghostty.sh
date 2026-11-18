@@ -14,16 +14,22 @@ if [ ! -f "$GHOSTTY/build.zig.zon" ]; then
 fi
 
 REQUIRED_ZIG="$(sed -nE 's/.*minimum_zig_version = "([^"]+)".*/\1/p' "$GHOSTTY/build.zig.zon")"
+SERIES="${REQUIRED_ZIG%.*}"   # Ghostty builds with exactly one Zig minor series; any patch release of it works.
 ZIG="${ZIG:-}"
 if [ -z "$ZIG" ]; then
-  for candidate in "/opt/homebrew/opt/zig@${REQUIRED_ZIG%.*}/bin/zig" "$(command -v zig || true)"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ] && [ "$("$candidate" version)" = "$REQUIRED_ZIG" ]; then
-      ZIG="$candidate"; break
+  # The versioned keg first (zig@0.15 while it is the older series), then the unversioned
+  # keg (Homebrew's current `zig`), then PATH.
+  for candidate in "/opt/homebrew/opt/zig@${SERIES}/bin/zig" "/opt/homebrew/opt/zig/bin/zig" "$(command -v zig || true)"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      v="$("$candidate" version)"
+      if [ "${v%.*}" = "$SERIES" ] && [ "$(printf '%s\n%s\n' "$REQUIRED_ZIG" "$v" | sort -V | head -1)" = "$REQUIRED_ZIG" ]; then
+        ZIG="$candidate"; break
+      fi
     fi
   done
 fi
 if [ -z "$ZIG" ]; then
-  echo "error: need zig $REQUIRED_ZIG. Try: brew install zig@${REQUIRED_ZIG%.*}" >&2; exit 1
+  echo "error: need zig $SERIES.x (>= $REQUIRED_ZIG). Try: brew install zig@${SERIES} (or brew install zig if $SERIES is current)" >&2; exit 1
 fi
 echo "using zig $("$ZIG" version) at $ZIG"
 

@@ -12,7 +12,7 @@ clinic/
 ├── project.yml                 XcodeGen spec → Clinic.xcodeproj (gitignored)
 ├── Makefile                    setup / ghostty / project / build / test
 ├── scripts/build-ghostty.sh    zig build → Packages/GhosttyBridge/GhosttyKit.xcframework (gitignored)
-├── vendor/ghostty/             submodule pinned to v1.3.1 (Zig 0.15.2)
+├── vendor/ghostty/             submodule pinned to v1.4.0 (Zig 0.17)
 ├── Packages/
 │   ├── ClinicCore/             models, TranscriptReader, SessionStateMachine, ClaudeLaunch, HookSettings,
 │   │                           HookServer/HookClient, DirectoryWatcher, SessionScanner, StateStore. No AppKit.

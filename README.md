@@ -45,7 +45,7 @@ Or download `Clinic-<version>.zip` from the [latest release](https://github.com/
 Requirements: macOS 15+, Xcode 26, Homebrew.
 
 ```sh
-make setup        # installs xcodegen + zig@0.15, checks out the ghostty submodule
+make setup        # installs xcodegen + zig@0.17, checks out the ghostty submodule
 make ghostty      # builds GhosttyKit.xcframework from vendor/ghostty (one-time, several minutes)
 make project      # generates Clinic.xcodeproj
 make build        # builds the app

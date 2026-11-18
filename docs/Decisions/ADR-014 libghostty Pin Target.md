@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: superseded by ADR-235
 date: 2026-09-07
+superseded-by: "[[ADR-235 Clinic Builds On Ghostty 1.4]]"
 tags: [adr, terminal, libghostty, build]
 ---
 # ADR-014: libghostty Pin Target

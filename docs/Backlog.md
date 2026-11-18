@@ -60,7 +60,16 @@ Organised by milestone ([[ADR-024 Milestones and Versioning]]). Milestone 1 scop
 
 ## Open research
 - ~~`CwdChanged` for footer cwd~~ moot: footer follows libghostty's `pwd` action (shell integration).
-- Bump to Ghostty 1.4 when tagged (ADR-014).
+- ~~Bump to Ghostty 1.4 when tagged (ADR-014).~~ Done → [[ADR-235 Clinic Builds On Ghostty 1.4]].
+- Ghostty 1.4 surfaces to weigh, each its own ADR (see [[Ghostty 1.4]]):
+  - Replace `GhosttyProcessProbe`'s creation-order child matching with `ghostty_surface_foreground_pid` /
+    `ghostty_surface_tty_name`; rework `foregroundJobName` around the session leader. Touches `run_in_terminal`'s
+    busy check (ADR-198) and the card's busy terminals.
+  - `GHOSTTY_ACTION_SELECTION_CHANGED` → an "Ask Claude about the selection" affordance or Copy enablement.
+  - `ghostty_surface_paste_text` (paste protection) for drops and other outside text.
+  - OSC 7501 program status: watch for an apprt action in a later release (1.4 only parses it).
+  - Hand checks the bump could not script: dictation into a Claude tab, a Kitty clipboard read (should be denied),
+    paste protection on multi-line text.
 
 ## Milestone 5 — the diff panel
 The git pane becomes a read-only, multi-scope diff reader → [[ADR-080 Diff Panel]].

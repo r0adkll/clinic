@@ -24,12 +24,45 @@ final class GhosttyBridgeTests: XCTestCase {
         }
     }
 
+    /// The name table is indexed by raw tag value, so it must track the pinned header exactly.
+    /// Checking the first, a mid-enum insertion point and the last tag catches a stale table.
+    func testActionTagNamesMatchThePinnedHeader() {
+        XCTAssertEqual(GhosttyAction.kindName(GHOSTTY_ACTION_QUIT), "quit")
+        XCTAssertEqual(GhosttyAction.kindName(GHOSTTY_ACTION_RELOAD_CONFIG), "reload_config")
+        XCTAssertEqual(GhosttyAction.kindName(GHOSTTY_ACTION_SELECTION_CHANGED), "selection_changed")
+        XCTAssertEqual(GhosttyAction.kindName(GHOSTTY_ACTION_RESIZE_WINDOW), "resize_window")
+        XCTAssertEqual(GhosttyAction.tagNames.count, Int(GHOSTTY_ACTION_RESIZE_WINDOW.rawValue) + 1)
+    }
+
+    func testClipboardDefaultPolicyDeniesProgramReads() {
+        XCTAssertTrue(GhosttyClipboardRequest.paste.allowedByDefault)
+        XCTAssertTrue(GhosttyClipboardRequest.osc52Write.allowedByDefault)
+        XCTAssertTrue(GhosttyClipboardRequest.kittyWrite.allowedByDefault)
+        XCTAssertFalse(GhosttyClipboardRequest.osc52Read.allowedByDefault)
+        XCTAssertFalse(GhosttyClipboardRequest.kittyRead.allowedByDefault)
+        XCTAssertFalse(GhosttyClipboardRequest.list.allowedByDefault)
+    }
+
+    func testPasteboardServesRequestedMIMEs() {
+        let pb = NSPasteboard(name: .init("com.clinic.GhosttyBridgeTests.\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setString("hello", forType: .string)
+        XCTAssertEqual(pb.ghosttyData(forMIME: "text/plain"), Data("hello".utf8))
+        XCTAssertNil(pb.ghosttyData(forMIME: "text/uri-list"))
+        XCTAssertEqual(pb.ghosttyAvailableMIMEs().first, "text/plain")
+    }
+
+    func testOpenURLKindNamesOSC8() {
+        XCTAssertEqual(GhosttyAction.urlKind(GHOSTTY_ACTION_OPEN_URL_KIND_OSC8), "osc8")
+    }
+
     func testConfigWithoutUserDefaults() throws {
         let config = try GhosttyConfig(loadUserDefaults: false)
         XCTAssertEqual(config.diagnostics, [])
 
         // Clinic override applied.
-        XCTAssertEqual(config.bool(forKey: "confirm-close-surface"), false)
+        XCTAssertEqual(config.string(forKey: "confirm-close-surface"), "false")   // an enum: false/true/always
 
         // Typed getters.
         XCTAssertEqual(config.fontSize, 13, accuracy: 0.001)
@@ -54,7 +87,7 @@ final class GhosttyBridgeTests: XCTestCase {
     func testConfigWithoutUnbinding() throws {
         let config = try GhosttyConfig(loadUserDefaults: false, overrides: [], unbindActions: [])
         XCTAssertEqual(config.diagnostics, [])
-        XCTAssertEqual(config.bool(forKey: "confirm-close-surface"), true)
+        XCTAssertEqual(config.string(forKey: "confirm-close-surface"), "true")
         XCTAssertEqual(config.trigger(forAction: "new_window"), "super+n")
     }
 

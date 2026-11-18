@@ -151,8 +151,44 @@ extension NSPasteboard {
         switch clipboard {
         case GHOSTTY_CLIPBOARD_STANDARD: return .general
         case GHOSTTY_CLIPBOARD_SELECTION: return ghosttySelection
-        default: return nil
+        default: return nil   // GHOSTTY_CLIPBOARD_PRIMARY (1.4): macOS has no primary selection.
         }
+    }
+
+    /// The data for a MIME type a clipboard read asked for, if the pasteboard can serve it.
+    /// `text/plain` is the opinionated string (a copied file reads as its escaped path, the
+    /// same as pasting it); copied files are also served as `text/uri-list`; anything else
+    /// maps through UTType. (Mirrors Ghostty 1.4's `ghosttyData(forMime:)`.)
+    func ghosttyData(forMIME mime: String) -> Data? {
+        switch mime {
+        case "text/plain":
+            return ghosttyStringContents().map { Data($0.utf8) }
+        case "text/uri-list":
+            let urls = (readObjects(forClasses: [NSURL.self]) as? [URL] ?? []).filter(\.isFileURL)
+            guard !urls.isEmpty else { return nil }
+            return Data(urls.map { $0.absoluteString + "\r\n" }.joined().utf8)
+        default:
+            guard let type = Self.pasteboardType(forMIME: mime) else { return nil }
+            return data(forType: type)
+        }
+    }
+
+    /// The MIME types the pasteboard holds, inferred from declared types only so lazy
+    /// providers are never asked for data (OSC 5522 listings must stay metadata-only).
+    func ghosttyAvailableMIMEs() -> [String] {
+        let declared = types ?? []
+        let mime: (NSPasteboard.PasteboardType) -> String? = { type in
+            guard let m = UTType(type.rawValue)?.preferredMIMEType else { return nil }
+            return m == "text/plain;charset=utf-8" ? "text/plain" : m
+        }
+        var result: [String] = []
+        let hasFileURL = declared.contains(.fileURL)
+        if hasFileURL || declared.contains(where: { mime($0) == "text/plain" }) { result.append("text/plain") }
+        if hasFileURL { result.append("text/uri-list") }
+        for type in declared {
+            if let m = mime(type), !result.contains(m) { result.append(m) }
+        }
+        return result
     }
 
     /// Ghostty's "opinionated" string read: file URLs become shell-escaped paths

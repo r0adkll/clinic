@@ -1103,7 +1103,24 @@ public final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient
             keyTextAccumulator = acc
             return
         }
-        sendText(chars)
+        // Outside keyDown only input methods call this (dictation, emoji picker, character
+        // viewer, IMEs that commit without marked text). Send it as typed input, never through
+        // `sendText`'s paste path, or programs see a bracketed paste (Claude Code collapses
+        // dictated prompts into "[Pasted text]"). Mirrors Ghostty 1.4 (#13817).
+        if !chars.isEmpty { _ = committedTextAction(GHOSTTY_ACTION_PRESS, text: chars) }
+    }
+
+    /// A text-only key event carrying committed input-method text.
+    private func committedTextAction(_ action: ghostty_input_action_e, text: String) -> Bool {
+        guard let surface else { return false }
+        var ev = ghostty_input_key_s()
+        ev.action = action
+        ev.mods = GHOSTTY_MODS_NONE
+        ev.consumed_mods = GHOSTTY_MODS_NONE
+        return text.withCString { ptr in
+            ev.text = ptr
+            return ghostty_surface_key(surface, ev)
+        }
     }
 
     /// Exists to (1) silence the NSBeep for unimplemented selectors and (2) send
