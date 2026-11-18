@@ -5726,3 +5726,17 @@ default values, so code 0 never reaches the emulator.*
 
 *When Ghostty inserts action tags mid-enum, every index-based name table goes stale silently. Pin both ends of such
 a table to the C enum in a test.*
+
+## 2026-11-18 — Released 0.7.0 (ADR-153, ADR-169)
+- **Asked:** cut a new release.
+- **Did:** `scripts/publish 0.7.0 --yes`. The minor bump is for Ghostty 1.4 (ADR-235) and the emulator clipboard
+  (ADR-234). It committed the version bump, built and notarized the app, tagged `0.7.0`, created the GitHub Release
+  with `Clinic-0.7.0.zip` and its dSYMs, and pushed `clinic 0.7.0` to `r0adkll/homebrew-tap`.
+- **Found:** preflight stopped at `notarytool history` with HTTP 403: *"A required agreement is missing or has
+  expired."* The user accepted the new Apple Developer agreement. The 403 lasted about 4 more minutes after that.
+  The script's hint to re-run `store-credentials` does not fix this error.
+- **Checked:** Gatekeeper accepts the zip (Notarized Developer ID). The release is not marked pre-release and has
+  both assets. **Not checked:** the smoke test, which `--yes` skips.
+
+*A notarytool 403 that mentions an agreement means the account, not the stored credentials. Sign at
+developer.apple.com and wait a few minutes.*
